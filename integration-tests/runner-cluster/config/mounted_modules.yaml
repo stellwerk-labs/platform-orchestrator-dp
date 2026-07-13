@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: terraform-module-success
+  namespace: platform-orchestrator-runner
+data:
+  main.tf: |
+    variable "a" {
+      type = string
+    }
+
+    variable "b" {
+      type = string
+    }
+
+    output "c" {
+      value = "${var.a}${var.b}" # Concatenate both inputs
+    }
+
+    output "platform_orchestrator_metadata" {
+      value = {
+        "Example" = "hello world"
+      }
+    }
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: terraform-module-failure
+  namespace: platform-orchestrator-runner
+data:
+  main.tf: |
+    variable "a" {
+      type = string
+    }
+
+    variable "b" {
+      type = string
+    }
+
+    output "c" {
+      value = "${var.a / var.b}" # This introduces a runtime error (division of strings)
+    }

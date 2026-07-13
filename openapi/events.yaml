@@ -1,0 +1,68 @@
+openapi: 3.0.0
+info:
+  title: ""
+  version: ""
+paths: {}
+components:
+  schemas:
+
+    EventType:
+      type: string
+      enum:
+        - io.platform-orchestrator.deployment.created
+        - io.platform-orchestrator.deployment.updated
+        - io.platform-orchestrator.runner.check_status
+
+    OrgId:
+      type: string
+    ProjectId:
+      type: string
+    EnvId:
+      type: string
+    EnvUuid:
+      type: string
+      format: uuid
+    DeploymentId:
+      type: string
+      format: uuid
+    Revision:
+      type: integer
+    RunnerId:
+      type: string
+
+    DeploymentChangedData:
+      required:
+        - org_id
+        - project_id
+        - env_id
+        - env_uuid
+        - deployment_id
+        - revision
+      properties:
+        org_id:
+          $ref: "#/components/schemas/OrgId"
+        project_id:
+          $ref: "#/components/schemas/ProjectId"
+        env_id:
+          $ref: "#/components/schemas/EnvId"
+        env_uuid:
+          $ref: "#/components/schemas/EnvUuid"
+        deployment_id:
+          $ref: "#/components/schemas/DeploymentId"
+        revision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          type: string
+
+    RunnerStatusCheckData:
+      required:
+        - org_id
+        - deployment_id
+        - runner_id
+      properties:
+        org_id:
+          $ref: "#/components/schemas/OrgId"
+        deployment_id:
+          $ref: "#/components/schemas/DeploymentId"
+        runner_id:
+          $ref: "#/components/schemas/RunnerId"

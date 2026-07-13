@@ -1,0 +1,7 @@
+# Config used for generating the API models and server stubs based on the openapi/spec.yaml
+package: genevents
+generate:
+  models: true
+output: shared/genevents/events.gen.go
+output-options:
+  skip-prune: true

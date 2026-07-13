@@ -1,0 +1,76 @@
+apiVersion: score.dev/v1b1
+metadata:
+  name: platform-orchestrator-iam
+service:
+  ports:
+    http:
+      port: 8080
+containers:
+  platform-orchestrator-iam:
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-iam:v1.0.0
+    command: ["/opt/server/server"]
+    livenessProbe:
+      httpGet:
+        path: /alive
+        port: 8080
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8080
+    resources:
+      limits:
+        cpu: "1"
+        memory: 256Mi
+      requests:
+        cpu: "0.025"
+        memory: 64Mi
+    variables:
+      AUTH_TOKEN_SALT: ${resources.env.AUTH_TOKEN_SALT}
+      DD_AGENT_HOST: $${pod.status.hostIP}
+      DD_ENABLE: ${resources.env.DATADOG_ENABLED}
+      DD_ENV: ${resources.env.DATADOG_ENV}
+      DD_SERVICE: ${metadata.name}
+      DD_TRACE_HTTP_CLIENT_ERROR_STATUSES: 500-600
+      PORT: "8080"
+      DATABASE_HOST: ${resources.postgres.host}
+      DATABASE_NAME: ${resources.postgres.name}
+      DATABASE_PASSWORD: ${resources.postgres.password}
+      DATABASE_PORT: ${resources.postgres.port}
+      DATABASE_USER: ${resources.postgres.username}
+      ALLOWED_GOOGLE_CLIENT_IDS: ${resources.env.IAM_ALLOWED_GOOGLE_CLIENT_IDS}
+      ALLOWED_MICROSOFT_CLIENT_IDS: ${resources.env.IAM_ALLOWED_MICROSOFT_CLIENT_IDS}
+      SESSION_TOKEN_COOKIE_DOMAIN: ${resources.env.SESSION_TOKEN_COOKIE_DOMAIN}
+      TEST_USER_PROVIDER_AGE_IDENTITY: ${resources.env.TEST_USER_PROVIDER_AGE_IDENTITY}
+      CONTROL_PLANE_URL: http://${resources.platform-orchestrator-cp.name}:8080
+      UI_HOST_URL: ${resources.env.UI_HOST_URL}
+      SENDGRID_API_KEY: ${resources.env.SENDGRID_API_KEY}
+      SPICEDB_URL: ${resources.spicedb.hostname}:50051
+      SPICEDB_PRE_SHARED_KEY: ${resources.spicedb.preshared_key}
+      AMQP_CONNECTION_STRING: amqp://${resources.rabbitmq.username}:${resources.rabbitmq.password}@${resources.rabbitmq.host}:${resources.rabbitmq.port}/${resources.rabbitmq.vhost}
+      WORKOS_API_KEY: ${resources.env.WORKOS_API_KEY}
+      WORKOS_CLIENT_ID: ${resources.env.WORKOS_CLIENT_ID}
+      SSO_CALLBACK_URL_PATH: ${resources.env.SSO_CALLBACK_URL_PATH}
+      SSO_STATE_SECRET: ${resources.env.SSO_STATE_SECRET}
+
+resources:
+  env:
+    type: environment
+  postgres:
+    type: postgres
+  dns:
+    type: dns
+    id: api-dns
+  platform-orchestrator-cp:
+    type: service
+  route:
+    type: route
+    params:
+      host: ${resources.dns.host}
+      port: 8080
+      path: /(auth/register|auth/logout|auth/login|auth/device|(users/.+)|(orgs/[^/]+/memberships.*)|(orgs/[^/]+/service-users.*)|(orgs/[^/]+/invitations.*)|(orgs/[^/]+/roles.*)|current-user|(devicelogins/.+))
+  spicedb:
+    type: spicedb
+    id: spicedb
+  rabbitmq:
+    type: amqp
+    id: rabbitmq

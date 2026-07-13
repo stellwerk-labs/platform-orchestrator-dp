@@ -1,0 +1,83 @@
+apiVersion: score.dev/v1b1
+metadata:
+  name: platform-orchestrator-dp
+service:
+  ports:
+    http:
+      port: 8080
+containers:
+  platform-orchestrator-dp:
+    image: .
+    command: ["/opt/server/server"]
+    livenessProbe:
+      httpGet:
+        path: /alive
+        port: 8080
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8080
+    resources:
+      limits:
+        cpu: "1"
+        memory: 256Mi
+      requests:
+        cpu: "0.025"
+        memory: 64Mi
+    variables:
+      AMQP_CONNECTION_STRING: amqp://${resources.rabbitmq.username}:${resources.rabbitmq.password}@${resources.rabbitmq.host}:${resources.rabbitmq.port}/${resources.rabbitmq.vhost}
+      RUNNER_TOKEN_SALT: ${resources.env.RUNNER_TOKEN_SALT}
+      DD_AGENT_HOST: $${pod.status.hostIP}
+      OTEL_ENABLE: ${resources.env.DATADOG_ENABLED}
+      DD_ENV: ${resources.env.DATADOG_ENV}
+      DD_SERVICE: ${metadata.name}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${resources.env.OTEL_EXPORTER_OTLP_ENDPOINT}
+      DD_TRACE_HTTP_CLIENT_ERROR_STATUSES: 500-600
+      DD_TRACE_HTTP_SERVER_ERROR_STATUSES: 500-600
+      PORT: "8080"
+      OIDC_ISSUER_URL: ${resources.env.OIDC_ISSUER_URL}
+      DATABASE_HOST: ${resources.postgres.host}
+      DATABASE_NAME: ${resources.postgres.name}
+      DATABASE_PASSWORD: ${resources.postgres.password}
+      DATABASE_PORT: ${resources.postgres.port}
+      DATABASE_USER: ${resources.postgres.username}
+      RUNNER_IMAGE: ${resources.env.RUNNER_IMAGE}
+      CONTROL_PLANE_URL: http://${resources.platform-orchestrator-cp.name}:8080
+      IAM_URL: http://${resources.platform-orchestrator-iam.name}:8080
+      VAULT_URL: ${resources.env.VAULT_URL}
+      VAULT_AUTH: kubernetes:platform-orchestrator-platform-orchestrator-dp
+      VAULT_ROLE: platform-orchestrator-platform-orchestrator-dp
+      SERVER_BASE_URL: ${resources.env.SERVER_BASE_URL}
+      INTERNAL_DATAPLANE_HOSTNAME: ${resources.env.INTERNAL_DATAPLANE_HOSTNAME}
+      RUNNER_LOGS_BUCKET: ${resources.env.RUNNER_LOGS_BUCKET}
+      K8S_RUNNER_POD_SCHEDULING_DELAY: ${resources.env.K8S_RUNNER_POD_SCHEDULING_DELAY}
+
+resources:
+  env:
+    type: environment
+  postgres:
+    type: postgres
+  rabbitmq:
+    type: amqp
+    id: rabbitmq
+  platform-orchestrator-cp:
+    type: service
+  platform-orchestrator-iam:
+    type: service
+  dns:
+    type: dns
+    id: api-dns
+  dns-oidc:
+    type: dns
+  route:
+    type: route
+    params:
+      host: ${resources.dns.host}
+      port: 8080
+      path: /orgs/[^/]+/(deployments|last-deployments|active-resources|metadata-keys|remote-runners)($|/.*)
+  well-known-route:
+    type: route
+    params:
+      host: ${resources.dns-oidc.host}
+      port: 8080
+      path: /(.well-known/openid-configuration|.well-known/jwks)

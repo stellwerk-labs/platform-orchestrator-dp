@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Generate
+        run: make generate
+
+      - name: Tidy modules
+        run: |
+          go mod tidy
+          cd shared
+          go mod tidy
+
+      - name: Check generated and module files
+        run: git diff --exit-code
+
+      - name: Vet
+        run: |
+          go vet ./...
+          cd shared
+          go vet ./...
+
+      - name: Unit tests
+        run: make test-unit
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.4
+
+      - name: Build container
+        run: docker build --target final --tag platform-orchestrator-dp:ci .
+
+      - name: Upload unit test coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-coverage
+          path: cover.out
+
+  integration:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Disable Docker containerd image store
+        run: |
+          sudo mkdir -p /etc/docker
+          echo '{"features": {"containerd-snapshotter": false}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: false
+
+      - name: Setup Score Compose
+        uses: score-spec/setup-score@v3
+        with:
+          file: score-compose
+          version: 0.17.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+
+      - name: Run integration tests
+        run: make test-integration
+
+      - name: Show integration test logs
+        if: always()
+        run: make test-integration-logs
+
+      - name: Clean integration resources
+        if: always()
+        run: make clean
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - verify
+      - integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      packages: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Release
+        id: release
+        uses: stellwerk-labs/semantic-release-action@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        if: steps.release.outputs.version != ''
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup QEMU
+        if: steps.release.outputs.version != ''
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        if: steps.release.outputs.version != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        if: steps.release.outputs.version != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          target: final
+          tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ steps.release.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,86 @@
+services:
+  platform-orchestrator-cp-platform-orchestrator-cp:
+    environment:
+      LOG_LEVEL: debug
+      DD_AGENT_HOST: ""
+      SHUTDOWN_DELAY: 1s
+      VAULT_AUTH: token:mytoken
+      DATA_PLANE_URL: http://platform-orchestrator-dp-platform-orchestrator-dp:8080
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+  platform-orchestrator-dp-platform-orchestrator-dp:
+    environment:
+      LOG_LEVEL: debug
+      DD_AGENT_HOST: ""
+      SHUTDOWN_DELAY: 1s
+      DEPLOYMENTS_COMPLETED_BEFORE: 10s
+      VAULT_AUTH: token:mytoken
+      RUNNER_LOGS_BUCKET_CREDS: '{"access_key_id":"test","secret_access_key":"testtest"}'
+      RUNNER_LOGS_BUCKET_ENDPOINT: http://seaweedfs:8333
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+      platform-orchestrator-iam-platform-orchestrator-iam:
+        condition: service_started
+      seaweedfs:
+        condition: service_healthy
+  platform-orchestrator-iam-platform-orchestrator-iam:
+    environment:
+      LOG_LEVEL: debug
+      DD_AGENT_HOST: ""
+      SHUTDOWN_DELAY: 1s
+    depends_on:
+      spicedb:
+        condition: service_healthy      
+  vault:
+    image: hashicorp/vault:1.14
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: mytoken
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+  vault-init:
+    image: hashicorp/vault:1.14
+    environment:
+      VAULT_TOKEN: mytoken
+      VAULT_ADDR: http://vault:8200
+    depends_on:
+      vault:
+        condition: service_started
+    command:
+      - "sh"
+      - "-c"
+      - "until vault secrets disable transit; do sleep 3; done; vault secrets enable transit"
+  spicedb:
+    image: authzed/spicedb:v1.45.4
+    command: serve-testing
+    ports:
+      - "50051:50051"
+      - "8443:8443"
+      - "9090:9090"
+    environment:
+      - SPICEDB_GRPC_PRESHARED_KEY=t0k3n
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-v", "-addr=localhost:50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=100"
+    ports:
+      - "8333:8333"
+      - "9333:9333"
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs-config:/etc/seaweedfs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8333/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+volumes:
+  seaweedfs-data:

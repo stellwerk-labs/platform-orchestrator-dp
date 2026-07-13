@@ -1,0 +1,63 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.template
+.envrc
+.direnv/
+*.key
+*.pem
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+CODEX_HANDOFF.md
+
+# Go build, test, coverage, and dependency output
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+cover.out
+coverage.html
+vendor/
+go.work
+go.work.sum
+
+# Generated mocks
+*_mock.go
+mocks/
+
+# Integration test output and local cluster credentials
+.score-compose/
+compose.yaml
+integration-tests/runner_config.json
+integration-tests/runner-cluster/kubeconfig*.yaml
+integration-tests/*.env
+
+# Editors
+.idea/
+.vscode/
+*.swo
+*.swp
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk

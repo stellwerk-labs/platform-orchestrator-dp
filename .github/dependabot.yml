@@ -1,0 +1,45 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    # Disable updates except for vulnerabilities
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    groups:
+      golib:
+        patterns:
+          - github.com/stellwerk-labs/golib*
+      opentelemetry:
+        patterns:
+          - go.opentelemetry.io*
+  - package-ecosystem: docker
+    directory: integration-tests/
+    # Disable updates except for vulnerabilities
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+      include: "scope"
+  - package-ecosystem: docker
+    directory: /
+    # Disable updates except for vulnerabilities
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+      include: "scope"
+  - package-ecosystem: github-actions
+    directory: /
+    # Disable updates except for vulnerabilities
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+      include: "scope"
