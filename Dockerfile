@@ -17,6 +17,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM gcr.io/distroless/static:nonroot AS final
 
+LABEL org.opencontainers.image.source="https://github.com/stellwerk-labs/platform-orchestrator-dp"
+
 WORKDIR /opt/server
 
 COPY --chown=nonroot:nonroot --from=builder /opt/server .
