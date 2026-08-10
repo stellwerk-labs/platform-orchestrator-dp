@@ -3,7 +3,6 @@ package completionhooks
 import (
 	"slices"
 	"sync"
-	"time"
 )
 
 // CompletionHooks is a mechanism of allowing API handlers to register interest in a particular event, and have that event trigger them when it arrives.
@@ -77,27 +76,6 @@ func (h *CompletionHooks[ht, T]) Notify(handle ht, msg T) int {
 type DeploymentOrgAndId struct {
 	OrgId        string
 	DeploymentId string
-}
-
-type RunnerAndOrgId struct {
-	RunnerId string
-	OrgId    string
-}
-
-type RunnerMessageAction string
-
-const (
-	WaitForRunnerMessagesActionCreateJob      RunnerMessageAction = "create-job"
-	WaitForRunnerMessagesActionCheckJobStatus RunnerMessageAction = "check-job-status"
-)
-
-type RunnerMessage struct {
-	Action          RunnerMessageAction    `json:"action"`
-	JobId           string                 `json:"job_id"`
-	Namespace       string                 `json:"namespace"`
-	DeploymentToken string                 `json:"deployment_token"`
-	Configuration   map[string]interface{} `json:"configuration,omitempty"`
-	ExpiresAt       time.Time              `json:"expires_at,omitempty"`
 }
 
 const MaximumWaitersPerDeploymentHandler = 3

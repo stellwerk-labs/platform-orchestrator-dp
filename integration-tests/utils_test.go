@@ -22,13 +22,12 @@ import (
 
 	"filippo.io/age"
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	"github.com/stellwerk-labs/golib/hpostgresconnect"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/zap/zaptest"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -36,7 +35,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
 )
 
 var testHttpClient = &http.Client{
@@ -225,19 +224,12 @@ func MustDatabaser(t *testing.T) model.Databaser {
 	return inner
 }
 
-// MustRabbitConn provides access to the rabbitmq during tests
-func MustRabbitConn(t *testing.T) *rabbitmq.Conn {
-	conn, err := rabbitmq.NewConn(os.Getenv("AMQP_CONNECTION_STRING"), rabbitmq.WithConnectionOptionsLogger(hrabbitmq.NewLogger(zaptest.NewLogger(t))))
+// MustNATSConn provides access to NATS during tests.
+func MustNATSConn(t *testing.T) *nats.Conn {
+	conn, err := nats.Connect(os.Getenv("NATS_URL"))
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		assert.NoError(t, conn.Close())
-		if !t.Failed() {
-			// avoid test failures due to logging while goroutines close
-			select {
-			case <-time.After(time.Second * 3):
-			case <-t.Context().Done():
-			}
-		}
+		conn.Close()
 	})
 	return conn
 }

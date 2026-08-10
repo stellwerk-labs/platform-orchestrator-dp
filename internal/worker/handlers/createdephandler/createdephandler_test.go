@@ -3,14 +3,17 @@ package createdephandler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pkg/errors"
 
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 
 	mockplatformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-dp/internal/clients/platformorchestratorcp/mocks"
@@ -23,21 +26,17 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	mockrunners "github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/mocks"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 
 	"github.com/google/uuid"
-	"github.com/rabbitmq/amqp091-go"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
 
 const (
 	runnerImage           = "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v1.8.3"
-	tokenSalt             = "S4LT"
 	orgId                 = "test-org"
 	projectId             = "test-app"
 	envId                 = "test-env"
@@ -53,7 +52,19 @@ type ClientFactoryMock struct {
 
 var depId = uuid.New()
 
-func prepUnitTest(t *testing.T) (*CreateDepHandler, *mockmodel.MockDatabaser, *mockplatformorchestratorcp.MockClientWithResponsesInterface, *mockrunners.MockRunnerFactory, *hrabbitmq.NoOpPublisher) {
+type recordingBundleStore struct {
+	name    string
+	payload []byte
+}
+
+func (s *recordingBundleStore) Put(_ context.Context, metadata jetstream.ObjectMeta, reader io.Reader) (*jetstream.ObjectInfo, error) {
+	s.name = metadata.Name
+	payload, err := io.ReadAll(reader)
+	s.payload = payload
+	return &jetstream.ObjectInfo{ObjectMeta: metadata}, err
+}
+
+func prepUnitTest(t *testing.T) (*CreateDepHandler, *mockmodel.MockDatabaser, *mockplatformorchestratorcp.MockClientWithResponsesInterface, *mockrunners.MockRunnerFactory, *hmessaging.RecordingPublisher) {
 	ctrl := gomock.NewController(t)
 	t.Cleanup(func() {
 		ctrl.Finish()
@@ -63,10 +74,10 @@ func prepUnitTest(t *testing.T) (*CreateDepHandler, *mockmodel.MockDatabaser, *m
 	db.EXPECT().BeginTx(gomock.Any(), gomock.Any()).Return(tx, nil).AnyTimes()
 	tx.EXPECT().Commit().Return(nil).AnyTimes()
 	tx.EXPECT().Rollback().Return(nil).AnyTimes()
-	pub := new(hrabbitmq.NoOpPublisher)
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	pub := new(hmessaging.RecordingPublisher)
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	db.EXPECT().AsReliableOutboxStore().Return(store).AnyTimes()
-	db.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+	db.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 		store.Put(m)
 		return m, nil
 	}).AnyTimes()
@@ -80,7 +91,6 @@ func prepUnitTest(t *testing.T) (*CreateDepHandler, *mockmodel.MockDatabaser, *m
 		publisher:          pub,
 		controlPlaneClient: cp,
 		runnerFactory:      mockRunnerFactory,
-		runnerTokenSalt:    tokenSalt,
 	}
 
 	return h, db, cp, mockRunnerFactory, pub
@@ -102,11 +112,7 @@ func buildDepEvent(t *testing.T, orgId string, depId uuid.UUID) []byte {
 func TestHandle_dep_not_found(t *testing.T) {
 	h, db, _, _, _ := prepUnitTest(t)
 	db.EXPECT().GetDeployment(gomock.Any(), nil, orgId, depId, model.GetModeDefault).Return(nil, nil, nil, nil, model.NewErrNotFound("deployment not found"))
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
 }
 
 func TestHandle_runner_not_found(t *testing.T) {
@@ -129,15 +135,11 @@ func TestHandle_runner_not_found(t *testing.T) {
 
 	db.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Not(nil), gomock.Not(nil)).Return(nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
 }
 
 func TestHandle_runner_already_running(t *testing.T) {
-	h, db, cp, mockRunnerFactory, _ := prepUnitTest(t)
+	h, db, cp, mockRunnerFactory, publisher := prepUnitTest(t)
 
 	deploymentSummary := &model.DeploymentSummary{
 		OrgId:     orgId,
@@ -182,11 +184,9 @@ func TestHandle_runner_already_running(t *testing.T) {
 
 	mockRunnerFactory.EXPECT().CreateRunner(gomock.Any(), internalRunner, deploymentSummary).Return(mockRunner, nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
+	require.Len(t, publisher.Messages(), 1)
+	assert.Equal(t, string(genevents.IoPlatformOrchestratorRunnerCheckStatus), publisher.Messages()[0].Subject)
 }
 
 func TestHandle_start_runner_error(t *testing.T) {
@@ -243,11 +243,7 @@ func TestHandle_start_runner_error(t *testing.T) {
 
 	db.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Not(nil), gomock.Not(nil)).Return(nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
 }
 
 func TestHandle_start_runner_user_error(t *testing.T) {
@@ -303,11 +299,7 @@ func TestHandle_start_runner_user_error(t *testing.T) {
 
 	db.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Not(nil), gomock.Not(nil)).Return(nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
 }
 
 func TestHandle_success(t *testing.T) {
@@ -316,7 +308,9 @@ func TestHandle_success(t *testing.T) {
 		ctrl.Finish()
 	})
 
-	h, db, cp, mockRunnerFactory, pub := prepUnitTest(t)
+	h, db, cp, mockRunnerFactory, publisher := prepUnitTest(t)
+	bundleStore := new(recordingBundleStore)
+	h.bundleStore = bundleStore
 	deploymentSummary := &model.DeploymentSummary{
 		OrgId:                     orgId,
 		ProjectId:                 projectId,
@@ -329,6 +323,8 @@ func TestHandle_success(t *testing.T) {
 	}
 
 	db.EXPECT().GetDeployment(gomock.Any(), nil, orgId, depId, model.GetModeDefault).Return(deploymentSummary, nil, nil, nil, nil)
+	db.EXPECT().GetDeployment(gomock.Any(), nil, orgId, depId, model.GetModeDefault).
+		Return(deploymentSummary, nil, model.RawTofu("terraform {}"), model.EncodedDeploymentGraph(`{"nodes":{}}`), nil)
 
 	cfg := new(platformorchestratorcp.RunnerConfiguration)
 	require.NoError(t, cfg.FromK8sRunnerConfiguration(platformorchestratorcp.K8sRunnerConfiguration{
@@ -357,27 +353,22 @@ func TestHandle_success(t *testing.T) {
 	// Mock runner that succeeds
 	mockRunner := mockrunners.NewMockRunnerInterface(ctrl)
 	mockRunner.EXPECT().IsRunning(gomock.Any()).Return(false, nil)
-	mockRunner.EXPECT().Start(gomock.Any()).Return(nil)
+	mockRunner.EXPECT().Start(gomock.Any()).DoAndReturn(func(context.Context) error {
+		assert.Equal(t, orgId+"/"+depId.String(), bundleStore.name)
+		assert.NotEmpty(t, bundleStore.payload)
+		return nil
+	})
 
 	mockRunnerFactory.EXPECT().CreateRunner(gomock.Any(), internalRunner, deploymentSummary).Return(mockRunner, nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
-
-	if assert.Len(t, pub.Recorded, 1) {
-		m := pub.Recorded[0]
-		assert.Equal(t, []string{string(genevents.IoPlatformOrchestratorRunnerCheckStatus)}, m.Keys)
-		assert.Equal(t, events.DefaultExchange, m.Options.Exchange)
-		var statusCheckEvent events.CloudEvent[genevents.RunnerStatusCheckData]
-
-		assert.NoError(t, json.Unmarshal(m.Data, &statusCheckEvent))
-		require.Equal(t, depId, statusCheckEvent.Data.DeploymentId)
-		require.Equal(t, orgId, statusCheckEvent.Data.OrgId)
-		require.Equal(t, runnerId, statusCheckEvent.Data.RunnerId)
-	}
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
+	require.Len(t, publisher.Messages(), 1)
+	assert.Equal(t, depId.String()+":runner-status-check", publisher.Messages()[0].ID)
+	var statusEvent events.CloudEvent[genevents.RunnerStatusCheckData]
+	require.NoError(t, json.Unmarshal(publisher.Messages()[0].Data, &statusEvent))
+	assert.Equal(t, depId, statusEvent.Data.DeploymentId)
+	assert.Equal(t, orgId, statusEvent.Data.OrgId)
+	assert.Equal(t, runnerId, statusEvent.Data.RunnerId)
 }
 
 func TestHandle_start_runner_kubernetes_agent_not_reachable_retry(t *testing.T) {
@@ -426,11 +417,7 @@ func TestHandle_start_runner_kubernetes_agent_not_reachable_retry(t *testing.T) 
 	mockRunner.EXPECT().IsRunning(gomock.Any()).Return(false, nil)
 	mockRunner.EXPECT().Start(gomock.Any()).Return(runners.ErrKubernetesAgentNotReachableRetry)
 
-	err := h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	})
+	err := h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}})
 
 	require.Error(t, err)
 
@@ -494,9 +481,5 @@ func TestHandle_start_runner_kubernetes_agent_not_reachable_tolerance_exceeded(t
 
 	db.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Not(nil), gomock.Not(nil)).Return(nil)
 
-	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), &rabbitmq.Delivery{
-		Delivery: amqp091.Delivery{
-			Body: buildDepEvent(t, orgId, depId),
-		},
-	}))
+	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
 }

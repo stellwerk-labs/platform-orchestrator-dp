@@ -13,7 +13,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
 )
 
 func TestListDeploymentResourceNodes_notFound(t *testing.T) {

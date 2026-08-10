@@ -10,38 +10,36 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	v2 "github.com/stellwerk-labs/golib/hrabbitmq/delayqueues/v2"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/zap"
 
-	usererrors "github.com/stellwerk-labs/platform-orchestrator-dp/internal/errors"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 const (
-	MaxStatusCheckDuration = 1 * time.Hour
+	MaxStatusCheckDuration = time.Hour
 	RetryInterval          = 30 * time.Second
+	MaxDeliveries          = int(MaxStatusCheckDuration/RetryInterval) + 2
 )
 
 type RunnerStatusHandler struct {
 	db                 model.Databaser
-	publisher          hrabbitmq.Publisher
+	publisher          hmessaging.Publisher
 	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
 	runnerFactory      runners.RunnerFactory
 }
 
 func New(
 	db model.Databaser,
-	publisher hrabbitmq.Publisher,
+	publisher hmessaging.Publisher,
 	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface,
 	runnerFactory runners.RunnerFactory,
 ) *RunnerStatusHandler {
@@ -53,10 +51,10 @@ func New(
 	}
 }
 
-func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, d *rabbitmq.Delivery) error {
+func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, delivery hmessaging.Delivery) error {
 	var body events.CloudEvent[genevents.RunnerStatusCheckData]
-	if err := json.Unmarshal(d.Body, &body); err != nil {
-		return errors.Wrap(err, "failed to unmarshal runner status check event")
+	if err := json.Unmarshal(delivery.Data, &body); err != nil {
+		return hmessaging.NewTerminalError(errors.Wrap(err, "failed to unmarshal runner status check event"))
 	}
 
 	ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)
@@ -65,23 +63,18 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, d 
 	ids.RunnerId = body.Data.RunnerId
 	logger = hlogger.TraceScopedLoggerFromCtx(logger, ctx).WithLazy(ids.AsLogField())
 
-	// Get current deployment
 	deployment, _, _, _, err := h.db.GetDeployment(ctx, nil, body.Data.OrgId, body.Data.DeploymentId, model.GetModeDefault)
 	if err != nil {
 		if _, ok := model.IsErrNotFound(err); ok {
 			logger.Info("deployment no longer exists, stopping status checks")
 			return nil
 		}
-		return errors.Wrap(err, "failed to get deployment")
+		return hmessaging.NewRetryErrorWithDelay(errors.Wrap(err, "failed to get deployment"), RetryInterval)
 	}
-
-	// Skip if deployment is no longer executing
 	if deployment.Status != model.DeploymentStatusExecuting {
 		logger.Info("deployment no longer executing, stopping status checks", zap.String("status", string(deployment.Status)))
 		return nil
 	}
-
-	// Check if we've exceeded the maximum status check duration
 	if time.Now().After(deployment.CreatedAt.Add(MaxStatusCheckDuration)) {
 		logger.Warn("max status check duration exceeded, failing deployment",
 			zap.Time("deployment_created_at", deployment.CreatedAt),
@@ -89,29 +82,27 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, d 
 		return h.failDeployment(ctx, logger, deployment, "deployment timeout - runner did not complete within expected time")
 	}
 
-	// Get runner configuration
-	res, err := h.controlPlaneClient.GetInternalRunnerWithResponse(ctx, body.Data.OrgId, body.Data.RunnerId)
+	response, err := h.controlPlaneClient.GetInternalRunnerWithResponse(ctx, body.Data.OrgId, body.Data.RunnerId)
 	if err != nil {
-		return errors.Wrap(err, "failed to get runner configuration")
-	} else if res.StatusCode() == http.StatusNotFound {
-		return usererrors.NewUserError(fmt.Sprintf("no runner has been configured with id '%s'", body.Data.RunnerId))
-	} else if res.StatusCode() != http.StatusOK {
-		return errors.Errorf("unexpected status code when getting runner '%s': %s: %s", body.Data.RunnerId, res.Status(), string(res.Body))
+		return hmessaging.NewRetryErrorWithDelay(errors.Wrap(err, "failed to get runner configuration"), RetryInterval)
+	}
+	if response.StatusCode() == http.StatusNotFound {
+		return h.failDeployment(ctx, logger, deployment, fmt.Sprintf("no runner has been configured with id '%s'", body.Data.RunnerId))
+	}
+	if response.StatusCode() != http.StatusOK {
+		return hmessaging.NewRetryErrorWithDelay(errors.Errorf(
+			"unexpected status code when getting runner '%s': %s: %s",
+			body.Data.RunnerId, response.Status(), string(response.Body)), RetryInterval)
 	}
 
-	// Create runner instance
-	rn := *res.JSON200
-	runner, err := h.runnerFactory.CreateRunner(ctx, rn, deployment)
+	runner, err := h.runnerFactory.CreateRunner(ctx, *response.JSON200, deployment)
 	if err != nil {
-		return errors.Wrap(err, "failed to create runner")
+		return h.failDeployment(ctx, logger, deployment, errors.Wrap(err, "failed to create runner").Error())
 	}
-
-	// Check runner status
 	status, err := runner.CheckStatus(ctx)
 	if err != nil {
 		if errors.Is(err, runners.ErrKubernetesAgentNotReachableRetry) {
-			logger.Warn("kubernetes agent temporary not reachable, will retry", zap.Error(err))
-			return v2.NewGracefulRetryErrorWithDelay(errors.Wrap(err, "kubernetes agent temporary not reachable"), RetryInterval)
+			return hmessaging.NewRetryErrorWithDelay(errors.Wrap(err, "kubernetes agent temporarily not reachable"), RetryInterval)
 		}
 		return h.failDeployment(ctx, logger, deployment, errors.Wrap(err, "failed to check runner status").Error())
 	}
@@ -121,59 +112,50 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, d 
 		zap.Bool("stuck", status.IsStuck),
 		zap.String("message", status.Message),
 	)
-
-	// Handle scenario of runner stuck
 	if status.IsStuck {
 		return h.failDeployment(ctx, logger, deployment, status.Message)
-	} else if status.IsCompleted {
-		logger.Info("runner completed successfully, deployment should be updated by runner itself shortly if not already")
+	}
+	if status.IsCompleted {
+		logger.Info("runner completed, waiting for its result event if the deployment is still executing")
 		return nil
 	}
-
-	// Schedule next check - runner is still running, time check already done above
-	return v2.NewGracefulRetryErrorWithDelay(
-		errors.New("runner still running, scheduling next status check"),
-		RetryInterval,
-	)
+	return hmessaging.NewRetryErrorWithDelay(errors.New("runner still running"), RetryInterval)
 }
 
-func (h *RunnerStatusHandler) failDeployment(ctx context.Context, logger *zap.Logger, dep *model.DeploymentSummary, statusMessage string) error {
-	if tx, err := h.db.BeginTx(ctx, nil); err != nil {
+func (h *RunnerStatusHandler) failDeployment(ctx context.Context, logger *zap.Logger, deployment *model.DeploymentSummary, statusMessage string) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
 		return errors.Wrap(err, "failed to begin transaction")
-	} else {
-		defer func() {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				logger.Error("failed to rollback transaction", zap.Error(err))
-			}
-		}()
-
-		if dep, err = h.db.UpdateDeploymentStatusAndOutputs(ctx, tx, dep.Id, model.UpdateDeploymentStatusAndOutputsParams{
-			Status:           model.DeploymentStatusFailed,
-			StatusMessage:    statusMessage,
-			Metrics:          dep.Metrics,
-			ExpectedRevision: opt.Of(int64(dep.Revision)),
-		}); err != nil {
-			return errors.Wrap(err, "failed to update deployment status")
-		}
-
-		if err := h.db.CreateDeploymentHistoryRecord(ctx, tx, dep); err != nil {
-			return errors.Wrap(err, "failed to create deployment history record")
-		}
-
-		messages, err := h.db.InsertPendingEventMessages(ctx, tx, []*hstandardreliableoutbox.PendingEventMessage{
-			{
-				Exchange:   events.DefaultExchange,
-				RoutingKey: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
-				Payload:    model.ConvertDeploymentToEventPayload(dep),
-			},
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to insert pending event messages")
-		}
-		if err := tx.Commit(); err != nil {
-			return errors.Wrap(err, "failed to commit transaction")
-		}
-		reliableoutbox.OptimisticPublish(ctx, logger, h.db.AsReliableOutboxStore(), h.publisher, messages)
-		return nil
 	}
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			logger.Error("failed to rollback transaction", zap.Error(rollbackErr))
+		}
+	}()
+
+	deployment, err = h.db.UpdateDeploymentStatusAndOutputs(ctx, tx, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{
+		Status:           model.DeploymentStatusFailed,
+		StatusMessage:    statusMessage,
+		Metrics:          deployment.Metrics,
+		ExpectedRevision: opt.Of(int64(deployment.Revision)),
+	})
+	if err != nil {
+		return errors.Wrap(err, "failed to update deployment status")
+	}
+	if err := h.db.CreateDeploymentHistoryRecord(ctx, tx, deployment); err != nil {
+		return errors.Wrap(err, "failed to create deployment history record")
+	}
+	messages, err := h.db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{{
+		Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
+		Payload: model.ConvertDeploymentToEventPayload(deployment),
+	}})
+	if err != nil {
+		return errors.Wrap(err, "failed to insert pending event messages")
+	}
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to commit transaction")
+	}
+	logger.Info("deployment completed", zap.String("status", string(model.DeploymentStatusFailed)), zap.String("status_message", statusMessage))
+	reliableoutbox.OptimisticPublish(ctx, logger, h.db.AsReliableOutboxStore(), h.publisher, messages)
+	return nil
 }

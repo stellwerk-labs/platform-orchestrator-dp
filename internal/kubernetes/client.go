@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 )
 
 const (
@@ -46,8 +47,8 @@ func (c *kubernetesClient) IsJobRunning(ctx context.Context, namespace string, j
 	return true, nil
 }
 
-func (c *kubernetesClient) CreateJob(ctx context.Context, jobCfg platformorchestratorcp.K8sRunnerJobConfig, externalDataplaneUrl, runnerImage, token, runnerLogsSignedUrl, metadataOutputKey string, d *model.DeploymentSummary) (*v1.Job, error) {
-	jobSpec, err := GetJobSpec(ctx, jobCfg, externalDataplaneUrl, runnerImage, token, runnerLogsSignedUrl, metadataOutputKey, d)
+func (c *kubernetesClient) CreateJob(ctx context.Context, jobCfg platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...runnercommon.NATSConfiguration) (*v1.Job, error) {
+	jobSpec, err := GetJobSpec(ctx, jobCfg, runnerImage, metadataOutputKey, d, natsConfigurations...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get job spec")
 	}

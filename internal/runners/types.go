@@ -14,7 +14,14 @@ import (
 
 const KubernetesAgentConnectionIssueTolerance = 120 * time.Second
 
-var ErrKubernetesAgentNotReachableRetry = errors.New("kubernetes agent not reachable")
+var (
+	// ErrKubernetesAgentNotReachableRetry is retained for local runner
+	// implementations and compatibility with callers that still classify it.
+	ErrKubernetesAgentNotReachableRetry = errors.New("kubernetes agent not reachable")
+	// ErrRunnerCommandPublishRetry means the command has not been durably
+	// accepted by JetStream and the source event should be retried.
+	ErrRunnerCommandPublishRetry = errors.New("runner command was not durably published")
+)
 
 // RunnerInterface defines the common interface for all runner types
 type RunnerInterface interface {

@@ -3,6 +3,8 @@ package worker
 import "time"
 
 const (
-	MainConsumerConcurrency = 10
-	MainConsumerMessageTtl  = time.Minute * 10
+	MainConsumerConcurrency   = 10
+	MainConsumerMaxDeliveries = 10
+	MainConsumerAckWait       = time.Minute
+	RunnerStatusConcurrency   = 10
 )

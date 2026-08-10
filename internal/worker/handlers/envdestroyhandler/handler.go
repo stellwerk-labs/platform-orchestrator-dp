@@ -11,12 +11,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genevents"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api"
@@ -28,7 +27,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers"
 
-	dpevents "github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	dpevents "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 // BranchPattern is the branch match pattern for incoming events.
@@ -42,12 +41,12 @@ var BranchPattern = regexp.MustCompile(regexp.QuoteMeta(string(cpevents.IoPlatfo
 type EnvDestroyHandler struct {
 	cpClient platformorchestratorcp.ClientWithResponsesInterface
 	db       model.Databaser
-	pub      hrabbitmq.Publisher
+	pub      hmessaging.Publisher
 	logDel   runners.RunnerLogsDeleter
 }
 
 // New is the constructor so that we don't miss new arguments.
-func New(cpClient platformorchestratorcp.ClientWithResponsesInterface, db model.Databaser, pub hrabbitmq.Publisher, logDel runners.RunnerLogsDeleter) *EnvDestroyHandler {
+func New(cpClient platformorchestratorcp.ClientWithResponsesInterface, db model.Databaser, pub hmessaging.Publisher, logDel runners.RunnerLogsDeleter) *EnvDestroyHandler {
 	return &EnvDestroyHandler{
 		cpClient: cpClient,
 		db:       db,
@@ -57,11 +56,11 @@ func New(cpClient platformorchestratorcp.ClientWithResponsesInterface, db model.
 }
 
 // Handle is the entrypoint for new messages. Here we unwrap the typed data and call handleInner if it applies.
-func (h *EnvDestroyHandler) Handle(ctx context.Context, logger *zap.Logger, d *rabbitmq.Delivery) error {
-	switch d.RoutingKey {
+func (h *EnvDestroyHandler) Handle(ctx context.Context, logger *zap.Logger, d hmessaging.Delivery) error {
+	switch d.Subject {
 	case string(cpevents.IoPlatformOrchestratorEnvironmentUpdated):
 		var e events.CloudEvent[cpevents.EnvChangedData]
-		if err := json.Unmarshal(d.Body, &e); err != nil {
+		if err := json.Unmarshal(d.Data, &e); err != nil {
 			return errors.Wrap(err, "failed to unmarshal event body")
 		}
 		force := ref.DerefOr(e.Data.Force, false)
@@ -70,7 +69,7 @@ func (h *EnvDestroyHandler) Handle(ctx context.Context, logger *zap.Logger, d *r
 		fallthrough
 	case string(dpevents.IoPlatformOrchestratorDeploymentUpdated):
 		var e events.CloudEvent[dpevents.DeploymentChangedData]
-		if err := json.Unmarshal(d.Body, &e); err != nil {
+		if err := json.Unmarshal(d.Data, &e); err != nil {
 			return errors.Wrap(err, "failed to unmarshal event body")
 		}
 		return h.handleInner(ctx, logger, e.Data.OrgId, e.Data.ProjectId, e.Data.EnvId, e.Data.EnvUuid, false, false)

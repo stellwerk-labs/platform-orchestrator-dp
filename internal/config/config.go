@@ -1,11 +1,6 @@
 package config
 
-import (
-	"fmt"
-	"time"
-
-	"github.com/pkg/errors"
-)
+import "time"
 
 // Configuration ...
 type Configuration struct {
@@ -17,15 +12,19 @@ type Configuration struct {
 	DatabaseHost     string `env:"DATABASE_HOST"     validate:"required"`
 	DatabasePort     string `env:"DATABASE_PORT"     validate:"required"`
 
-	// AmqpConnectionString should be an AMQP url like "amqp://%s:%s@%s:%d/%s"
-	AmqpConnectionString string `env:"AMQP_CONNECTION_STRING" validate:"omitempty,url"`
+	NATSURL            string `env:"NATS_URL"                        validate:"required,url"`
+	NATSCredsFile      string `env:"NATS_CREDS_FILE"`
+	NATSToken          string `env:"NATS_TOKEN"`
+	NATSCAFile         string `env:"NATS_CA_FILE"`
+	NATSClientCertFile string `env:"NATS_CLIENT_CERT_FILE"`
+	NATSClientKeyFile  string `env:"NATS_CLIENT_KEY_FILE"`
+	NATSStreamReplicas int    `env:"NATS_STREAM_REPLICAS, default=1" validate:"gte=1"`
+	NATSBootstrap      bool   `env:"NATS_BOOTSTRAP, default=false"`
 
-	// Alternatively, separate env vars can be set for AMQP connection
-	AmpqHost     string `env:"AMQP_HOST"`
-	AmpqPort     string `env:"AMQP_PORT, default=5672"`
-	AmpqVhost    string `env:"AMQP_VHOST"`
-	AmpqUsername string `env:"AMQP_USERNAME"`
-	AmpqPassword string `env:"AMQP_PASSWORD"`
+	// RunnerNATS* are injected only into runners started directly by this data
+	// plane. Remote agents replace them with their local broker configuration.
+	RunnerNATSURL   string `env:"RUNNER_NATS_URL"   validate:"required,url"`
+	RunnerNATSToken string `env:"RUNNER_NATS_TOKEN"`
 
 	// ControlPlaneUrl is the api url for the control plane port 8080
 	ControlPlaneUrl string `env:"CONTROL_PLANE_URL" validate:"required,url"`
@@ -33,17 +32,6 @@ type Configuration struct {
 
 	// IamUrl is the internal url for the platform-orchestrator-iam service
 	IamUrl string `env:"IAM_URL" validate:"required,url"`
-
-	// RunnerLogsBucket is the bucket for storing runner logs
-	RunnerLogsBucket string `env:"RUNNER_LOGS_BUCKET" validate:"required"`
-
-	// RunnerLogsBucketEndpoint is the endpoint for the object storage service (only needed for S3-compatible services)
-	RunnerLogsBucketEndpoint string `env:"RUNNER_LOGS_BUCKET_ENDPOINT" validate:"omitempty"`
-
-	RunnerLogsSignedUrlExpirationTime time.Duration `env:"RUNNER_LOGS_SIGNED_URL_EXPIRATION_TIME, default=1h"`
-	RunnerLogsGCPServiceAccount       string        `env:"RUNNER_LOGS_GCP_SERVICE_ACCOUNT"`
-	// RunnerLogsCreds used by integration tests
-	RunnerLogsBucketCreds string `env:"RUNNER_LOGS_BUCKET_CREDS,default="`
 
 	ShutdownDelay time.Duration `env:"SHUTDOWN_DELAY, default=10s"`
 	OTELEnabled   bool          `env:"OTEL_ENABLE, default=false"`
@@ -54,8 +42,7 @@ type Configuration struct {
 	RunnerImage string `env:"RUNNER_IMAGE"`
 	// KubernetesRunnerPodSchedulingDelay is the time we wait for a k8s pod to be scheduled before marking the deployment as failed
 	KubernetesRunnerPodSchedulingDelay time.Duration `env:"K8S_RUNNER_POD_SCHEDULING_DELAY, default=5m"`
-
-	ExternalDataplaneUrl string `env:"SERVER_BASE_URL" validate:"url"`
+	RunnerCommandTTL                   time.Duration `env:"RUNNER_COMMAND_TTL, default=24h"             validate:"gt=0"`
 
 	VaultURL  string `env:"VAULT_URL"  validate:"url"`
 	VaultAuth string `env:"VAULT_AUTH" validate:"required"`
@@ -63,26 +50,5 @@ type Configuration struct {
 
 	OidcIssuerUrl string `env:"OIDC_ISSUER_URL" validate:"omitempty,url"`
 
-	InternalDataplaneHostname string `env:"INTERNAL_DATAPLANE_HOSTNAME" validate:"required"`
-
 	MetadataOutputKey string `env:"METADATA_KEY, default=platform_orchestrator_metadata"`
-}
-
-func (c *Configuration) GetAmqpConnectionString() (string, error) {
-	if c.AmqpConnectionString != "" {
-		return c.AmqpConnectionString, nil
-	}
-	if c.AmpqHost == "" {
-		return "", errors.New("AMQP_HOST or AMQP_CONNECTION_STRING is not set")
-	}
-	if c.AmpqVhost == "" {
-		return "", errors.New("AMQP_VHOST or AMQP_CONNECTION_STRING is not set")
-	}
-	if c.AmpqUsername == "" {
-		return "", errors.New("AMQP_USERNAME or AMQP_CONNECTION_STRING is not set")
-	}
-	if c.AmpqPassword == "" {
-		return "", errors.New("AMQP_PASSWORD or AMQP_CONNECTION_STRING is not set")
-	}
-	return fmt.Sprintf("amqp://%s:%s@%s:%s/%s", c.AmpqUsername, c.AmpqPassword, c.AmpqHost, c.AmpqPort, c.AmpqVhost), nil
 }

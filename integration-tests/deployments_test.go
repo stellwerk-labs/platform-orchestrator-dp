@@ -28,7 +28,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
 )
 
 func TestDeployments(t *testing.T) {
@@ -1277,7 +1277,7 @@ func Test_CreateDeployment_with_long_poll(t *testing.T) {
 		}
 	}, 2*time.Minute, 2*time.Second, "deployment %s not completed after 2 mins: %s", dep.Id, dep.StatusMessage)
 
-	// Add a small delay to allow logs to be uploaded to GCS after deployment completion
+	// Add a small delay to allow logs to be persisted after deployment completion.
 	// This prevents a race condition where the test tries to retrieve logs before they're uploaded
 	// The runner uploads logs asynchronously after deployment completion, so we need to wait
 	time.Sleep(5 * time.Second)

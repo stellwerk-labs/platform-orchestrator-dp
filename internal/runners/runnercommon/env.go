@@ -3,25 +3,45 @@ package runnercommon
 import (
 	"iter"
 
+	"github.com/google/uuid"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
-func GenerateEnvVarsForRun(externalDataplaneUrl, runnerToken, runnerLogsSignedUrl, metadataOutputKey string, d *model.DeploymentSummary) iter.Seq2[string, string] {
+type NATSConfiguration struct {
+	URL   string
+	Token string
+}
+
+func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...NATSConfiguration) iter.Seq2[string, string] {
 	return func(yield func(string, string) bool) {
 		yield("ORG_ID", d.OrgId)
+		if d.RunnerId != "" {
+			yield("RUNNER_ID", d.RunnerId)
+		}
 		yield("DEPLOYMENT_ID", d.Id.String())
+		if d.DeploymentEnvUuid != uuid.Nil {
+			yield("DEPLOYMENT_ENV_UUID", d.DeploymentEnvUuid.String())
+		}
 		yield("MODE", RunnerModeForDeployment(d.Mode))
-		yield("TOKEN", runnerToken)
 		if d.EncryptedOutputsRecipient.IsSet() {
 			yield("ENCRYPTING_KEY", d.EncryptedOutputsRecipient.Must())
 		}
 		if d.EncryptedLogsRecipient.IsSet() {
 			yield("ENCRYPTING_LOGS_KEY", d.EncryptedLogsRecipient.Must())
 		}
-		yield("PLATFORM_ORCHESTRATOR_BASE_URL", externalDataplaneUrl)
-		yield("PLATFORM_ORCHESTRATOR_API_PREFIX", externalDataplaneUrl)
-		yield("LOGS_URL", runnerLogsSignedUrl)
 		yield("LOG_LEVEL", d.RunnerLogLevel)
+		if len(natsConfigurations) > 0 && natsConfigurations[0].URL != "" {
+			natsConfig := natsConfigurations[0]
+			for _, variable := range []struct{ key, value string }{
+				{"NATS_URL", natsConfig.URL}, {"NATS_TOKEN", natsConfig.Token},
+				{"NATS_BUNDLE_BUCKET", "PO_RUNNER_BUNDLES"}, {"NATS_BUNDLE_KEY", d.OrgId + "/" + d.Id.String()},
+			} {
+				key, value := variable.key, variable.value
+				if value != "" {
+					yield(key, value)
+				}
+			}
+		}
 		if metadataOutputKey != "" {
 			yield("METADATA_KEY", metadataOutputKey)
 		}

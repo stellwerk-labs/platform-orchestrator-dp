@@ -7,7 +7,7 @@ service:
       port: 8080
 containers:
   platform-orchestrator-iam:
-    image: ghcr.io/stellwerk-labs/platform-orchestrator-iam:v1.0.0
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.0.0
     command: ["/opt/server/server"]
     livenessProbe:
       httpGet:
@@ -46,7 +46,7 @@ containers:
       SENDGRID_API_KEY: ${resources.env.SENDGRID_API_KEY}
       SPICEDB_URL: ${resources.spicedb.hostname}:50051
       SPICEDB_PRE_SHARED_KEY: ${resources.spicedb.preshared_key}
-      AMQP_CONNECTION_STRING: amqp://${resources.rabbitmq.username}:${resources.rabbitmq.password}@${resources.rabbitmq.host}:${resources.rabbitmq.port}/${resources.rabbitmq.vhost}
+      NATS_URL: ${resources.env.NATS_URL}
       WORKOS_API_KEY: ${resources.env.WORKOS_API_KEY}
       WORKOS_CLIENT_ID: ${resources.env.WORKOS_CLIENT_ID}
       SSO_CALLBACK_URL_PATH: ${resources.env.SSO_CALLBACK_URL_PATH}
@@ -71,6 +71,3 @@ resources:
   spicedb:
     type: spicedb
     id: spicedb
-  rabbitmq:
-    type: amqp
-    id: rabbitmq

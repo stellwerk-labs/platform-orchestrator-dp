@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
@@ -35,11 +35,11 @@ func mockHandler(t *testing.T, logDel runners.RunnerLogsDeleter) (*EnvDestroyHan
 	db.EXPECT().BeginTx(gomock.Any(), gomock.Any()).Return(tx, nil).AnyTimes()
 	tx.EXPECT().Commit().Return(nil).AnyTimes()
 	tx.EXPECT().Rollback().Return(nil).AnyTimes()
-	pub := new(hrabbitmq.NoOpPublisher)
+	pub := new(hmessaging.RecordingPublisher)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	db.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).AnyTimes()

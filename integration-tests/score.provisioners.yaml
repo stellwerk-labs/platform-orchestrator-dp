@@ -5,10 +5,11 @@
     DATADOG_ENV: ""
     RUNNER_TOKEN_SALT: vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=
     VAULT_URL: "http://vault:8200"
-    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v1.0.0"
-    SERVER_BASE_URL: http://platform-orchestrator-dp-platform-orchestrator-dp:8080
+    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v2.0.0"
     OIDC_ISSUER_URL: https://oidc.platform-orchestrator.io
-    INTERNAL_DATAPLANE_HOSTNAME: localhost
+    NATS_URL: nats://nats:4222
+    RUNNER_NATS_URL: nats://nats:4222
+    RUNNER_NATS_TOKEN: ""
     UI_HOST_URL: http://localhost:8080
     SENDGRID_API_KEY: mock
     AUTH_TOKEN_SALT: Hmq56BHF7dyEWC8Twjr2S3sOlJ4a5vhKBNxmVvYcoFUq
@@ -16,7 +17,6 @@
     IAM_ALLOWED_MICROSOFT_CLIENT_IDS: none
     SESSION_TOKEN_COOKIE_DOMAIN: localhost
     TEST_USER_PROVIDER_AGE_IDENTITY: AGE-SECRET-KEY-17WXCCNPHSLMZDSUKVZQX8JE9XVCJJ6MW77L3CYGSF6U30TG9LDFQ80VQYS
-    RUNNER_LOGS_BUCKET: runner-logs
     K8S_RUNNER_POD_SCHEDULING_DELAY: 5s
     WORKOS_CLIENT_ID: dumbworkosid
     WORKOS_API_KEY: dumbworkoskey
