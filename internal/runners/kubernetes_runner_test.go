@@ -21,7 +21,7 @@ import (
 	mockk8s "github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes/mocks"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 	mockvault "github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault/mocks"
 
@@ -31,13 +31,10 @@ import (
 
 const (
 	testRunnerImage                    = "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v1.8.3"
-	testTokenSalt                      = "S4LT"
 	testOrgId                          = "test-org"
 	testProjectId                      = "test-app"
 	testEnvId                          = "test-env"
 	testRunnerId                       = "default"
-	testExternalDataplaneUrl           = "http://platform-orchestrator-dp:8080"
-	runnerLogsBucketSignedUrl          = "https://storage.googleapis.com/platform-orchestrator-runner-logs/token"
 	kubernetesRunnerPodSchedulingDelay = 2 * time.Second
 )
 
@@ -81,14 +78,11 @@ func createTestKubernetesRunner(t *testing.T, k8sClient kubernetes.KubernetesInt
 	runner := NewKubernetesRunner(
 		&mockClientFactory{k8s: k8sClient},
 		vaultClient,
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		testTokenSalt,
 		"",
 		zaptest.NewLogger(t),
 		internalRunner,
 		deploymentSummary,
-		runnerLogsBucketSignedUrl,
 		kubernetesRunnerPodSchedulingDelay,
 	)
 
@@ -152,6 +146,7 @@ func TestKubernetesRunner_Start_Success(t *testing.T) {
 	mockVault := mockvault.NewMockVaultClientInterface(ctrl)
 
 	runner, deploymentSummary, _ := createTestKubernetesRunner(t, mockK8s, mockVault)
+	runner.natsConfiguration = runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"}
 
 	expectedJob := &v1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -162,12 +157,10 @@ func TestKubernetesRunner_Start_Success(t *testing.T) {
 	mockK8s.EXPECT().CreateJob(
 		gomock.Any(),
 		platformorchestratorcp.K8sRunnerJobConfig{Namespace: "platform-orchestrator-runner", ServiceAccount: "platform-orchestrator-runner"},
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		util.GenerateHashedRunnerToken(testTokenSalt, testOrgId, deploymentSummary.Id.String()),
-		runnerLogsBucketSignedUrl,
 		"",
 		deploymentSummary,
+		runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
 	).Return(expectedJob, nil)
 
 	err := runner.Start(context.Background())
@@ -206,26 +199,21 @@ func TestKubernetesRunner_Start_PassesMetadataOutputKey(t *testing.T) {
 	runner := NewKubernetesRunner(
 		&mockClientFactory{k8s: mockK8s},
 		mockVault,
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		testTokenSalt,
 		"platform_orchestrator_metadata",
 		zaptest.NewLogger(t),
 		internalRunner,
 		deploymentSummary,
-		runnerLogsBucketSignedUrl,
 		kubernetesRunnerPodSchedulingDelay,
 	)
 
 	mockK8s.EXPECT().CreateJob(
 		gomock.Any(),
 		platformorchestratorcp.K8sRunnerJobConfig{Namespace: "platform-orchestrator-runner", ServiceAccount: "platform-orchestrator-runner"},
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		util.GenerateHashedRunnerToken(testTokenSalt, testOrgId, deploymentSummary.Id.String()),
-		runnerLogsBucketSignedUrl,
 		"platform_orchestrator_metadata",
 		deploymentSummary,
+		runnercommon.NATSConfiguration{},
 	).Return(&v1.Job{ObjectMeta: metav1.ObjectMeta{Name: deploymentSummary.Id.String()}}, nil)
 
 	err := runner.Start(context.Background())
@@ -244,12 +232,10 @@ func TestKubernetesRunner_Start_CreateJobError(t *testing.T) {
 	mockK8s.EXPECT().CreateJob(
 		gomock.Any(),
 		platformorchestratorcp.K8sRunnerJobConfig{Namespace: "platform-orchestrator-runner", ServiceAccount: "platform-orchestrator-runner"},
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		util.GenerateHashedRunnerToken(testTokenSalt, testOrgId, deploymentSummary.Id.String()),
-		runnerLogsBucketSignedUrl,
 		"",
 		deploymentSummary,
+		runnercommon.NATSConfiguration{},
 	).Return(nil, errors.New("failed to create job"))
 
 	err := runner.Start(context.Background())
@@ -269,12 +255,10 @@ func TestKubernetesRunner_Start_CreateJobError_NotFound(t *testing.T) {
 	mockK8s.EXPECT().CreateJob(
 		gomock.Any(),
 		platformorchestratorcp.K8sRunnerJobConfig{Namespace: "platform-orchestrator-runner", ServiceAccount: "platform-orchestrator-runner"},
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		util.GenerateHashedRunnerToken(testTokenSalt, testOrgId, deploymentSummary.Id.String()),
-		runnerLogsBucketSignedUrl,
 		"",
 		deploymentSummary,
+		runnercommon.NATSConfiguration{},
 	).Return(nil, k8serrors.NewNotFound(schema.GroupResource{}, ""))
 
 	err := runner.Start(context.Background())
@@ -296,12 +280,10 @@ func TestKubernetesRunner_Start_CreateJobError_Forbidden(t *testing.T) {
 	mockK8s.EXPECT().CreateJob(
 		gomock.Any(),
 		platformorchestratorcp.K8sRunnerJobConfig{Namespace: "platform-orchestrator-runner", ServiceAccount: "platform-orchestrator-runner"},
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		util.GenerateHashedRunnerToken(testTokenSalt, testOrgId, deploymentSummary.Id.String()),
-		runnerLogsBucketSignedUrl,
 		"",
 		deploymentSummary,
+		runnercommon.NATSConfiguration{},
 	).Return(nil, k8serrors.NewForbidden(schema.GroupResource{}, "", errors.New("test")))
 
 	err := runner.Start(context.Background())
@@ -347,9 +329,7 @@ func TestKubernetesRunner_Start_GetClusterClientError(t *testing.T) {
 	runner := &KubernetesRunner{
 		k8sClusterClientFactory: &failingClientFactory{},
 		vlt:                     mockVault,
-		externalDataplaneUrl:    testExternalDataplaneUrl,
 		runnerImage:             testRunnerImage,
-		runnerTokenSalt:         testTokenSalt,
 		logger:                  zaptest.NewLogger(t),
 		internalRunner:          internalRunner,
 		deploymentSummary:       deploymentSummary,
@@ -385,14 +365,11 @@ func TestKubernetesRunner_Start_InvalidJobConfiguration(t *testing.T) {
 	runner := NewKubernetesRunner(
 		&mockClientFactory{k8s: nil},
 		mockVault,
-		testExternalDataplaneUrl,
 		testRunnerImage,
-		testTokenSalt,
 		"",
 		zaptest.NewLogger(t),
 		internalRunner,
 		deploymentSummary,
-		runnerLogsBucketSignedUrl,
 		kubernetesRunnerPodSchedulingDelay,
 	)
 

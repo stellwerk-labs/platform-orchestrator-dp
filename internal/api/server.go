@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,14 +13,13 @@ import (
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/stellwerk-labs/golib/hecho"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/authenticator"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/token"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
@@ -33,17 +33,16 @@ const (
 )
 
 type Server struct {
-	Database                   model.Databaser
-	Logger                     *zap.Logger
-	RabbitMqPublisher          hrabbitmq.Publisher
-	ControlPlaneClient         platformorchestratorcp.ClientWithResponsesInterface
-	RunnerTokenSalt            string
-	DeploymentCompletedHooks   *completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]
-	Vault                      vault.VaultClientInterface
-	OidcIssuerUrl              string
-	RemoteRunnerCompletedHooks *completionhooks.CompletionHooks[completionhooks.RunnerAndOrgId, completionhooks.RunnerMessage]
-	IamClient                  platformorchestratoriam.ClientWithResponsesInterface
-	RunnerLogsReader           RunnerLogsReader
+	Database                 model.Databaser
+	Logger                   *zap.Logger
+	EventPublisher           hmessaging.Publisher
+	ControlPlaneClient       platformorchestratorcp.ClientWithResponsesInterface
+	RunnerTokenSalt          string
+	DeploymentCompletedHooks *completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]
+	Vault                    vault.VaultClientInterface
+	OidcIssuerUrl            string
+	IamClient                platformorchestratoriam.ClientWithResponsesInterface
+	RunnerLogsReader         RunnerLogsReader
 }
 
 func (s *Server) MapRoutes(e *echo.Echo) {
@@ -53,7 +52,6 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		middleware.NewAuthZAsserter(regexp.MustCompile("^Internal.*$")),
 		hecho.AuthMiddleware(UserIdHeaderScopes),
 		token.StrictEncryptionMiddleware(),
-		authenticator.AuthJwtMiddleware(s.ControlPlaneClient, JwtAuthScopes, s.Logger),
 	})
 	RegisterHandlers(e, apiHandler)
 
@@ -72,7 +70,7 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 	// without tests having to wait 60 seconds for the next scheduled flush.
 	e.POST("/internal/actions/flush-pending-messages", func(c echo.Context) error {
 		if more, err := reliableoutbox.FlushNextPage(
-			c.Request().Context(), zap.L(), s.Database.AsReliableOutboxStore(), 1, s.RabbitMqPublisher,
+			c.Request().Context(), zap.L(), s.Database.AsReliableOutboxStore(), 1, s.EventPublisher,
 		); err != nil {
 			return err
 		} else {
@@ -104,3 +102,5 @@ func MustDecodeOpenApiSpec() []byte {
 }
 
 type RunnerLogsReader func(ctx context.Context, filename string) (io.ReadCloser, error)
+
+var ErrRunnerLogsNotFound = errors.New("runner logs not found")

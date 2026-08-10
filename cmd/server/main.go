@@ -10,37 +10,37 @@ import (
 	"os/signal"
 	"path"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hconfig"
 	"github.com/stellwerk-labs/golib/hecho"
 	"github.com/stellwerk-labs/golib/hlogger"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	delayqueues "github.com/stellwerk-labs/golib/hrabbitmq/delayqueues/v2"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hnats"
 	"github.com/stellwerk-labs/golib/hretrier"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/golib/hvaultapi"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/clients/storage"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/bundles"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/config"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/credentials/oidc"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
@@ -52,9 +52,9 @@ import (
 )
 
 const (
-	rabbitmqCacheSize      = 10000
-	rabbitmqCacheTtl       = 30 * time.Minute
 	concurrentLogDeletes   = 20
+	natsConnectTimeout     = 5 * time.Second
+	runnerLogsObjectStore  = "PO_RUNNER_LOGS"
 	runtimeMetricsInterval = 5 * time.Second
 	samplingRatio          = 1
 )
@@ -149,40 +149,58 @@ func main() {
 		zap.L().Info("Database closed")
 	}()
 
-	amqpConnectionString, err := cfg.GetAmqpConnectionString()
+	natsConnection, err := hnats.Connect(hnats.ConnectionConfig{
+		URLs:            []string{cfg.NATSURL},
+		Name:            "platform-orchestrator-dp",
+		Token:           cfg.NATSToken,
+		CredentialsFile: cfg.NATSCredsFile,
+		CAFile:          cfg.NATSCAFile,
+		ClientCertFile:  cfg.NATSClientCertFile,
+		ClientKeyFile:   cfg.NATSClientKeyFile,
+		ConnectTimeout:  natsConnectTimeout,
+		ReconnectWait:   time.Second,
+		MaxReconnects:   -1,
+	}, zap.L())
 	if err != nil {
-		zap.L().Fatal("Failed to get AMQP connection string", zap.Error(err))
-	}
-	conn, err := rabbitmq.NewConn(amqpConnectionString, rabbitmq.WithConnectionOptionsLogger(hrabbitmq.NewLogger(zap.L())))
-	if err != nil {
-		zap.L().Fatal("Failed to initialize rabbitmq connection", zap.Error(err))
+		zap.L().Fatal("failed to initialize NATS connection", zap.Error(err))
 	}
 	defer func() {
-		if err := conn.Close(); err != nil {
-			zap.L().Error("Failed to close connection", zap.Error(err))
+		if err := natsConnection.Drain(); err != nil {
+			zap.L().Error("failed to drain NATS connection", zap.Error(err))
 		}
+		natsConnection.Close()
 	}()
-
-	publisher, err := rabbitmq.NewPublisher(
-		conn, rabbitmq.WithPublisherOptionsLogger(hrabbitmq.NewLogger(zap.L())),
-		rabbitmq.WithPublisherOptionsExchangeName(events.DefaultExchange),
-		rabbitmq.WithPublisherOptionsExchangeDeclare,
-		rabbitmq.WithPublisherOptionsExchangeDurable,
-		rabbitmq.WithPublisherOptionsExchangeKind("topic"),
-		rabbitmq.WithPublisherOptionsLogger(hrabbitmq.NewLogger(zap.L())),
-	)
+	js, err := hnats.NewJetStream(natsConnection)
 	if err != nil {
-		zap.L().Fatal("Failed to initialize rabbitmq publisher", zap.Error(err))
+		zap.L().Fatal("failed to initialize JetStream", zap.Error(err))
 	}
-	defer publisher.Close()
-	publisher.NotifyPublish(func(p rabbitmq.Confirmation) {
-		zap.L().Debug("message publish confirmation received", zap.Bool("ack", p.Ack))
-	})
-
-	delayqueues.DefaultExchange = events.DefaultExchange
-	// We need to distinguish our outbox messages from those produced by the CP or other components in our system so
-	// that components can deduplicate messages using the message id. So we tack on a prefix.
-	hstandardreliableoutbox.MessageIdPrefix = "platform-orchestrator-dp-"
+	if cfg.NATSBootstrap {
+		if err := hnats.EnsureStandardStreams(ctx, js, cfg.NATSStreamReplicas); err != nil {
+			zap.L().Fatal("failed to bootstrap JetStream topology", zap.Error(err))
+		}
+	}
+	runnerLogsStore, err := js.ObjectStore(ctx, runnerLogsObjectStore)
+	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
+		runnerLogsStore, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{
+			Bucket: runnerLogsObjectStore, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas,
+		})
+	}
+	if err != nil {
+		zap.L().Fatal("failed to bind runner logs NATS Object Store", zap.Error(err))
+	}
+	runnerBundlesStore, err := js.ObjectStore(ctx, bundles.ObjectStoreName)
+	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
+		runnerBundlesStore, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{
+			Bucket: bundles.ObjectStoreName, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas, TTL: bundles.ObjectStoreTTL,
+		})
+	}
+	if err != nil {
+		zap.L().Fatal("failed to bind runner bundles NATS Object Store", zap.Error(err))
+	}
+	eventPublisher := hnats.NewPublisher(js, hmessaging.EventsStreamName, zap.L())
+	runnerCommandPublisher := hnats.NewPublisher(js, hmessaging.RunnerCommandsStreamName, zap.L())
+	dlqPublisher := hnats.NewPublisher(js, hmessaging.DeadLettersStreamName, zap.L())
+	hstandardoutbox.MessageIDPrefix = "platform-orchestrator-dp-"
 
 	vaultHttpClient := &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -199,16 +217,15 @@ func main() {
 	vlt := vault.NewVaultClient(hvaultapiClient.Client(), zap.L())
 
 	server := api.Server{
-		RabbitMqPublisher:          publisher,
-		Database:                   db,
-		Logger:                     zap.L(),
-		ControlPlaneClient:         cpClient,
-		RunnerTokenSalt:            cfg.RunnerTokenSalt,
-		DeploymentCompletedHooks:   &completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]{MaximumWaitersPerHandle: completionhooks.MaximumWaitersPerDeploymentHandler},
-		Vault:                      vlt,
-		OidcIssuerUrl:              cfg.OidcIssuerUrl,
-		RemoteRunnerCompletedHooks: &completionhooks.CompletionHooks[completionhooks.RunnerAndOrgId, completionhooks.RunnerMessage]{},
-		IamClient:                  iamClient,
+		EventPublisher:           eventPublisher,
+		Database:                 db,
+		Logger:                   zap.L(),
+		ControlPlaneClient:       cpClient,
+		RunnerTokenSalt:          cfg.RunnerTokenSalt,
+		DeploymentCompletedHooks: &completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]{MaximumWaitersPerHandle: completionhooks.MaximumWaitersPerDeploymentHandler},
+		Vault:                    vlt,
+		OidcIssuerUrl:            cfg.OidcIssuerUrl,
+		IamClient:                iamClient,
 	}
 	echo, err := hecho.DefaultEchoServerWithValidation(&hecho.ValidatedServerConfig{
 		AppName:          path.Base(buildInfo.Main.Path),
@@ -230,7 +247,7 @@ func main() {
 	defer bgCancel()
 	go func() {
 		zap.L().Info("Starting scheduled flush of pending messages")
-		reliableoutbox.ScheduledFlushPendingMessages(bgCtx, server.Database.AsReliableOutboxStore(), publisher, reliableoutbox.DefaultScheduledFlushPeriodFunc)
+		reliableoutbox.ScheduledFlushPendingMessages(bgCtx, server.Database.AsReliableOutboxStore(), eventPublisher, reliableoutbox.DefaultScheduledFlushPeriodFunc)
 		zap.L().Info("Stopped scheduled flush of pending messages")
 	}()
 
@@ -251,34 +268,15 @@ func main() {
 		}
 	}()
 
-	// This cache is used by hrabbitmq library for messages de-duplication
-	queueCache := expirable.NewLRU[string, int32](rabbitmqCacheSize, nil, rabbitmqCacheTtl)
-
-	// Set up the delay queues which expire the messages after the N seconds delays and then sends the message back to the common exchange
-	if err := delayqueues.SetupStandardDelayConsumers(conn, zap.L().With(zap.String("consumer", "delay"))); err != nil {
-		zap.L().Fatal("Failed to setup delay queues", zap.Error(err))
-	}
-
-	// Set up the dead letter queue and consumer which pushes the messages onto the delay queues and exponential backoff.
-	dlc, err := delayqueues.SetupStandardDeadLetterConsumer(conn, zap.L().With(zap.String("consumer", "dead-letters")), publisher, queueCache)
-	if err != nil {
-		zap.L().Fatal("Failed to setup dead letter queue", zap.Error(err))
-	}
-	defer func() {
-		zap.L().Info("Shutting down dead letter queue consumer")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		dlc.CloseWithContext(ctx)
-		zap.L().Info("Dead letter queue consumer shutdown")
-	}()
-
-	storageClient, err := storage.NewStorageClient(ctx, cfg.RunnerLogsBucketEndpoint, cfg.RunnerLogsBucketCreds, server.Logger)
-	if err != nil {
-		zap.L().Fatal("Failed to create storage client", zap.Error(err))
-	}
-
 	server.RunnerLogsReader = func(ctx context.Context, filename string) (io.ReadCloser, error) {
-		return storageClient.GetReader(ctx, cfg.RunnerLogsBucket, filename)
+		reader, err := runnerLogsStore.Get(ctx, filename)
+		if errors.Is(err, jetstream.ErrObjectNotFound) {
+			return nil, api.ErrRunnerLogsNotFound
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to read runner logs from NATS Object Store")
+		}
+		return reader, nil
 	}
 
 	var oidcProvider oidc.Provider
@@ -287,45 +285,42 @@ func main() {
 	}
 
 	wrk := &worker.Worker{
-		RabbitConn: conn, RabbitPublisher: publisher, DB: db,
-		Logger: zap.L().Named("worker"), ControlPlaneClient: cpClient,
-		VaultClient:               vlt,
-		RunnerTokenSalt:           cfg.RunnerTokenSalt,
-		RunnerImage:               cfg.RunnerImage,
-		ExternalDataplaneUrl:      cfg.ExternalDataplaneUrl,
-		OidcProvider:              oidcProvider,
-		HttpClient:                http.DefaultClient,
-		Cache:                     queueCache,
-		InternalDataplaneHostname: cfg.InternalDataplaneHostname,
-		RunnerLogsSignedUrlGenerator: func(ctx context.Context, deploymentUuid, encryptedLogsRecipient string) (string, error) {
-			if encryptedLogsRecipient == "" {
-				return "", nil
-			}
-			return storageClient.GetPresignedURL(ctx, cfg.RunnerLogsBucket, deploymentUuid, cfg.RunnerLogsSignedUrlExpirationTime)
+		NATSConnection:               natsConnection,
+		JetStream:                    js,
+		DLQPublisher:                 dlqPublisher,
+		EventPublisher:               eventPublisher,
+		RemoteRunnerCommandPublisher: &runners.NATSRemoteRunnerCommandPublisher{Publisher: runnerCommandPublisher},
+		DB:                           db,
+		Logger:                       zap.L().Named("worker"),
+		ControlPlaneClient:           cpClient,
+		VaultClient:                  vlt,
+		RunnerImage:                  cfg.RunnerImage,
+		OidcProvider:                 oidcProvider,
+		HTTPClient:                   http.DefaultClient,
+		RunnerCommandTTL:             cfg.RunnerCommandTTL,
+		RunnerNATSConfiguration: runners.RunnerNATSConfiguration{
+			URL: cfg.RunnerNATSURL, Token: cfg.RunnerNATSToken,
 		},
+		RunnerBundleStore: runnerBundlesStore,
 		RunnerLogsDeleter: func(ctx context.Context, envUuid string) error {
 			g, gctx := errgroup.WithContext(ctx)
 			g.SetLimit(concurrentLogDeletes)
-
-			it := storageClient.ListObjects(gctx, cfg.RunnerLogsBucket, envUuid+"/")
-			for {
-				objectName, err := it.Next()
-				if err == io.EOF {
-					break
+			objects, err := runnerLogsStore.List(gctx)
+			if err != nil && !errors.Is(err, jetstream.ErrNoObjectsFound) {
+				return errors.Wrap(err, "failed to list NATS runner log objects for deletion")
+			}
+			for _, object := range objects {
+				if strings.HasPrefix(object.Name, envUuid+"/") {
+					objectName := object.Name
+					g.Go(func() error { return runnerLogsStore.Delete(gctx, objectName) })
 				}
-				if err != nil {
-					return errors.Wrap(err, "failed to list runner logs objects for deletion")
-				}
-				g.Go(func() error {
-					return storageClient.DeleteObject(gctx, cfg.RunnerLogsBucket, objectName)
-				})
 			}
 			return g.Wait()
 		},
 		KubernetesRunnerPodSchedulingDelay: cfg.KubernetesRunnerPodSchedulingDelay,
 		MetadataOutputKey:                  cfg.MetadataOutputKey,
 	}
-	wrkc, err := wrk.BuildMainConsumer()
+	wrkc, err := wrk.BuildMainConsumer(bgCtx)
 	if err != nil {
 		zap.L().Fatal("failed to setup main consumer", zap.Error(err))
 	}
@@ -333,20 +328,44 @@ func main() {
 		zap.L().Info("Shutting down main consumer")
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		wrkc.CloseWithContext(ctx)
+		if err := wrkc.Close(ctx); err != nil {
+			zap.L().Error("failed to close main consumer", zap.Error(err))
+		}
 		zap.L().Info("Main consumer shutdown")
 	}()
 
-	chc, err := wrk.BuildCompletionsConsumer(server.DeploymentCompletedHooks)
+	resultsConsumer, err := wrk.BuildRunnerResultsConsumer(bgCtx, &server)
 	if err != nil {
-		zap.L().Fatal("failed to setup completions consumer", zap.Error(err))
+		zap.L().Fatal("failed to setup runner results consumer", zap.Error(err))
 	}
 	defer func() {
-		zap.L().Info("Shutting down completions consumer")
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		chc.CloseWithContext(ctx)
-		zap.L().Info("completions consumer shutdown")
+		if err := resultsConsumer.Close(ctx); err != nil {
+			zap.L().Error("failed to close runner results consumer", zap.Error(err))
+		}
+	}()
+
+	statusConsumer, err := wrk.BuildRunnerStatusConsumer(bgCtx)
+	if err != nil {
+		zap.L().Fatal("failed to setup runner status consumer", zap.Error(err))
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := statusConsumer.Close(ctx); err != nil {
+			zap.L().Error("failed to close runner status consumer", zap.Error(err))
+		}
+	}()
+
+	completionSubscription, err := wrk.BuildCompletionsSubscription(server.DeploymentCompletedHooks)
+	if err != nil {
+		zap.L().Fatal("failed to setup deployment completion subscription", zap.Error(err))
+	}
+	defer func() {
+		if err := completionSubscription.Drain(); err != nil {
+			zap.L().Error("failed to drain deployment completion subscription", zap.Error(err))
+		}
 	}()
 
 	errChan := make(chan error)
@@ -363,23 +382,23 @@ func main() {
 	}()
 
 	go func() {
-		zap.L().Info("Starting dead letter queue consumer")
-		if err := dlc.Run(); err != nil && !errors.Is(err, context.Canceled) {
-			errChan <- errors.Wrap(err, "failed to run dead letter queue consumer")
-		}
-	}()
-
-	go func() {
 		zap.L().Info("Starting worker consumer")
-		if err := wrkc.Run(); err != nil && !errors.Is(err, context.Canceled) {
+		if err := wrkc.Run(bgCtx); err != nil && !errors.Is(err, context.Canceled) {
 			errChan <- errors.Wrap(err, "failed to run main queue consumer")
 		}
 	}()
 
 	go func() {
-		zap.L().Info("Starting completions consumer")
-		if err := chc.Run(); err != nil && !errors.Is(err, context.Canceled) {
-			errChan <- errors.Wrap(err, "failed to run completions queue consumer")
+		zap.L().Info("Starting runner results consumer")
+		if err := resultsConsumer.Run(bgCtx); err != nil && !errors.Is(err, context.Canceled) {
+			errChan <- errors.Wrap(err, "failed to run runner results consumer")
+		}
+	}()
+
+	go func() {
+		zap.L().Info("Starting runner status consumer")
+		if err := statusConsumer.Run(bgCtx); err != nil && !errors.Is(err, context.Canceled) {
+			errChan <- errors.Wrap(err, "failed to run runner status consumer")
 		}
 	}()
 

@@ -18,6 +18,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/mocks/mockecs"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 )
 
 type TemporaryAuthProviderFunc func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error)
@@ -44,10 +45,8 @@ func Test_full_nominal(t *testing.T) {
 		},
 	})
 	r := &ecsRunnerInstance{
-		RunnerTokenSalt:      "salty",
-		RunnerImage:          "my-image",
-		ExternalDataplaneUrl: "some-url",
-		RunnerLogsSignedUrl:  "some-signed-url",
+		RunnerImage:       "my-image",
+		NATSConfiguration: runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
 
 		TemporaryAuthProvider: TemporaryAuthProviderFunc(func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error) {
 			return &aws.AWSCredentials{
@@ -100,11 +99,11 @@ func Test_full_nominal(t *testing.T) {
 						{Name: ref.Ref("ORG_ID"), Value: ref.Ref("my-org")},
 						{Name: ref.Ref("DEPLOYMENT_ID"), Value: ref.Ref("00000000-0000-0000-0000-000000000000")},
 						{Name: ref.Ref("MODE"), Value: ref.Ref("plan_only")},
-						{Name: ref.Ref("TOKEN"), Value: ref.Ref("gTTvt7GCPbVpz5fEWouA0Qn6F1trRpac39AgbVXgiOQ")},
-						{Name: ref.Ref("PLATFORM_ORCHESTRATOR_BASE_URL"), Value: ref.Ref("some-url")},
-						{Name: ref.Ref("PLATFORM_ORCHESTRATOR_API_PREFIX"), Value: ref.Ref("some-url")},
-						{Name: ref.Ref("LOGS_URL"), Value: ref.Ref("some-signed-url")},
 						{Name: ref.Ref("LOG_LEVEL"), Value: ref.Ref("info")},
+						{Name: ref.Ref("NATS_URL"), Value: ref.Ref("nats://broker:4222")},
+						{Name: ref.Ref("NATS_TOKEN"), Value: ref.Ref("runner-token")},
+						{Name: ref.Ref("NATS_BUNDLE_BUCKET"), Value: ref.Ref("PO_RUNNER_BUNDLES")},
+						{Name: ref.Ref("NATS_BUNDLE_KEY"), Value: ref.Ref("my-org/00000000-0000-0000-0000-000000000000")},
 						{Name: ref.Ref("A"), Value: ref.Ref("B")},
 					},
 					Secrets: []types.Secret{{Name: ref.Ref("B"), ValueFrom: ref.Ref("some-arn")}},
@@ -383,10 +382,7 @@ func Test_full_nominal(t *testing.T) {
 
 		// Create ecsRunnerInstance with default image that should be overridden
 		r := &ecsRunnerInstance{
-			RunnerTokenSalt:      "salty",
-			RunnerImage:          "default-image", // This should be ignored when custom image is provided
-			ExternalDataplaneUrl: "some-url",
-			RunnerLogsSignedUrl:  "some-signed-url",
+			RunnerImage: "default-image", // This should be ignored when custom image is provided
 			TemporaryAuthProvider: TemporaryAuthProviderFunc(
 				func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error) {
 					return &aws.AWSCredentials{
@@ -470,10 +466,7 @@ func Test_full_nominal(t *testing.T) {
 		})
 
 		r := &ecsRunnerInstance{
-			RunnerTokenSalt:      "salty",
-			RunnerImage:          defaultImage, // This should be used when no custom image is provided
-			ExternalDataplaneUrl: "some-url",
-			RunnerLogsSignedUrl:  "some-signed-url",
+			RunnerImage: defaultImage, // This should be used when no custom image is provided
 			TemporaryAuthProvider: TemporaryAuthProviderFunc(func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error) {
 				return &aws.AWSCredentials{
 					AccessKeyID:     "foo",

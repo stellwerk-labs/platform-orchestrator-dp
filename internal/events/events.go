@@ -3,10 +3,8 @@ package events
 import (
 	"time"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
-
-const DefaultExchange = "platform-orchestrator-default"
 
 type CloudEvent[e any] struct {
 	SpecVersion CloudEventSpecVersion1 `json:"specversion"`

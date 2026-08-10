@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"go.uber.org/zap"
 
@@ -42,7 +42,7 @@ func NewDatabaser(ctx context.Context, logger *zap.Logger, connStr string) (Data
 	goose.SetLogger(&gooseZapLogger{SugaredLogger: logger.Named("goose").Sugar()})
 	goose.SetBaseFS(embedMigrations)
 	goose.SetVerbose(logger.Level() <= zap.DebugLevel)
-	goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardreliableoutbox.MigrateUp01, hstandardreliableoutbox.MigrateDown01)
+	goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardoutbox.MigrateUp01, hstandardoutbox.MigrateDown01)
 
 	if inner, err := hpostgresconnect.InitDatabase(ctx, &hpostgresconnect.Config{
 		Logger:  logger,
@@ -64,8 +64,8 @@ type Databaser interface {
 	UpdateMetadataKey(ctx context.Context, optionalTx Tx, orgId string, key *MetadataKey) error
 	DeleteMetadataKey(ctx context.Context, optionalTx Tx, orgId string, keyName string) error
 
-	AsReliableOutboxStore() reliableoutbox.Store[*hstandardreliableoutbox.PendingEventMessage]
-	InsertPendingEventMessages(ctx context.Context, optionalTx Tx, messages []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error)
+	AsReliableOutboxStore() reliableoutbox.Store[*hstandardoutbox.PendingEventMessage]
+	InsertPendingEventMessages(ctx context.Context, optionalTx Tx, messages []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error)
 	Close() error
 
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (TxWithCommit, error)
@@ -82,6 +82,7 @@ type Databaser interface {
 	DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error)
 	ListLastDeploymentsByNodeProperties(ctx context.Context, optionalTx Tx, orgId string, pageToken string, perPage int, params ListLastDeploymentsByNodePropertiesParams) ([]DeploymentSummary, string, error)
 	CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error
+	TryRecordRunnerEvent(ctx context.Context, optionalTx Tx, eventID, orgID, runnerID string, deploymentID uuid.UUID, eventType string) (bool, error)
 
 	InitActiveResourcesFromGraph(ctx context.Context, tx Tx, deploymentEnvUuid, deploymentId uuid.UUID, graph *platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]) error
 	GetActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid uuid.UUID) ([]ResourceNode, error)
@@ -89,12 +90,12 @@ type Databaser interface {
 	BulkUpdateActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid, deploymentId uuid.UUID, params []UpdateResourceNodeParams) error
 }
 
-func (d *databaser) AsReliableOutboxStore() reliableoutbox.Store[*hstandardreliableoutbox.PendingEventMessage] {
-	return hstandardreliableoutbox.SqlContextAsReliableOutbox(d.DB)
+func (d *databaser) AsReliableOutboxStore() reliableoutbox.Store[*hstandardoutbox.PendingEventMessage] {
+	return hstandardoutbox.SQLContextAsReliableOutbox(d.DB)
 }
 
-func (d *databaser) InsertPendingEventMessages(ctx context.Context, optionalTx Tx, messages []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
-	return hstandardreliableoutbox.InsertPendingEventMessages(ctx, d.txOrDb(optionalTx), messages)
+func (d *databaser) InsertPendingEventMessages(ctx context.Context, optionalTx Tx, messages []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
+	return hstandardoutbox.InsertPendingEventMessages(ctx, d.txOrDb(optionalTx), messages)
 }
 
 type Tx interface {

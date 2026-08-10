@@ -15,15 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/storage"
 	"filippo.io/age"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hecho"
 	"github.com/stellwerk-labs/golib/herrors"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/errcodes"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
@@ -45,10 +43,47 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 const sampleLogs = "test log content"
+const orgId = "test-org"
+
+func TestApplyRunnerErrorRecordsAndFailsDeploymentAtomically(t *testing.T) {
+	_, server, finish := MockServer(t)
+	defer finish()
+	database := server.Database.(*mockmodel.MockDatabaser)
+	deploymentID := uuid.New()
+	deployment := &model.DeploymentSummary{Id: deploymentID, OrgId: orgId, RunnerId: "runner-1", Status: model.DeploymentStatusExecuting}
+	database.EXPECT().GetDeployment(gomock.Any(), gomock.Any(), orgId, deploymentID, model.GetModeForUpdate).
+		Return(deployment, nil, nil, nil, nil)
+	database.EXPECT().TryRecordRunnerEvent(gomock.Any(), gomock.Any(), "terminal-event", orgId, "runner-1", deploymentID, "runner-error").Return(true, nil)
+	database.EXPECT().UpdateDeploymentStatusAndOutputs(gomock.Any(), gomock.Any(), deploymentID, gomock.Cond(func(parameters model.UpdateDeploymentStatusAndOutputsParams) bool {
+		return parameters.Status == model.DeploymentStatusFailed && parameters.StatusMessage == "command expired before execution"
+	})).Return(deployment, nil)
+	database.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Any(), deployment).Return(nil)
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
+	database.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ model.Tx, messages []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
+		store.Put(messages)
+		return messages, nil
+	})
+	database.EXPECT().AsReliableOutboxStore().Return(store)
+
+	require.NoError(t, server.ApplyRunnerError(t.Context(), orgId, "runner-1", deploymentID, "terminal-event", "COMMAND_EXPIRED", "command expired before execution"))
+}
+
+func TestApplyRunnerErrorDuplicateIsNoOp(t *testing.T) {
+	_, server, finish := MockServer(t)
+	defer finish()
+	database := server.Database.(*mockmodel.MockDatabaser)
+	deploymentID := uuid.New()
+	deployment := &model.DeploymentSummary{Id: deploymentID, OrgId: orgId, RunnerId: "runner-1", Status: model.DeploymentStatusExecuting}
+	database.EXPECT().GetDeployment(gomock.Any(), gomock.Any(), orgId, deploymentID, model.GetModeForUpdate).
+		Return(deployment, nil, nil, nil, nil)
+	database.EXPECT().TryRecordRunnerEvent(gomock.Any(), gomock.Any(), "terminal-event", orgId, "runner-1", deploymentID, "runner-error").Return(false, nil)
+
+	require.NoError(t, server.ApplyRunnerError(t.Context(), orgId, "runner-1", deploymentID, "terminal-event", "COMMAND_EXPIRED", "command expired before execution"))
+}
 
 func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 	_, s, fin := MockServer(t)
@@ -101,9 +136,9 @@ func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 		},
 	}, nil).Times(3)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(3)
@@ -365,8 +400,8 @@ output "two" {
 		}
 
 		// assert that we published the message
-		if rec := s.RabbitMqPublisher.(*hrabbitmq.NoOpPublisher).GetRecorded(); assert.Len(t, rec, 1) {
-			assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[0].Keys[0])
+		if rec := s.EventPublisher.(*hmessaging.RecordingPublisher).Messages(); assert.Len(t, rec, 1) {
+			assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[0].Subject)
 			assert.JSONEq(t, `{
   "specversion": "1.0",
   "type": "io.platform-orchestrator.deployment.created",
@@ -546,8 +581,8 @@ output "one" {
 			}
 
 			// assert that we published the message
-			if rec := s.RabbitMqPublisher.(*hrabbitmq.NoOpPublisher).GetRecorded(); assert.Len(t, rec, 2) {
-				assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[1].Keys[0])
+			if rec := s.EventPublisher.(*hmessaging.RecordingPublisher).Messages(); assert.Len(t, rec, 2) {
+				assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[1].Subject)
 				assert.JSONEq(t, `{
   "specversion": "1.0",
   "type": "io.platform-orchestrator.deployment.created",
@@ -708,9 +743,9 @@ func TestCreateDeployment_with_rollback(t *testing.T) {
 		JSON200:      &platformorchestratorcp.Runner{StateStorageConfiguration: ssc},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -850,9 +885,9 @@ func TestCreateDeployment_with_co_provisioned_resource(t *testing.T) {
 		JSON200:      &platformorchestratorcp.Runner{StateStorageConfiguration: ssc},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -1013,9 +1048,9 @@ func TestCreateDeployment_with_inline_module_code(t *testing.T) {
 		JSON200:      &platformorchestratorcp.Runner{StateStorageConfiguration: ssc},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -1136,9 +1171,9 @@ func TestCreateDeployment_with_deprecated_variables(t *testing.T) {
 		JSON200:      &platformorchestratorcp.Runner{StateStorageConfiguration: ssc},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -1271,9 +1306,9 @@ func TestCreateDeployment_success_graph_test_mode(t *testing.T) {
 		},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -1417,8 +1452,8 @@ output "one" {
 	}
 
 	// assert that we published the message
-	if rec := s.RabbitMqPublisher.(*hrabbitmq.NoOpPublisher).GetRecorded(); assert.Len(t, rec, 1) {
-		assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[0].Keys[0])
+	if rec := s.EventPublisher.(*hmessaging.RecordingPublisher).Messages(); assert.Len(t, rec, 1) {
+		assert.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentCreated), rec[0].Subject)
 		assert.JSONEq(t, `{
   "specversion": "1.0",
   "type": "io.platform-orchestrator.deployment.created",
@@ -1730,9 +1765,9 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 		JSON200:      &platformorchestratorcp.Runner{StateStorageConfiguration: ssc},
 	}, nil).Times(1)
 
-	store := new(reliableoutbox.InMemoryStorage[*hstandardreliableoutbox.PendingEventMessage])
+	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])
 	mdb.EXPECT().InsertPendingEventMessages(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardreliableoutbox.PendingEventMessage) ([]*hstandardreliableoutbox.PendingEventMessage, error) {
+		DoAndReturn(func(_ context.Context, _ model.Tx, m []*hstandardoutbox.PendingEventMessage) ([]*hstandardoutbox.PendingEventMessage, error) {
 			store.Put(m)
 			return m, nil
 		}).Times(1)
@@ -2468,10 +2503,8 @@ func TestGetDeploymentLogs_logs_not_found(t *testing.T) {
 
 	deploymentId := uuid.New()
 	s.RunnerLogsReader = func(ctx context.Context, filename string) (io.ReadCloser, error) {
-		assert.Condition(t, func() bool {
-			return filename == deploymentEnvUuid.String()+"/"+deploymentId.String() || filename == "my-org/"+deploymentId.String()
-		}, "filename is not correct")
-		return nil, storage.ErrObjectNotExist
+		assert.Equal(t, deploymentEnvUuid.String()+"/"+deploymentId.String(), filename)
+		return nil, ErrRunnerLogsNotFound
 	}
 
 	ctx := context.WithValue(t.Context(), hecho.ContextKeyUserID, userid.InternalSystemUuid.String())
@@ -2486,46 +2519,6 @@ func TestGetDeploymentLogs_logs_not_found(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.IsTypef(t, GetDeploymentLogs404JSONResponse{}, r, "%+v", r)
-}
-
-func TestGetDeploymentLogs_logs_are_stored_in_deprecated_location(t *testing.T) {
-	_, s, fin := MockServer(t)
-	defer fin()
-
-	deploymentEnvUuid := uuid.New()
-
-	id, err := age.GenerateX25519Identity()
-	require.NoError(t, err)
-
-	deploymentId := uuid.New()
-	s.RunnerLogsReader = func(ctx context.Context, filename string) (io.ReadCloser, error) {
-		if filename == deploymentEnvUuid.String()+"/"+deploymentId.String() {
-			return nil, storage.ErrObjectNotExist
-		} else if filename == "my-org/"+deploymentId.String() {
-			var encryptedData = &bytes.Buffer{}
-			w, err := age.Encrypt(encryptedData, id.Recipient())
-			require.NoError(t, err)
-			_, err = w.Write([]byte(sampleLogs))
-			require.NoError(t, err)
-			require.NoError(t, w.Close())
-			return io.NopCloser(strings.NewReader(base64.StdEncoding.EncodeToString(encryptedData.Bytes()))), nil
-		}
-		assert.Fail(t, "filename is not correct", filename)
-		return nil, errors.New("unexpected filename")
-	}
-
-	ctx := context.WithValue(t.Context(), hecho.ContextKeyUserID, userid.InternalSystemUuid.String())
-
-	mdb := s.Database.(*mockmodel.MockDatabaser)
-	mdb.EXPECT().GetDeployment(gomock.Any(), gomock.Any(), "my-org", gomock.Any(), model.GetModeDefault).
-		Return(&model.DeploymentSummary{Id: deploymentId, DeploymentEnvUuid: deploymentEnvUuid}, nil, nil, nil, nil)
-
-	r, err := s.GetDeploymentLogs(ctx, GetDeploymentLogsRequestObject{
-		OrgId:        "my-org",
-		DeploymentId: deploymentId,
-	})
-	require.NoError(t, err)
-	require.IsTypef(t, GetDeploymentLogs200TextResponse{}, r, "%+v", r)
 }
 
 func TestGetDeploymentLogs_no_encryption_key(t *testing.T) {

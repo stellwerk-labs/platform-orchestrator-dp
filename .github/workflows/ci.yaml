@@ -67,6 +67,10 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CP_IMAGE: ghcr.io/stellwerk-labs/platform-orchestrator-cp:nats-candidate
+      IAM_IMAGE: ghcr.io/stellwerk-labs/platform-orchestrator-iam:nats-candidate
+      RUNNER_IMAGE: ghcr.io/stellwerk-labs/platform-orchestrator-runner:nats-candidate
     permissions:
       contents: read
       id-token: write

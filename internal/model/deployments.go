@@ -18,7 +18,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 type DeploymentMode string

@@ -13,13 +13,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	cperrors "github.com/stellwerk-labs/platform-orchestrator-cp/shared/errcodes"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"go.uber.org/zap"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -27,7 +26,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 // convertDpManifestToGraphManifest converts the deployment manifest from the API into the graph used by the platformorchestratorgraph
@@ -73,7 +72,7 @@ func CreateDeployment(
 	encryptedOutputsRecipient, encryptedLogsRecipient, idempotencyKey *string, dryRun bool, runnerLogLevel *DeploymentCreateBodyRunnerLogLevel,
 	cp platformorchestratorcp.ClientWithResponsesInterface,
 	db model.Databaser, tx model.Tx,
-) (*model.DeploymentSummary, []*hstandardreliableoutbox.PendingEventMessage, *DeploymentDiff, error) {
+) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
 	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
 		return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("environment is in status '%s'", env.Status))
 	}
@@ -338,12 +337,11 @@ func CreateDeployment(
 		}
 	}
 
-	msg := &hstandardreliableoutbox.PendingEventMessage{
-		Exchange:   events.DefaultExchange,
-		RoutingKey: string(genevents.IoPlatformOrchestratorDeploymentCreated),
-		Payload:    model.ConvertDeploymentToEventPayload(d),
+	msg := &hstandardoutbox.PendingEventMessage{
+		Subject: string(genevents.IoPlatformOrchestratorDeploymentCreated),
+		Payload: model.ConvertDeploymentToEventPayload(d),
 	}
-	messages, err := db.InsertPendingEventMessages(ctx, tx, []*hstandardreliableoutbox.PendingEventMessage{msg})
+	messages, err := db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{msg})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to insert pending event messages")
 	}

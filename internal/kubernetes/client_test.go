@@ -32,9 +32,6 @@ const (
 	testEnvId        = "test-env"
 	testRunnerId     = "test-runner"
 	testRunnerImage  = "test-runner:latest"
-	testDataplaneUrl = "http://test-dataplane"
-	testToken        = "test-token"
-	testLogsUrl      = "http://test-logs"
 )
 
 func createTestDeploymentSummary() *model.DeploymentSummary {
@@ -117,7 +114,7 @@ func TestKubernetesClient_CreateJob_Success(t *testing.T) {
 	deploymentSummary := createTestDeploymentSummary()
 	jobConfig := createTestJobConfig()
 
-	job, err := client.CreateJob(context.Background(), jobConfig, testDataplaneUrl, testRunnerImage, testToken, testLogsUrl, "", deploymentSummary)
+	job, err := client.CreateJob(context.Background(), jobConfig, testRunnerImage, "", deploymentSummary)
 	require.NoError(t, err)
 	assert.NotNil(t, job)
 	assert.Equal(t, deploymentSummary.Id.String(), job.Name)
@@ -139,7 +136,7 @@ func TestKubernetesClient_CreateJob_GetJobSpecError(t *testing.T) {
 		PodTemplate:    &map[string]interface{}{"invalid": "template"},
 	}
 
-	job, err := client.CreateJob(context.Background(), jobConfig, testDataplaneUrl, testRunnerImage, testToken, testLogsUrl, "", deploymentSummary)
+	job, err := client.CreateJob(context.Background(), jobConfig, testRunnerImage, "", deploymentSummary)
 	require.Error(t, err)
 	assert.Nil(t, job)
 	assert.Contains(t, err.Error(), "failed to get job spec")
@@ -157,7 +154,7 @@ func TestKubernetesClient_CreateJob_K8sCreateError(t *testing.T) {
 	deploymentSummary := createTestDeploymentSummary()
 	jobConfig := createTestJobConfig()
 
-	_, err := client.CreateJob(context.Background(), jobConfig, testDataplaneUrl, testRunnerImage, testToken, testLogsUrl, "", deploymentSummary)
+	_, err := client.CreateJob(context.Background(), jobConfig, testRunnerImage, "", deploymentSummary)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "simulated k8s create error")
 }

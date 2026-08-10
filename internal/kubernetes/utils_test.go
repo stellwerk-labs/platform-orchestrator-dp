@@ -6,6 +6,7 @@ import (
 
 	model "github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 
 	"github.com/google/uuid"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
@@ -13,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
-
-const runnerLogsBucketSignedUrl = "https://storage.googleapis.com/platform-orchestrator-runner-logs/token"
 
 func TestGetJobSpec_DefaultValues(t *testing.T) {
 	jobConfig := platformorchestratorcp.K8sRunnerJobConfig{
@@ -30,10 +29,7 @@ func TestGetJobSpec_DefaultValues(t *testing.T) {
 	spec, err := GetJobSpec(
 		context.Background(),
 		jobConfig,
-		"https://external-dp",
 		"runner-image:latest",
-		"token-abc",
-		runnerLogsBucketSignedUrl,
 		"",
 		d,
 	)
@@ -44,18 +40,15 @@ func TestGetJobSpec_DefaultValues(t *testing.T) {
 	assert.Equal(t, "runner-image:latest", container.Image, "container image mismatch")
 	assert.Equal(t, "ORG_ID", container.Env[0].Name)
 	assert.Equal(t, "org-123", container.Env[0].Value)
-	assert.Equal(t, "TOKEN", container.Env[3].Name)
-	assert.Equal(t, "token-abc", container.Env[3].Value)
-	assert.Equal(t, "ENCRYPTING_KEY", container.Env[4].Name)
-	assert.Equal(t, "outputs-key", container.Env[4].Value)
-	assert.Equal(t, "ENCRYPTING_LOGS_KEY", container.Env[5].Name)
-	assert.Equal(t, "logs-key", container.Env[5].Value)
-	assert.Equal(t, "PLATFORM_ORCHESTRATOR_BASE_URL", container.Env[6].Name)
-	assert.Equal(t, "https://external-dp", container.Env[6].Value)
-	assert.Equal(t, "PLATFORM_ORCHESTRATOR_API_PREFIX", container.Env[7].Name)
-	assert.Equal(t, "https://external-dp", container.Env[7].Value)
-	assert.Equal(t, "LOGS_URL", container.Env[8].Name)
-	assert.Equal(t, runnerLogsBucketSignedUrl, container.Env[8].Value)
+	environment := map[string]string{}
+	for _, env := range container.Env {
+		environment[env.Name] = env.Value
+	}
+	assert.Equal(t, "outputs-key", environment["ENCRYPTING_KEY"])
+	assert.Equal(t, "logs-key", environment["ENCRYPTING_LOGS_KEY"])
+	for _, obsolete := range []string{"TOKEN", "LOGS_URL", "PLATFORM_ORCHESTRATOR_BASE_URL", "PLATFORM_ORCHESTRATOR_API_PREFIX"} {
+		assert.NotContains(t, environment, obsolete)
+	}
 }
 
 func TestGetJobSpec_WithMetadataOutputKey(t *testing.T) {
@@ -70,10 +63,7 @@ func TestGetJobSpec_WithMetadataOutputKey(t *testing.T) {
 	spec, err := GetJobSpec(
 		context.Background(),
 		jobConfig,
-		"https://external-dp",
 		"runner-image:latest",
-		"token-abc",
-		"",
 		"my-metadata-key",
 		d,
 	)
@@ -84,6 +74,32 @@ func TestGetJobSpec_WithMetadataOutputKey(t *testing.T) {
 		envVars[e.Name] = e.Value
 	}
 	assert.Equal(t, "my-metadata-key", envVars["METADATA_KEY"])
+}
+
+func TestGetJobSpec_WithNATSConfiguration(t *testing.T) {
+	deployment := &model.DeploymentSummary{
+		OrgId: "org-123",
+		Id:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Mode:  model.DeploymentModeDeploy,
+	}
+	spec, err := GetJobSpec(
+		context.Background(),
+		platformorchestratorcp.K8sRunnerJobConfig{ServiceAccount: "test-sa"},
+		"runner-image:latest",
+		"",
+		deployment,
+		runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
+	)
+	require.NoError(t, err)
+
+	environment := map[string]string{}
+	for _, env := range spec.Template.Spec.Containers[0].Env {
+		environment[env.Name] = env.Value
+	}
+	assert.Equal(t, "nats://broker:4222", environment["NATS_URL"])
+	assert.Equal(t, "runner-token", environment["NATS_TOKEN"])
+	assert.Equal(t, "PO_RUNNER_BUNDLES", environment["NATS_BUNDLE_BUCKET"])
+	assert.Equal(t, "org-123/11111111-1111-1111-1111-111111111111", environment["NATS_BUNDLE_KEY"])
 }
 
 func TestGetJobSpec_OmitsMetadataKeyWhenEmpty(t *testing.T) {
@@ -98,10 +114,7 @@ func TestGetJobSpec_OmitsMetadataKeyWhenEmpty(t *testing.T) {
 	spec, err := GetJobSpec(
 		context.Background(),
 		jobConfig,
-		"https://external-dp",
 		"runner-image:latest",
-		"token-abc",
-		"",
 		"",
 		d,
 	)
@@ -131,19 +144,18 @@ func TestGetJobSpec_WithPodTemplatePatch(t *testing.T) {
 	spec, err := GetJobSpec(
 		context.Background(),
 		jobConfig,
-		"https://external-dp",
 		"runner-image:latest",
-		"token-abc",
-		"",
 		"",
 		d,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, corev1.RestartPolicyAlways, spec.Template.Spec.RestartPolicy)
 
-	container := spec.Template.Spec.Containers[0]
-	assert.Equal(t, "LOGS_URL", container.Env[8].Name)
-	assert.Empty(t, container.Env[8].Value)
+	environment := map[string]string{}
+	for _, env := range spec.Template.Spec.Containers[0].Env {
+		environment[env.Name] = env.Value
+	}
+	assert.NotContains(t, environment, "LOGS_URL")
 }
 
 func TestGetJobSpec_InvalidPodTemplatePatch(t *testing.T) {
@@ -165,10 +177,7 @@ func TestGetJobSpec_InvalidPodTemplatePatch(t *testing.T) {
 	_, err := GetJobSpec(
 		context.Background(),
 		jobConfig,
-		"https://external-dp",
 		"runner-image:latest",
-		"token-abc",
-		runnerLogsBucketSignedUrl,
 		"",
 		d,
 	)

@@ -15,7 +15,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
@@ -23,44 +23,42 @@ import (
 
 // KubernetesRunner handles Kubernetes and GKE runners
 type KubernetesRunner struct {
-	k8sClusterClientFactory   kubernetes.ClientFactory
-	vlt                       vault.VaultClientInterface
-	externalDataplaneUrl      string
-	runnerImage               string
-	runnerTokenSalt           string
-	metadataOutputKey         string
-	logger                    *zap.Logger
-	internalRunner            platformorchestratorcp.InternalRunner
-	deploymentSummary         *model.DeploymentSummary
-	runnerLogsBucketSignedUrl string
-	podSchedulingDelay        time.Duration
+	k8sClusterClientFactory kubernetes.ClientFactory
+	vlt                     vault.VaultClientInterface
+	runnerImage             string
+	metadataOutputKey       string
+	logger                  *zap.Logger
+	internalRunner          platformorchestratorcp.InternalRunner
+	deploymentSummary       *model.DeploymentSummary
+	podSchedulingDelay      time.Duration
+	natsConfiguration       runnercommon.NATSConfiguration
 }
 
 func NewKubernetesRunner(
 	k8sClusterClientFactory kubernetes.ClientFactory,
 	vlt vault.VaultClientInterface,
-	externalDataplaneUrl string,
 	runnerImage string,
-	runnerTokenSalt string,
 	metadataOutputKey string,
 	logger *zap.Logger,
 	internalRunner platformorchestratorcp.InternalRunner,
 	deploymentSummary *model.DeploymentSummary,
-	runnerLogsBucketSignedUrl string,
 	podSchedulingDelay time.Duration,
+	natsConfigurations ...runnercommon.NATSConfiguration,
 ) *KubernetesRunner {
+	var natsConfiguration runnercommon.NATSConfiguration
+	if len(natsConfigurations) > 0 {
+		natsConfiguration = natsConfigurations[0]
+	}
 	return &KubernetesRunner{
-		k8sClusterClientFactory:   k8sClusterClientFactory,
-		vlt:                       vlt,
-		externalDataplaneUrl:      externalDataplaneUrl,
-		runnerImage:               runnerImage,
-		runnerTokenSalt:           runnerTokenSalt,
-		metadataOutputKey:         metadataOutputKey,
-		logger:                    logger,
-		internalRunner:            internalRunner,
-		deploymentSummary:         deploymentSummary,
-		runnerLogsBucketSignedUrl: runnerLogsBucketSignedUrl,
-		podSchedulingDelay:        podSchedulingDelay,
+		k8sClusterClientFactory: k8sClusterClientFactory,
+		vlt:                     vlt,
+		runnerImage:             runnerImage,
+		metadataOutputKey:       metadataOutputKey,
+		logger:                  logger,
+		internalRunner:          internalRunner,
+		deploymentSummary:       deploymentSummary,
+		podSchedulingDelay:      podSchedulingDelay,
+		natsConfiguration:       natsConfiguration,
 	}
 }
 
@@ -75,9 +73,7 @@ func (k *KubernetesRunner) Start(ctx context.Context) error {
 		return errors.Wrap(err, "failed to obtain access to the runner cluster")
 	}
 
-	token := util.GenerateHashedRunnerToken(k.runnerTokenSalt, k.deploymentSummary.OrgId, k.deploymentSummary.Id.String())
-
-	job, err := k8sClient.CreateJob(ctx, jobCfg, k.externalDataplaneUrl, k.runnerImage, token, k.runnerLogsBucketSignedUrl, k.metadataOutputKey, k.deploymentSummary)
+	job, err := k8sClient.CreateJob(ctx, jobCfg, k.runnerImage, k.metadataOutputKey, k.deploymentSummary, k.natsConfiguration)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return usererror.NewUserErrorWithDetails("failed to run the job, a resource was not found, this can be caused by a misconfiguration of the runner", err)
@@ -176,7 +172,7 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 					message = "job has not started and the runner configuration does not allow to read job events and pods in the target namespace, please check the runner configuration"
 				}
 			} else {
-				message = strings.Join(warningEvents, "/n")
+				message = strings.Join(warningEvents, "\n")
 			}
 
 			return &RunnerStatus{

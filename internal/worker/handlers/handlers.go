@@ -3,20 +3,19 @@ package handlers
 import (
 	"context"
 
-	delayqueues "github.com/stellwerk-labs/golib/hrabbitmq/delayqueues/v2"
-	"github.com/wagslane/go-rabbitmq"
+	"github.com/stellwerk-labs/golib/hmessaging"
 	"go.uber.org/zap"
 )
 
 // A Handler is a thing which can handle a message and return a possible error if necessary. Handlers can be chained
 // together to create more complex request processing chains or wrapped in middleware to provide meta behaviors.
 type Handler interface {
-	Handle(ctx context.Context, logger *zap.Logger, d *rabbitmq.Delivery) error
+	Handle(ctx context.Context, logger *zap.Logger, d hmessaging.Delivery) error
 }
 
-type HandlerFunc delayqueues.HandlerFunc
+type HandlerFunc func(context.Context, *zap.Logger, hmessaging.Delivery) error
 
-func (f HandlerFunc) Handle(ctx context.Context, logger *zap.Logger, d *rabbitmq.Delivery) error {
+func (f HandlerFunc) Handle(ctx context.Context, logger *zap.Logger, d hmessaging.Delivery) error {
 	return f(ctx, logger, d)
 }
 

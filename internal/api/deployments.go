@@ -1,9 +1,7 @@
 package api
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/base64"
@@ -16,13 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/storage"
 	"filippo.io/age"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/golib/htelemetry"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
@@ -30,7 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/bundles"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -39,13 +36,11 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 const (
 	defaultPaginationSize = 100
-	headerMode            = 0644
-	headerDirectoryMode   = 0755
 
 	// Destroy is an internal mode - not documented on the API
 	Destroy DeploymentCreateBodyMode = "destroy"
@@ -314,7 +309,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		logger.Info("Created deployment")
 
 		rawManifest, _ := json.Marshal(request.Body.Manifest)
-		reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.RabbitMqPublisher, messages)
+		reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
 		return CreateDeployment201JSONResponse(apiDepFromModel(*dep, rawManifest)), nil
 	}
 }
@@ -438,34 +433,7 @@ func (s *Server) GetDeploymentBundle(ctx context.Context, request GetDeploymentB
 	ids.EnvId = deployment.EnvId
 	ids.RunnerId = deployment.RunnerId
 
-	graph, err := graphs.FromJson(bytes.NewReader(rawGraph))
-	if err != nil {
-		return nil, err
-	}
-
-	// We need to include the source code of any inline modules here within the bundle.
-	var inlineModules []platformorchestratorcp.InternalModuleCatalogueModule
-	versionsToGet := make([]string, 0)
-	for rc := range graph.DepthFirstIterate(platform_orchestrator_graph.DepthFirstIteratePreOrder) {
-		n := graph.Nodes[rc]
-		if n.ModuleConfiguration != nil && n.ModuleConfiguration.HasInlineSource {
-			versionsToGet = append(versionsToGet, fmt.Sprintf("%s@%s", n.ModuleConfiguration.DefinitionId, n.ModuleConfiguration.VersionId))
-		}
-	}
-	if len(versionsToGet) > 0 {
-		if r, err := s.ControlPlaneClient.GenerateInternalModuleCatalogueWithResponse(ctx, request.OrgId, deployment.ProjectId, deployment.EnvId, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
-			AreRulesIgnored:      true,
-			PinnedModuleVersions: versionsToGet,
-		}); err != nil {
-			return nil, errors.Wrap(err, "failed to generate module catalogue")
-		} else if r.StatusCode() != http.StatusOK {
-			return nil, errors.Errorf("unexpected status code %d when fetching module catalogue: %s", r.StatusCode(), string(r.Body))
-		} else {
-			inlineModules = r.JSON200.Modules
-		}
-	}
-
-	if archive, err := compressTofu(tofu, inlineModules); err != nil {
+	if archive, err := bundles.BuildForDeployment(ctx, s.ControlPlaneClient, request.OrgId, deployment, tofu, rawGraph); err != nil {
 		return nil, errors.Wrap(err, "failed to build bundle")
 	} else {
 		return GetDeploymentBundle200ApplicationxGzipResponse{Body: archive, ContentLength: int64(archive.Len())}, nil
@@ -660,31 +628,15 @@ func (s *Server) UpdateDeploymentResults(ctx context.Context, request UpdateDepl
 	} else {
 		middleware.SetAuthCheckedCtx(ctx)
 
-		if request.Body.Outputs != nil {
-			if _, err := io.Copy(io.Discard, base64.NewDecoder(base64.StdEncoding, strings.NewReader(*request.Body.Outputs))); err != nil {
-				return UpdateDeploymentResults400JSONResponse{N400BadRequestJSONResponse: Generate400Response("outputs were invalid base64, expected std encoding")}, nil
+		updateParams, err := s.deploymentResultUpdateParams(ctx, request.OrgId, request.DeploymentId, request.Body)
+		if err != nil {
+			if errors.Is(err, errRunnerOutputsInvalidBase64) {
+				return UpdateDeploymentResults400JSONResponse{N400BadRequestJSONResponse: Generate400Response(err.Error())}, nil
 			}
-		}
-		updateParams := model.UpdateDeploymentStatusAndOutputsParams{
-			Outputs: opt.OfRef(request.Body.Outputs),
+			return nil, err
 		}
 
-		if request.Body.Status == Success {
-			updateParams.Status = model.DeploymentStatusSucceeded
-		} else {
-			updateParams.Status = model.DeploymentStatusFailed
-			updateParams.StatusMessage = "runner failed without error details"
-			if request.Body.Error != nil {
-				// Try to enrich the error message with additional context
-				if enriched, err := enrichDeploymentError(ctx, s.Database, request.OrgId, request.DeploymentId, request.Body.Error.Error, request.Body.Error.Message); err != nil {
-					return nil, err
-				} else {
-					updateParams.StatusMessage = enriched
-				}
-			}
-		}
-
-		if _, err := s.commonUpdateDeploymentResults(ctx, logger, request, updateParams); err != nil {
+		if _, err := s.commonUpdateDeploymentResults(ctx, logger, request, updateParams, nil); err != nil {
 			if e, ok := model.IsErrNotFound(err); ok {
 				return UpdateDeploymentResults404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 			} else if e, ok := model.IsErrConflict(err); ok {
@@ -696,7 +648,112 @@ func (s *Server) UpdateDeploymentResults(ctx context.Context, request UpdateDepl
 	}
 }
 
-func (s *Server) commonUpdateDeploymentResults(ctx context.Context, logger *zap.Logger, request UpdateDeploymentResultsRequestObject, updateParams model.UpdateDeploymentStatusAndOutputsParams) (*model.DeploymentSummary, error) {
+var errRunnerOutputsInvalidBase64 = errors.New("outputs were invalid base64, expected std encoding")
+
+func (s *Server) deploymentResultUpdateParams(
+	ctx context.Context,
+	orgID string,
+	deploymentID uuid.UUID,
+	body *DeploymentResultsUpdateBody,
+) (model.UpdateDeploymentStatusAndOutputsParams, error) {
+	if body.Outputs != nil {
+		if _, err := io.Copy(io.Discard, base64.NewDecoder(base64.StdEncoding, strings.NewReader(*body.Outputs))); err != nil {
+			return model.UpdateDeploymentStatusAndOutputsParams{}, errRunnerOutputsInvalidBase64
+		}
+	}
+	updateParams := model.UpdateDeploymentStatusAndOutputsParams{Outputs: opt.OfRef(body.Outputs)}
+	if body.Status == Success {
+		updateParams.Status = model.DeploymentStatusSucceeded
+		return updateParams, nil
+	}
+
+	updateParams.Status = model.DeploymentStatusFailed
+	updateParams.StatusMessage = "runner failed without error details"
+	if body.Error != nil {
+		enriched, err := enrichDeploymentError(ctx, s.Database, orgID, deploymentID, body.Error.Error, body.Error.Message)
+		if err != nil {
+			return model.UpdateDeploymentStatusAndOutputsParams{}, err
+		}
+		updateParams.StatusMessage = enriched
+	}
+	return updateParams, nil
+}
+
+// ApplyRunnerDeploymentResult applies a durable NATS runner event. Duplicate
+// event IDs are acknowledged as success after the original transaction commits.
+func (s *Server) ApplyRunnerDeploymentResult(
+	ctx context.Context,
+	orgID string,
+	runnerID string,
+	deploymentID uuid.UUID,
+	eventID string,
+	body DeploymentResultsUpdateBody,
+) error {
+	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).With(
+		logging.ZapOrgId(orgID),
+		logging.ZapRunnerId(runnerID),
+		logging.ZapDeploymentId(deploymentID.String()),
+		zap.String("runner_event_id", eventID),
+	)
+	updateParams, err := s.deploymentResultUpdateParams(ctx, orgID, deploymentID, &body)
+	if err != nil {
+		return err
+	}
+	request := UpdateDeploymentResultsRequestObject{
+		OrgId:        orgID,
+		DeploymentId: deploymentID,
+		Body:         &body,
+	}
+	_, err = s.commonUpdateDeploymentResults(ctx, logger, request, updateParams, &RunnerEventMetadata{
+		EventID:  eventID,
+		RunnerID: runnerID,
+		Type:     "deployment-result",
+	})
+	return err
+}
+
+// ApplyRunnerError fails a deployment after the remote runner reports a
+// terminal command failure (for example, an expired buffered command).
+func (s *Server) ApplyRunnerError(
+	ctx context.Context,
+	orgID string,
+	runnerID string,
+	deploymentID uuid.UUID,
+	eventID string,
+	code string,
+	message string,
+) error {
+	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).With(
+		logging.ZapOrgId(orgID), logging.ZapRunnerId(runnerID),
+		logging.ZapDeploymentId(deploymentID.String()), zap.String("runner_event_id", eventID),
+	)
+	body := DeploymentResultsUpdateBody{
+		Status: Failure,
+		Error:  &Error{Error: code, Message: message},
+	}
+	_, err := s.commonUpdateDeploymentResults(ctx, logger, UpdateDeploymentResultsRequestObject{
+		OrgId: orgID, DeploymentId: deploymentID, Body: &body,
+	}, model.UpdateDeploymentStatusAndOutputsParams{
+		Status: model.DeploymentStatusFailed, StatusMessage: message,
+	}, &RunnerEventMetadata{EventID: eventID, RunnerID: runnerID, Type: "runner-error"})
+	return err
+}
+
+// RunnerEventMetadata identifies one at-least-once runner event. It is recorded
+// in the same transaction as its deployment update.
+type RunnerEventMetadata struct {
+	EventID  string
+	RunnerID string
+	Type     string
+}
+
+func (s *Server) commonUpdateDeploymentResults(
+	ctx context.Context,
+	logger *zap.Logger,
+	request UpdateDeploymentResultsRequestObject,
+	updateParams model.UpdateDeploymentStatusAndOutputsParams,
+	runnerEvent *RunnerEventMetadata,
+) (*model.DeploymentSummary, error) {
 	if tx, err := s.Database.BeginTx(ctx, nil); err != nil {
 		return nil, errors.Wrap(err, "failed to begin transaction")
 	} else {
@@ -706,9 +763,34 @@ func (s *Server) commonUpdateDeploymentResults(ctx context.Context, logger *zap.
 			}
 		}()
 
-		if dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, request.OrgId, request.DeploymentId, model.GetModeForUpdate); err != nil {
+		dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, request.OrgId, request.DeploymentId, model.GetModeForUpdate)
+		if err != nil {
 			return nil, errors.Wrap(err, "failed to get deployment")
-		} else if dep.CompletedAt.IsSet() {
+		} else if runnerEvent != nil && dep.RunnerId != runnerEvent.RunnerID {
+			return nil, model.NewErrConflict("runner event does not belong to the deployment runner")
+		} else if runnerEvent != nil {
+			inserted, err := s.Database.TryRecordRunnerEvent(
+				ctx,
+				tx,
+				runnerEvent.EventID,
+				request.OrgId,
+				runnerEvent.RunnerID,
+				request.DeploymentId,
+				runnerEvent.Type,
+			)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to record runner event")
+			}
+			if !inserted {
+				if err := tx.Commit(); err != nil {
+					return nil, errors.Wrap(err, "failed to commit duplicate runner event")
+				}
+				logger.Info("runner event already applied", zap.String("event_id", runnerEvent.EventID))
+				return dep, nil
+			}
+		}
+
+		if dep.CompletedAt.IsSet() {
 			return nil, model.NewErrConflict("deployment already completed")
 		} else {
 			ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)
@@ -756,12 +838,11 @@ func (s *Server) commonUpdateDeploymentResults(ctx context.Context, logger *zap.
 				}
 			}
 
-			msg := &hstandardreliableoutbox.PendingEventMessage{
-				Exchange:   events.DefaultExchange,
-				RoutingKey: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
-				Payload:    model.ConvertDeploymentToEventPayload(dep),
+			msg := &hstandardoutbox.PendingEventMessage{
+				Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
+				Payload: model.ConvertDeploymentToEventPayload(dep),
 			}
-			if messages, err := s.Database.InsertPendingEventMessages(ctx, tx, []*hstandardreliableoutbox.PendingEventMessage{msg}); err != nil {
+			if messages, err := s.Database.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{msg}); err != nil {
 				return nil, errors.Wrap(err, "failed to insert pending event messages")
 			} else if err := tx.Commit(); err != nil {
 				return nil, errors.Wrap(err, "failed to commit transaction")
@@ -775,7 +856,7 @@ func (s *Server) commonUpdateDeploymentResults(ctx context.Context, logger *zap.
 					zap.Int("tf_resources_changed", updateParams.Metrics.TfResourcesChanged),
 					zap.Int("tf_resources_removed", updateParams.Metrics.TfResourcesRemoved),
 				)
-				reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.RabbitMqPublisher, messages)
+				reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
 				return dep, nil
 			}
 		}
@@ -802,12 +883,8 @@ func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLog
 	}
 
 	logsReader, err := s.RunnerLogsReader(ctx, ds.DeploymentEnvUuid.String()+"/"+request.DeploymentId.String())
-	if errors.Is(err, storage.ErrObjectNotExist) {
-		// Try to read the logs from the deprecated location
-		logsReader, err = s.RunnerLogsReader(ctx, request.OrgId+"/"+request.DeploymentId.String())
-	}
 	if err != nil {
-		if errors.Is(err, storage.ErrObjectNotExist) {
+		if errors.Is(err, ErrRunnerLogsNotFound) {
 			return GetDeploymentLogs404JSONResponse{N404NotFoundJSONResponse: Generate404Response(fmt.Sprintf("logs for deployment %s not found", request.DeploymentId))}, nil
 		}
 		return nil, errors.Wrap(err, "failed to create log reader")
@@ -853,72 +930,6 @@ func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLog
 			ContentDisposition: fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId),
 		},
 	}, nil
-}
-
-func compressTofu(content []byte, inlineModules []platformorchestratorcp.InternalModuleCatalogueModule) (*bytes.Buffer, error) {
-	buf := new(bytes.Buffer)
-
-	// gzip writer
-	gw := gzip.NewWriter(buf)
-	defer func() {
-		_ = gw.Close()
-	}()
-
-	// archive writer
-	tw := tar.NewWriter(gw)
-	defer func() {
-		_ = tw.Close()
-	}()
-
-	header := &tar.Header{
-		Name:    "main.tf",
-		Size:    int64(len(content)),
-		Mode:    headerMode,
-		ModTime: time.Now(),
-	}
-
-	if err := tw.WriteHeader(header); err != nil {
-		return nil, errors.Wrap(err, "failed to write archive header")
-	}
-
-	if _, err := tw.Write(content); err != nil {
-		return nil, errors.Wrap(err, "failed to write archive content")
-	}
-
-	for _, m := range inlineModules {
-		dirName := fmt.Sprintf("modules/%s/%s", m.Id, m.VersionId)
-		dirHeader := &tar.Header{
-			Name:     dirName + "/",
-			Mode:     headerDirectoryMode,
-			ModTime:  time.Now(),
-			Typeflag: tar.TypeDir,
-		}
-		if err := tw.WriteHeader(dirHeader); err != nil {
-			return nil, errors.Wrapf(err, "failed to write directory header for %s", dirName)
-		}
-		// Write main.tf file inside the directory
-		fileHeader := &tar.Header{
-			Name:    dirName + "/main.tf",
-			Mode:    headerMode,
-			Size:    int64(len(*m.ModuleSourceCode)),
-			ModTime: time.Now(),
-		}
-		if err := tw.WriteHeader(fileHeader); err != nil {
-			return nil, errors.Wrapf(err, "failed to write file header for %s/main.tf", dirName)
-		}
-		if _, err := tw.Write([]byte(*m.ModuleSourceCode)); err != nil {
-			return nil, errors.Wrap(err, "failed to write archive content")
-		}
-	}
-
-	if err := tw.Close(); err != nil {
-		return nil, errors.Wrap(err, "failed to close archive writer")
-	}
-
-	if err := gw.Close(); err != nil {
-		return nil, errors.Wrap(err, "failed to close gzip writer")
-	}
-	return buf, nil
 }
 
 const waitForDeploymentPollTime = time.Second * 10
@@ -1068,7 +1079,7 @@ func (s *Server) InternalForceFailDeployment(ctx context.Context, request Intern
 		StatusMessage: "deployment was manually failed by an operator",
 	}
 
-	if dep, err := s.commonUpdateDeploymentResults(ctx, logger, updateRequest, updateParams); err != nil {
+	if dep, err := s.commonUpdateDeploymentResults(ctx, logger, updateRequest, updateParams, nil); err != nil {
 		if e, ok := model.IsErrNotFound(err); ok {
 			return InternalForceFailDeployment404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 		} else if e, ok := model.IsErrConflict(err); ok {

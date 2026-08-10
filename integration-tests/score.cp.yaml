@@ -7,7 +7,7 @@ service:
       port: 8080
 containers:
   platform-orchestrator-cp:
-    image: ghcr.io/stellwerk-labs/platform-orchestrator-cp:v1.0.1
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
     command: ["/opt/server/server"]
     livenessProbe:
       httpGet:
@@ -25,7 +25,7 @@ containers:
         cpu: "0.025"
         memory: 64Mi
     variables:
-      AMQP_CONNECTION_STRING: amqp://${resources.rabbitmq.username}:${resources.rabbitmq.password}@${resources.rabbitmq.host}:${resources.rabbitmq.port}/${resources.rabbitmq.vhost}
+      NATS_URL: ${resources.env.NATS_URL}
       DD_AGENT_HOST: $${pod.status.hostIP}
       DD_ENABLE: ${resources.env.DATADOG_ENABLED}
       DD_ENV: ${resources.env.DATADOG_ENV}
@@ -48,13 +48,6 @@ resources:
     type: service
   postgres:
     type: postgres
-  rabbitmq:
-    type: amqp
-    id: rabbitmq
-    metadata:
-      annotations:
-        # this annotation is for local compose testing where we want to expose the rabbitmq port so that our integration tests can call it
-        "compose.score.dev/publish-port": "5672"
   dns:
     type: dns
     id: api-dns

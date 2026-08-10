@@ -25,7 +25,6 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 )
 
 const (
@@ -66,12 +65,10 @@ var (
 type ecsRunnerInstance struct {
 	Runner                platformorchestratorcp.InternalRunner
 	TemporaryAuthProvider AwsTemporaryAuthProvider
-	ExternalDataplaneUrl  string
 	RunnerImage           string
-	RunnerTokenSalt       string
-	RunnerLogsSignedUrl   string
 	MetadataOutputKey     string
 	Deployment            *model.DeploymentSummary
+	NATSConfiguration     runnercommon.NATSConfiguration
 
 	overrideClient ecsClientSubset
 }
@@ -159,7 +156,6 @@ func (e *ecsRunnerInstance) Start(ctx context.Context) error {
 
 	runnerImage := e.getRunnerImage(runCfg)
 
-	runnerToken := util.GenerateHashedRunnerToken(e.RunnerTokenSalt, e.Deployment.OrgId, e.Deployment.Id.String())
 	td, err := ecsClient.RegisterTaskDefinition(ctx, &ecs.RegisterTaskDefinitionInput{
 		Family:                  ref.Ref(e.taskFamily()),
 		ExecutionRoleArn:        ref.Ref(runCfg.Job.ExecutionRoleArn),
@@ -173,7 +169,7 @@ func (e *ecsRunnerInstance) Start(ctx context.Context) error {
 			Image:   ref.Ref(runnerImage),
 			Command: []string{runnercommon.RunnerImageSubCommand},
 			Environment: slices.Collect(func(yield func(kv types.KeyValuePair) bool) {
-				for k, v := range runnercommon.GenerateEnvVarsForRun(e.ExternalDataplaneUrl, runnerToken, e.RunnerLogsSignedUrl, e.MetadataOutputKey, e.Deployment) {
+				for k, v := range runnercommon.GenerateEnvVarsForRun(e.MetadataOutputKey, e.Deployment, e.NATSConfiguration) {
 					yield(types.KeyValuePair{Name: ref.Ref(k), Value: ref.Ref(v)})
 				}
 				for _, k := range slices.Sorted(maps.Keys(runCfg.Job.Environment)) {

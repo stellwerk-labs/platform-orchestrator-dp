@@ -5,19 +5,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
-	"github.com/stellwerk-labs/golib/hrabbitmq"
-	v2 "github.com/stellwerk-labs/golib/hrabbitmq/delayqueues/v2"
-	"github.com/stellwerk-labs/golib/hrabbitmq/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardreliableoutbox"
+	"github.com/stellwerk-labs/golib/hmessaging"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	"github.com/wagslane/go-rabbitmq"
 	"go.uber.org/zap"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/bundles"
 	usererrors "github.com/stellwerk-labs/platform-orchestrator-dp/internal/errors"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes"
@@ -26,7 +27,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
 
 // magicNoOpRunnerId is a temporary constant we use in testing to force the create-dep handler to retry all errors so
@@ -35,40 +36,49 @@ const magicNoOpRunnerId = "sunshine-weary-robin-runner"
 
 type CreateDepHandler struct {
 	db                 model.Databaser
-	publisher          hrabbitmq.Publisher
+	publisher          hmessaging.Publisher
 	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
 	runnerFactory      runners.RunnerFactory
-	runnerTokenSalt    string
+	bundleStore        RunnerBundleStore
+}
+
+type RunnerBundleStore interface {
+	Put(context.Context, jetstream.ObjectMeta, io.Reader) (*jetstream.ObjectInfo, error)
 }
 
 func Setup(
-	db model.Databaser, pub hrabbitmq.Publisher, cp platformorchestratorcp.ClientWithResponsesInterface, awsTemporaryAuth runners.AwsTemporaryAuthProvider,
-	rnImage, externalDataplaneUrl string, vlt vault.VaultClientInterface,
-	deployTokenSalt, metadataOutputKey string, logger *zap.Logger, k8sClientBuilder kubernetes.ClientFactory,
-	internalDataplaneHostname string, runnerLogsBucketSignedUrlGenerator runners.RunnerLogsSignedUrlGenerator, kubernetesRunnerPodSchedulingDelay time.Duration) (*CreateDepHandler, error) {
+	db model.Databaser, pub hmessaging.Publisher, cp platformorchestratorcp.ClientWithResponsesInterface, awsTemporaryAuth runners.AwsTemporaryAuthProvider,
+	rnImage string, vlt vault.VaultClientInterface,
+	metadataOutputKey string, logger *zap.Logger, k8sClientBuilder kubernetes.ClientFactory,
+	remoteRunnerCommandPublisher runners.RemoteRunnerCommandPublisher,
+	kubernetesRunnerPodSchedulingDelay time.Duration,
+	runnerCommandTTL time.Duration,
+	runnerNATSConfiguration runners.RunnerNATSConfiguration,
+	bundleStore RunnerBundleStore,
+) (*CreateDepHandler, error) {
 	return &CreateDepHandler{
 		db:                 db,
 		publisher:          pub,
 		controlPlaneClient: cp,
+		bundleStore:        bundleStore,
 		runnerFactory: runners.NewDefaultRunnerFactory(
 			logger,
 			awsTemporaryAuth,
 			k8sClientBuilder,
 			vlt,
-			externalDataplaneUrl,
 			rnImage,
-			deployTokenSalt,
 			metadataOutputKey,
-			internalDataplaneHostname,
-			runnerLogsBucketSignedUrlGenerator,
+			remoteRunnerCommandPublisher,
 			kubernetesRunnerPodSchedulingDelay,
+			runnerCommandTTL,
+			runnerNATSConfiguration,
 		),
 	}, nil
 }
 
-func (h *CreateDepHandler) Handle(ctx context.Context, logger *zap.Logger, d *rabbitmq.Delivery) error {
+func (h *CreateDepHandler) Handle(ctx context.Context, logger *zap.Logger, delivery hmessaging.Delivery) error {
 	var body events.CloudEvent[genevents.DeploymentChangedData]
-	if err := json.Unmarshal(d.Body, &body); err != nil {
+	if err := json.Unmarshal(delivery.Data, &body); err != nil {
 		return errors.Wrap(err, "failed to unmarshal event body")
 	} else {
 		ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)
@@ -100,8 +110,8 @@ func (h *CreateDepHandler) Handle(ctx context.Context, logger *zap.Logger, d *ra
 			if err := h.handleInner(ctx, logger, d); err != nil {
 				if d.RunnerId == magicNoOpRunnerId {
 					return err
-				} else if gre := (v2.GracefulRetryError)(nil); errors.As(err, &gre) {
-					return gre
+				} else if _, retry := hmessaging.AsRetryError(err); retry {
+					return err
 				} else if ue := new(usererrors.UserError); errors.As(err, &ue) {
 					logger.Warn("failing deployment due to user error", zap.Error(ue), zap.Any("details", ue.Details))
 					return h.failDeployment(ctx, logger, d, ue.Error())
@@ -138,11 +148,10 @@ func (h *CreateDepHandler) failDeployment(ctx context.Context, logger *zap.Logge
 			return errors.Wrap(err, "failed to create deployment history record")
 		}
 
-		messages, err := h.db.InsertPendingEventMessages(ctx, tx, []*hstandardreliableoutbox.PendingEventMessage{
+		messages, err := h.db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{
 			{
-				Exchange:   events.DefaultExchange,
-				RoutingKey: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
-				Payload:    model.ConvertDeploymentToEventPayload(dep),
+				Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
+				Payload: model.ConvertDeploymentToEventPayload(dep),
 			},
 		})
 		if err != nil {
@@ -163,7 +172,7 @@ func (h *CreateDepHandler) failDeployment(ctx context.Context, logger *zap.Logge
 func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, d *model.DeploymentSummary) error {
 	res, err := h.controlPlaneClient.GetInternalRunnerWithResponse(ctx, d.OrgId, d.RunnerId)
 	if err != nil {
-		return v2.NewGracefulRetryError(errors.Wrap(err, "failed to make get-runner request"))
+		return hmessaging.NewRetryError(errors.Wrap(err, "failed to make get-runner request"))
 	} else if res.StatusCode() == http.StatusNotFound {
 		return usererrors.NewUserError(fmt.Sprintf("no runner has been configured with id '%s'", d.RunnerId))
 	} else if res.StatusCode() != http.StatusOK {
@@ -178,14 +187,26 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	if isRunning, err := runner.IsRunning(ctx); err != nil {
 		return errors.Wrap(err, "failed to check if runner is running")
 	} else if isRunning {
-		logger.Info("job already running, skipping")
-		return nil
+		logger.Info("job already running, ensuring status check is scheduled")
+		return h.scheduleStatusCheck(ctx, d)
+	}
+	if h.bundleStore != nil {
+		archive, err := bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id)
+		if err != nil {
+			return hmessaging.NewRetryError(errors.Wrap(err, "failed to build runner bundle"))
+		}
+		if _, err := h.bundleStore.Put(ctx, jetstream.ObjectMeta{Name: bundles.ObjectKey(d.OrgId, d.Id)}, archive); err != nil {
+			return hmessaging.NewRetryError(errors.Wrap(err, "failed to store runner bundle in NATS Object Store"))
+		}
 	}
 
 	if err := runner.Start(ctx); err != nil {
+		if errors.Is(err, runners.ErrRunnerCommandPublishRetry) {
+			return hmessaging.NewRetryError(errors.Wrap(err, "failed to durably publish runner command"))
+		}
 		if errors.Is(err, runners.ErrKubernetesAgentNotReachableRetry) {
 			if time.Since(d.CreatedAt) < runners.KubernetesAgentConnectionIssueTolerance {
-				return v2.NewGracefulRetryError(errors.Wrap(err, "kubernetes agent temporary not reachable, will retry"))
+				return hmessaging.NewRetryError(errors.Wrap(err, "kubernetes agent temporary not reachable, will retry"))
 			} else {
 				return usererrors.NewUserErrorWithDetails(fmt.Sprintf("kubernetes-agent runner %q not reachable, please check your network connectivity and configuration", rn.Id), err)
 			}
@@ -193,47 +214,31 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		return err
 	}
 
-	if err := h.scheduleStatusCheck(ctx, d); err != nil {
-		logger.Warn("failed to schedule initial status check", zap.Error(err))
-	}
-
-	return nil
+	return h.scheduleStatusCheck(ctx, d)
 }
 
-func (h *CreateDepHandler) scheduleStatusCheck(ctx context.Context, d *model.DeploymentSummary) error {
+func (h *CreateDepHandler) scheduleStatusCheck(ctx context.Context, deployment *model.DeploymentSummary) error {
 	statusCheckEvent := events.CloudEvent[genevents.RunnerStatusCheckData]{
 		SpecVersion: events.CloudEventSpecVersion1{},
 		Type:        genevents.EventType(genevents.IoPlatformOrchestratorRunnerCheckStatus),
-		Time:        time.Now(),
+		Time:        time.Now().UTC(),
 		Data: genevents.RunnerStatusCheckData{
-			DeploymentId: d.Id,
-			OrgId:        d.OrgId,
-			RunnerId:     d.RunnerId,
+			DeploymentId: deployment.Id,
+			OrgId:        deployment.OrgId,
+			RunnerId:     deployment.RunnerId,
 		},
 	}
-
 	payload, err := json.Marshal(statusCheckEvent)
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal status check event")
+		return errors.Wrap(err, "failed to marshal runner status check event")
 	}
-
-	// Schedule initial status check using reliable outbox (will be processed immediately, then the handler will manage subsequent delays)
-	if confirms, err := h.publisher.PublishWithDeferredConfirmWithContext(
-		ctx, payload, []string{string(genevents.IoPlatformOrchestratorRunnerCheckStatus)},
-		rabbitmq.WithPublishOptionsExchange(events.DefaultExchange),
-		rabbitmq.WithPublishOptionsContentType("application/json"),
-		rabbitmq.WithPublishOptionsContentEncoding("utf-8"),
-		rabbitmq.WithPublishOptionsTimestamp(time.Now().UTC()),
-	); err != nil {
-		return errors.Wrap(err, "rabbit publish failed")
-	} else {
-		for _, confirm := range confirms {
-			if ok, err := confirm.WaitContext(ctx); err != nil {
-				return errors.Wrap(err, "rabbit confirm timed out")
-			} else if !ok {
-				return errors.Wrap(err, "rabbit ping confirm failed")
-			}
-		}
+	if err := h.publisher.Publish(ctx, hmessaging.Message{
+		ID:        deployment.Id.String() + ":runner-status-check",
+		Subject:   string(genevents.IoPlatformOrchestratorRunnerCheckStatus),
+		Data:      payload,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		return hmessaging.NewRetryError(errors.Wrap(err, "failed to publish runner status check event"))
 	}
 	return nil
 }

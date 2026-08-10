@@ -1,4 +1,17 @@
 services:
+  nats:
+    image: nats:2.12-alpine
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
   platform-orchestrator-cp-platform-orchestrator-cp:
     environment:
       LOG_LEVEL: debug
@@ -11,22 +24,23 @@ services:
         condition: service_completed_successfully
   platform-orchestrator-dp-platform-orchestrator-dp:
     environment:
+      NATS_BOOTSTRAP: "true"
+      RUNNER_NATS_URL: nats://nats:4222
       LOG_LEVEL: debug
       DD_AGENT_HOST: ""
       SHUTDOWN_DELAY: 1s
       DEPLOYMENTS_COMPLETED_BEFORE: 10s
       VAULT_AUTH: token:mytoken
-      RUNNER_LOGS_BUCKET_CREDS: '{"access_key_id":"test","secret_access_key":"testtest"}'
-      RUNNER_LOGS_BUCKET_ENDPOINT: http://seaweedfs:8333
     depends_on:
+      nats:
+        condition: service_healthy
       vault-init:
         condition: service_completed_successfully
       platform-orchestrator-iam-platform-orchestrator-iam:
         condition: service_started
-      seaweedfs:
-        condition: service_healthy
   platform-orchestrator-iam-platform-orchestrator-iam:
     environment:
+      NATS_BOOTSTRAP_STREAMS: "true"
       LOG_LEVEL: debug
       DD_AGENT_HOST: ""
       SHUTDOWN_DELAY: 1s
@@ -68,19 +82,5 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
-  seaweedfs:
-    image: chrislusf/seaweedfs:latest
-    command: "server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=100"
-    ports:
-      - "8333:8333"
-      - "9333:9333"
-    volumes:
-      - seaweedfs-data:/data
-      - ./seaweedfs-config:/etc/seaweedfs
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8333/status"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
 volumes:
-  seaweedfs-data:
+  nats-data:
