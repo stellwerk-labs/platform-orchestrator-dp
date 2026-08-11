@@ -8,7 +8,7 @@ DEFAULT_K8S_RES := platform-orchestrator-runner
 RUNNER_CONFIGURATION := runner_config.json
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
 IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.0.0
-RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v2.0.0
+RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
 RUNNER_IMAGE_PULL ?= true
 
 compose.yaml: BUILD_ARGS := {"context":"../"}
@@ -17,7 +17,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose init --no-sample
 	cp score.provisioners.yaml .score-compose/
 	cp score.cp.yaml score.iam.yaml .score-compose/
-	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v2.0.0"; "$(RUNNER_IMAGE)")' .score-compose/score.provisioners.yaml
+	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0"; "$(RUNNER_IMAGE)")' .score-compose/score.provisioners.yaml
 	yq -i '.containers.platform-orchestrator-cp.image = "$(CP_IMAGE)"' .score-compose/score.cp.yaml
 	yq -i '.containers.platform-orchestrator-iam.image = "$(IAM_IMAGE)"' .score-compose/score.iam.yaml
 	score-compose generate ../score.yaml --build 'platform-orchestrator-dp=$(BUILD_ARGS)'
@@ -25,6 +25,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose generate .score-compose/score.cp.yaml
 	score-compose generate --publish 5432:postgres.default#platform-orchestrator-dp.postgres.host:5432 --publish 8081:platform-orchestrator-cp:8080 --publish 8082:platform-orchestrator-dp:8080 --publish 8083:platform-orchestrator-iam:8080
 	yq eval-all '. as $$item ireduce ({}; . * $$item)' --inplace compose.yaml compose-mixins.yaml
+	yq -i '.services.runner-gateway.image = "$(RUNNER_IMAGE)"' compose.yaml
 
 .PHONY: build
 build: compose.yaml
@@ -32,7 +33,7 @@ build: compose.yaml
 
 .PHONY: test
 test: compose.yaml
-	docker compose up --no-build -d platform-orchestrator-cp-platform-orchestrator-cp platform-orchestrator-dp-platform-orchestrator-dp  --wait
+	docker compose up --no-build -d platform-orchestrator-cp-platform-orchestrator-cp platform-orchestrator-dp-platform-orchestrator-dp runner-gateway --wait
 	docker network connect integration-tests_default runner-control-plane || true
 	SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#api-dns | jq -r .host):8080" OIDC_SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#platform-orchestrator-dp.dns-oidc | jq -r .host):8080" INTERNAL_CP_URL=http://localhost:8081 INTERNAL_DP_URL=http://localhost:8082 INTERNAL_IAM_URL=http://localhost:8083 DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=5432 dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" NATS_URL=nats://localhost:4222 RUNNER_TOKEN_SALT="vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=" TEST_USER_IDENTITY_RECIPIENT=age10hmkvsqfxr5ha05ay6pqj9zdtal7pw7x2r3t4n00rzucc3en3u9q3cycqm go tool gotestsum --format testname ./ -test.timeout 10m -test.parallel=2 -test.v $(TESTARGS)
 

@@ -76,7 +76,7 @@ func TestGetJobSpec_WithMetadataOutputKey(t *testing.T) {
 	assert.Equal(t, "my-metadata-key", envVars["METADATA_KEY"])
 }
 
-func TestGetJobSpec_WithNATSConfiguration(t *testing.T) {
+func TestGetJobSpec_WithGatewayConfiguration(t *testing.T) {
 	deployment := &model.DeploymentSummary{
 		OrgId: "org-123",
 		Id:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -88,7 +88,7 @@ func TestGetJobSpec_WithNATSConfiguration(t *testing.T) {
 		"runner-image:latest",
 		"",
 		deployment,
-		runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
+		runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
 	)
 	require.NoError(t, err)
 
@@ -96,10 +96,9 @@ func TestGetJobSpec_WithNATSConfiguration(t *testing.T) {
 	for _, env := range spec.Template.Spec.Containers[0].Env {
 		environment[env.Name] = env.Value
 	}
-	assert.Equal(t, "nats://broker:4222", environment["NATS_URL"])
-	assert.Equal(t, "runner-token", environment["NATS_TOKEN"])
-	assert.Equal(t, "PO_RUNNER_BUNDLES", environment["NATS_BUNDLE_BUCKET"])
-	assert.Equal(t, "org-123/11111111-1111-1111-1111-111111111111", environment["NATS_BUNDLE_KEY"])
+	assert.Equal(t, "https://gateway.example.test", environment["RUNNER_GATEWAY_URL"])
+	assert.NotEmpty(t, environment["TOKEN"])
+	assert.NotContains(t, environment, "NATS_URL")
 }
 
 func TestGetJobSpec_OmitsMetadataKeyWhenEmpty(t *testing.T) {

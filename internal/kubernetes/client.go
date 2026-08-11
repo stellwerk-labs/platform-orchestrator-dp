@@ -47,8 +47,8 @@ func (c *kubernetesClient) IsJobRunning(ctx context.Context, namespace string, j
 	return true, nil
 }
 
-func (c *kubernetesClient) CreateJob(ctx context.Context, jobCfg platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...runnercommon.NATSConfiguration) (*v1.Job, error) {
-	jobSpec, err := GetJobSpec(ctx, jobCfg, runnerImage, metadataOutputKey, d, natsConfigurations...)
+func (c *kubernetesClient) CreateJob(ctx context.Context, jobCfg platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, gatewayConfigurations ...runnercommon.GatewayConfiguration) (*v1.Job, error) {
+	jobSpec, err := GetJobSpec(ctx, jobCfg, runnerImage, metadataOutputKey, d, gatewayConfigurations...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get job spec")
 	}

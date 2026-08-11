@@ -58,7 +58,7 @@ type Worker struct {
 	RunnerLogsDeleter                  runners.RunnerLogsDeleter
 	KubernetesRunnerPodSchedulingDelay time.Duration
 	RunnerCommandTTL                   time.Duration
-	RunnerNATSConfiguration            runners.RunnerNATSConfiguration
+	RunnerGatewayConfiguration         runners.RunnerGatewayConfiguration
 	RunnerBundleStore                  createdephandler.RunnerBundleStore
 	MetadataOutputKey                  string
 }
@@ -76,7 +76,7 @@ func (w *Worker) BuildRunnerStatusConsumer(ctx context.Context) (*hnats.Consumer
 		w.RemoteRunnerCommandPublisher,
 		w.KubernetesRunnerPodSchedulingDelay,
 		w.RunnerCommandTTL,
-		w.RunnerNATSConfiguration,
+		w.RunnerGatewayConfiguration,
 	)
 	handler := runnerstatushandler.New(w.DB, w.EventPublisher, w.ControlPlaneClient, runnerFactory)
 	consumer, err := hnats.EnsureDurableConsumer(ctx, w.JetStream, hnats.DurableConsumerConfig{
@@ -115,7 +115,7 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 		w.RemoteRunnerCommandPublisher,
 		w.KubernetesRunnerPodSchedulingDelay,
 		w.RunnerCommandTTL,
-		w.RunnerNATSConfiguration,
+		w.RunnerGatewayConfiguration,
 		w.RunnerBundleStore,
 	)
 	if err != nil {

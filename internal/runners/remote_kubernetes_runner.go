@@ -13,6 +13,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 )
 
 // RemoteRunnerCommandPublisher durably submits work for one remote runner. The
@@ -39,6 +40,7 @@ type RemoteKubernetesRunner struct {
 	deploymentSummary *model.DeploymentSummary
 	commandPublisher  RemoteRunnerCommandPublisher
 	commandTTL        time.Duration
+	gateway           runnercommon.GatewayConfiguration
 }
 
 func NewRemoteKubernetesRunner(
@@ -48,6 +50,7 @@ func NewRemoteKubernetesRunner(
 	deploymentSummary *model.DeploymentSummary,
 	commandPublisher RemoteRunnerCommandPublisher,
 	commandTTL time.Duration,
+	gateway runnercommon.GatewayConfiguration,
 ) *RemoteKubernetesRunner {
 	return &RemoteKubernetesRunner{
 		runnerImage:       runnerImage,
@@ -56,6 +59,7 @@ func NewRemoteKubernetesRunner(
 		deploymentSummary: deploymentSummary,
 		commandPublisher:  commandPublisher,
 		commandTTL:        commandTTL,
+		gateway:           gateway,
 	}
 }
 
@@ -71,6 +75,7 @@ func (r *RemoteKubernetesRunner) Start(ctx context.Context) error {
 		r.runnerImage,
 		"",
 		r.deploymentSummary,
+		r.gateway,
 	)
 	if err != nil {
 		return errors.Wrap(err, "failed to build job spec")

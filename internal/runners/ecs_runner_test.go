@@ -45,8 +45,8 @@ func Test_full_nominal(t *testing.T) {
 		},
 	})
 	r := &ecsRunnerInstance{
-		RunnerImage:       "my-image",
-		NATSConfiguration: runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
+		RunnerImage:          "my-image",
+		GatewayConfiguration: runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
 
 		TemporaryAuthProvider: TemporaryAuthProviderFunc(func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error) {
 			return &aws.AWSCredentials{
@@ -100,10 +100,8 @@ func Test_full_nominal(t *testing.T) {
 						{Name: ref.Ref("DEPLOYMENT_ID"), Value: ref.Ref("00000000-0000-0000-0000-000000000000")},
 						{Name: ref.Ref("MODE"), Value: ref.Ref("plan_only")},
 						{Name: ref.Ref("LOG_LEVEL"), Value: ref.Ref("info")},
-						{Name: ref.Ref("NATS_URL"), Value: ref.Ref("nats://broker:4222")},
-						{Name: ref.Ref("NATS_TOKEN"), Value: ref.Ref("runner-token")},
-						{Name: ref.Ref("NATS_BUNDLE_BUCKET"), Value: ref.Ref("PO_RUNNER_BUNDLES")},
-						{Name: ref.Ref("NATS_BUNDLE_KEY"), Value: ref.Ref("my-org/00000000-0000-0000-0000-000000000000")},
+						{Name: ref.Ref("RUNNER_GATEWAY_URL"), Value: ref.Ref("https://gateway.example.test")},
+						{Name: ref.Ref("TOKEN"), Value: ref.Ref("36DE7KHt1pgv5ZOsoYocb7jVbZDTlIh5FEy3aROv3TM")},
 						{Name: ref.Ref("A"), Value: ref.Ref("B")},
 					},
 					Secrets: []types.Secret{{Name: ref.Ref("B"), ValueFrom: ref.Ref("some-arn")}},

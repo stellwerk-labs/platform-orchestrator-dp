@@ -20,7 +20,7 @@ var ErrK8sActionForbidden = errors.New("kubernetes action forbidden")
 
 type KubernetesInterface interface {
 	IsJobRunning(ctx context.Context, namespace, deploymentId string) (bool, error)
-	CreateJob(ctx context.Context, rnConfiguration platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...runnercommon.NATSConfiguration) (*v1.Job, error)
+	CreateJob(ctx context.Context, rnConfiguration platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, gatewayConfigurations ...runnercommon.GatewayConfiguration) (*v1.Job, error)
 	CheckJobStatus(ctx context.Context, namespace, deploymentId string) (*v1.JobStatus, error)
 	GetPodJob(ctx context.Context, namespace, jobName string) (*corev1.Pod, error)
 	GetObjectWarningEvents(ctx context.Context, namespace string, jobName string) ([]string, error)

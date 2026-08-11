@@ -21,10 +21,13 @@ type Configuration struct {
 	NATSStreamReplicas int    `env:"NATS_STREAM_REPLICAS, default=1" validate:"gte=1"`
 	NATSBootstrap      bool   `env:"NATS_BOOTSTRAP, default=false"`
 
-	// RunnerNATS* are injected only into runners started directly by this data
-	// plane. Remote agents replace them with their local broker configuration.
-	RunnerNATSURL   string `env:"RUNNER_NATS_URL"   validate:"required,url"`
-	RunnerNATSToken string `env:"RUNNER_NATS_TOKEN"`
+	// RunnerGatewayURL is the externally reachable HTTPS endpoint injected into
+	// runners outside the data-plane cluster, such as ECS tasks.
+	RunnerGatewayURL string `env:"RUNNER_GATEWAY_URL" validate:"required,url"`
+	// RunnerGatewayInternalURL is used by Kubernetes Jobs created inside the
+	// data-plane cluster. It may use cluster DNS and plain HTTP within the trust
+	// boundary. When unset, RunnerGatewayURL is used for compatibility.
+	RunnerGatewayInternalURL string `env:"RUNNER_GATEWAY_INTERNAL_URL" validate:"omitempty,url"`
 
 	// ControlPlaneUrl is the api url for the control plane port 8080
 	ControlPlaneUrl string `env:"CONTROL_PLANE_URL" validate:"required,url"`

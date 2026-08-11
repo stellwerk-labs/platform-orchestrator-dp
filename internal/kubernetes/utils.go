@@ -18,7 +18,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 )
 
-func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...runnercommon.NATSConfiguration) (*v1.JobSpec, error) {
+func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJobConfig, runnerImage, metadataOutputKey string, d *model.DeploymentSummary, gatewayConfigurations ...runnercommon.GatewayConfiguration) (*v1.JobSpec, error) {
 	containerName := RunnerContainerName
 	jobTemplate := corev1.PodTemplateSpec{
 		Spec: corev1.PodSpec{
@@ -36,7 +36,7 @@ func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJ
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Args:            []string{"standard"},
 					Env: slices.Collect(func(yield func(corev1.EnvVar) bool) {
-						for k, v := range runnercommon.GenerateEnvVarsForRun(metadataOutputKey, d, natsConfigurations...) {
+						for k, v := range runnercommon.GenerateEnvVarsForRun(metadataOutputKey, d, gatewayConfigurations...) {
 							yield(corev1.EnvVar{Name: k, Value: v})
 						}
 					}),

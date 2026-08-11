@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap/zaptest"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 )
 
 type recordingCommandPublisher struct {
@@ -46,6 +47,7 @@ func TestRemoteKubernetesRunnerQueuesCreateJob(t *testing.T) {
 		"runner:feat-nats", zaptest.NewLogger(t),
 		platformorchestratorcp.InternalRunner{Id: "edge-1", RunnerConfiguration: *configuration},
 		deployment, publisher, time.Hour,
+		runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
 	)
 
 	require.NoError(t, runner.Start(t.Context()))
@@ -58,7 +60,8 @@ func TestRemoteKubernetesRunnerQueuesCreateJob(t *testing.T) {
 	assert.Equal(t, "runner-jobs", publisher.command.Namespace)
 	configurationJSON, err := json.Marshal(publisher.command.Configuration)
 	require.NoError(t, err)
-	assert.NotContains(t, string(configurationJSON), "NATS_URL", "the remote agent must inject its local broker, never the central endpoint")
+	assert.Contains(t, string(configurationJSON), "RUNNER_GATEWAY_URL")
+	assert.NotContains(t, string(configurationJSON), "NATS_URL", "runner jobs must never receive broker credentials")
 }
 
 func TestNATSRemoteRunnerCommandPublisherEnvelope(t *testing.T) {

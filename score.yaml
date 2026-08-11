@@ -26,8 +26,6 @@ containers:
         memory: 64Mi
     variables:
       NATS_URL: ${resources.env.NATS_URL}
-      RUNNER_NATS_URL: ${resources.env.RUNNER_NATS_URL}
-      RUNNER_NATS_TOKEN: ${resources.env.RUNNER_NATS_TOKEN}
       RUNNER_TOKEN_SALT: ${resources.env.RUNNER_TOKEN_SALT}
       DD_AGENT_HOST: $${pod.status.hostIP}
       OTEL_ENABLE: ${resources.env.DATADOG_ENABLED}
@@ -44,6 +42,8 @@ containers:
       DATABASE_PORT: ${resources.postgres.port}
       DATABASE_USER: ${resources.postgres.username}
       RUNNER_IMAGE: ${resources.env.RUNNER_IMAGE}
+      RUNNER_GATEWAY_URL: ${resources.env.RUNNER_GATEWAY_URL}
+      RUNNER_GATEWAY_INTERNAL_URL: ${resources.env.RUNNER_GATEWAY_INTERNAL_URL}
       CONTROL_PLANE_URL: http://${resources.platform-orchestrator-cp.name}:8080
       IAM_URL: http://${resources.platform-orchestrator-iam.name}:8080
       VAULT_URL: ${resources.env.VAULT_URL}
