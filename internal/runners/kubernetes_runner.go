@@ -31,7 +31,7 @@ type KubernetesRunner struct {
 	internalRunner          platformorchestratorcp.InternalRunner
 	deploymentSummary       *model.DeploymentSummary
 	podSchedulingDelay      time.Duration
-	natsConfiguration       runnercommon.NATSConfiguration
+	gatewayConfiguration    runnercommon.GatewayConfiguration
 }
 
 func NewKubernetesRunner(
@@ -43,11 +43,11 @@ func NewKubernetesRunner(
 	internalRunner platformorchestratorcp.InternalRunner,
 	deploymentSummary *model.DeploymentSummary,
 	podSchedulingDelay time.Duration,
-	natsConfigurations ...runnercommon.NATSConfiguration,
+	gatewayConfigurations ...runnercommon.GatewayConfiguration,
 ) *KubernetesRunner {
-	var natsConfiguration runnercommon.NATSConfiguration
-	if len(natsConfigurations) > 0 {
-		natsConfiguration = natsConfigurations[0]
+	var gatewayConfiguration runnercommon.GatewayConfiguration
+	if len(gatewayConfigurations) > 0 {
+		gatewayConfiguration = gatewayConfigurations[0]
 	}
 	return &KubernetesRunner{
 		k8sClusterClientFactory: k8sClusterClientFactory,
@@ -58,7 +58,7 @@ func NewKubernetesRunner(
 		internalRunner:          internalRunner,
 		deploymentSummary:       deploymentSummary,
 		podSchedulingDelay:      podSchedulingDelay,
-		natsConfiguration:       natsConfiguration,
+		gatewayConfiguration:    gatewayConfiguration,
 	}
 }
 
@@ -73,7 +73,7 @@ func (k *KubernetesRunner) Start(ctx context.Context) error {
 		return errors.Wrap(err, "failed to obtain access to the runner cluster")
 	}
 
-	job, err := k8sClient.CreateJob(ctx, jobCfg, k.runnerImage, k.metadataOutputKey, k.deploymentSummary, k.natsConfiguration)
+	job, err := k8sClient.CreateJob(ctx, jobCfg, k.runnerImage, k.metadataOutputKey, k.deploymentSummary, k.gatewayConfiguration)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return usererror.NewUserErrorWithDetails("failed to run the job, a resource was not found, this can be caused by a misconfiguration of the runner", err)

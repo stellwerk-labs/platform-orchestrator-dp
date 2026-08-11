@@ -22,7 +22,8 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 	t.Setenv("OIDC_ISSUER_URL", "http://oidc-issuer:8080")
 	t.Setenv("RUNNER_TOKEN_SALT", "test_salt")
 	t.Setenv("NATS_URL", "nats://nats:4222")
-	t.Setenv("RUNNER_NATS_URL", "nats://runner-nats:4222")
+	t.Setenv("RUNNER_GATEWAY_URL", "https://orchestrator.example.test/runner-gateway")
+	t.Setenv("RUNNER_GATEWAY_INTERNAL_URL", "http://runner-gateway:8080/runner-gateway")
 
 	cfg := new(Configuration)
 	require.NoError(t, hconfig.LoadConfigWithoutRetag(cfg))
@@ -36,7 +37,8 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 		NATSURL:                            "nats://nats:4222",
 		NATSStreamReplicas:                 1,
 		NATSBootstrap:                      false,
-		RunnerNATSURL:                      "nats://runner-nats:4222",
+		RunnerGatewayURL:                   "https://orchestrator.example.test/runner-gateway",
+		RunnerGatewayInternalURL:           "http://runner-gateway:8080/runner-gateway",
 		ControlPlaneUrl:                    "http://control-plane:8080",
 		RunnerTokenSalt:                    "test_salt",
 		ShutdownDelay:                      10 * time.Second,

@@ -27,7 +27,7 @@ type DefaultRunnerFactory struct {
 	remoteRunnerCommandPublisher       RemoteRunnerCommandPublisher
 	kubernetesRunnerPodSchedulingDelay time.Duration
 	runnerCommandTTL                   time.Duration
-	natsConfiguration                  runnercommon.NATSConfiguration
+	gatewayConfiguration               RunnerGatewayConfiguration
 }
 
 func NewDefaultRunnerFactory(
@@ -40,11 +40,11 @@ func NewDefaultRunnerFactory(
 	remoteRunnerCommandPublisher RemoteRunnerCommandPublisher,
 	kubernetesRunnerPodSchedulingDelay time.Duration,
 	runnerCommandTTL time.Duration,
-	natsConfigurations ...runnercommon.NATSConfiguration,
+	gatewayConfigurations ...RunnerGatewayConfiguration,
 ) *DefaultRunnerFactory {
-	var natsConfiguration runnercommon.NATSConfiguration
-	if len(natsConfigurations) > 0 {
-		natsConfiguration = natsConfigurations[0]
+	var gatewayConfiguration RunnerGatewayConfiguration
+	if len(gatewayConfigurations) > 0 {
+		gatewayConfiguration = gatewayConfigurations[0]
 	}
 	return &DefaultRunnerFactory{
 		logger:                             logger,
@@ -56,7 +56,7 @@ func NewDefaultRunnerFactory(
 		remoteRunnerCommandPublisher:       remoteRunnerCommandPublisher,
 		kubernetesRunnerPodSchedulingDelay: kubernetesRunnerPodSchedulingDelay,
 		runnerCommandTTL:                   runnerCommandTTL,
-		natsConfiguration:                  natsConfiguration,
+		gatewayConfiguration:               gatewayConfiguration,
 	}
 }
 
@@ -77,6 +77,7 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			deploymentSummary,
 			f.remoteRunnerCommandPublisher,
 			f.runnerCommandTTL,
+			f.gatewayConfiguration.public(),
 		), nil
 	case string(platformorchestratorcp.RunnerTypeKubernetes), string(platformorchestratorcp.RunnerTypeKubernetesGke), string(platformorchestratorcp.RunnerTypeKubernetesEks):
 		return NewKubernetesRunner(
@@ -88,7 +89,7 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			internalRunner,
 			deploymentSummary,
 			f.kubernetesRunnerPodSchedulingDelay,
-			f.natsConfiguration,
+			f.gatewayConfiguration.internal(),
 		), nil
 	case string(platformorchestratorcp.RunnerTypeServerlessEcs):
 		return &ecsRunnerInstance{
@@ -97,7 +98,7 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			RunnerImage:           f.runnerImage,
 			MetadataOutputKey:     f.metadataOutputKey,
 			Deployment:            deploymentSummary,
-			NATSConfiguration:     f.natsConfiguration,
+			GatewayConfiguration:  f.gatewayConfiguration.public(),
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported runner type: %s", runnerType)
@@ -106,4 +107,20 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 
 type RunnerLogsDeleter func(ctx context.Context, envUuid string) error
 
-type RunnerNATSConfiguration = runnercommon.NATSConfiguration
+type RunnerGatewayConfiguration struct {
+	PublicURL       string
+	InternalURL     string
+	RunnerTokenSalt string
+}
+
+func (c RunnerGatewayConfiguration) public() runnercommon.GatewayConfiguration {
+	return runnercommon.GatewayConfiguration{URL: c.PublicURL, RunnerTokenSalt: c.RunnerTokenSalt}
+}
+
+func (c RunnerGatewayConfiguration) internal() runnercommon.GatewayConfiguration {
+	url := c.InternalURL
+	if url == "" {
+		url = c.PublicURL
+	}
+	return runnercommon.GatewayConfiguration{URL: url, RunnerTokenSalt: c.RunnerTokenSalt}
+}

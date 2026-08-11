@@ -298,8 +298,9 @@ func main() {
 		OidcProvider:                 oidcProvider,
 		HTTPClient:                   http.DefaultClient,
 		RunnerCommandTTL:             cfg.RunnerCommandTTL,
-		RunnerNATSConfiguration: runners.RunnerNATSConfiguration{
-			URL: cfg.RunnerNATSURL, Token: cfg.RunnerNATSToken,
+		RunnerGatewayConfiguration: runners.RunnerGatewayConfiguration{
+			PublicURL: cfg.RunnerGatewayURL, InternalURL: cfg.RunnerGatewayInternalURL,
+			RunnerTokenSalt: cfg.RunnerTokenSalt,
 		},
 		RunnerBundleStore: runnerBundlesStore,
 		RunnerLogsDeleter: func(ctx context.Context, envUuid string) error {

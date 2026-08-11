@@ -68,7 +68,7 @@ type ecsRunnerInstance struct {
 	RunnerImage           string
 	MetadataOutputKey     string
 	Deployment            *model.DeploymentSummary
-	NATSConfiguration     runnercommon.NATSConfiguration
+	GatewayConfiguration  runnercommon.GatewayConfiguration
 
 	overrideClient ecsClientSubset
 }
@@ -169,7 +169,7 @@ func (e *ecsRunnerInstance) Start(ctx context.Context) error {
 			Image:   ref.Ref(runnerImage),
 			Command: []string{runnercommon.RunnerImageSubCommand},
 			Environment: slices.Collect(func(yield func(kv types.KeyValuePair) bool) {
-				for k, v := range runnercommon.GenerateEnvVarsForRun(e.MetadataOutputKey, e.Deployment, e.NATSConfiguration) {
+				for k, v := range runnercommon.GenerateEnvVarsForRun(e.MetadataOutputKey, e.Deployment, e.GatewayConfiguration) {
 					yield(types.KeyValuePair{Name: ref.Ref(k), Value: ref.Ref(v)})
 				}
 				for _, k := range slices.Sorted(maps.Keys(runCfg.Job.Environment)) {

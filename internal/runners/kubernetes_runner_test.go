@@ -146,7 +146,7 @@ func TestKubernetesRunner_Start_Success(t *testing.T) {
 	mockVault := mockvault.NewMockVaultClientInterface(ctrl)
 
 	runner, deploymentSummary, _ := createTestKubernetesRunner(t, mockK8s, mockVault)
-	runner.natsConfiguration = runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"}
+	runner.gatewayConfiguration = runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"}
 
 	expectedJob := &v1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -160,7 +160,7 @@ func TestKubernetesRunner_Start_Success(t *testing.T) {
 		testRunnerImage,
 		"",
 		deploymentSummary,
-		runnercommon.NATSConfiguration{URL: "nats://broker:4222", Token: "runner-token"},
+		runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
 	).Return(expectedJob, nil)
 
 	err := runner.Start(context.Background())
@@ -213,7 +213,7 @@ func TestKubernetesRunner_Start_PassesMetadataOutputKey(t *testing.T) {
 		testRunnerImage,
 		"platform_orchestrator_metadata",
 		deploymentSummary,
-		runnercommon.NATSConfiguration{},
+		runnercommon.GatewayConfiguration{},
 	).Return(&v1.Job{ObjectMeta: metav1.ObjectMeta{Name: deploymentSummary.Id.String()}}, nil)
 
 	err := runner.Start(context.Background())
@@ -235,7 +235,7 @@ func TestKubernetesRunner_Start_CreateJobError(t *testing.T) {
 		testRunnerImage,
 		"",
 		deploymentSummary,
-		runnercommon.NATSConfiguration{},
+		runnercommon.GatewayConfiguration{},
 	).Return(nil, errors.New("failed to create job"))
 
 	err := runner.Start(context.Background())
@@ -258,7 +258,7 @@ func TestKubernetesRunner_Start_CreateJobError_NotFound(t *testing.T) {
 		testRunnerImage,
 		"",
 		deploymentSummary,
-		runnercommon.NATSConfiguration{},
+		runnercommon.GatewayConfiguration{},
 	).Return(nil, k8serrors.NewNotFound(schema.GroupResource{}, ""))
 
 	err := runner.Start(context.Background())
@@ -283,7 +283,7 @@ func TestKubernetesRunner_Start_CreateJobError_Forbidden(t *testing.T) {
 		testRunnerImage,
 		"",
 		deploymentSummary,
-		runnercommon.NATSConfiguration{},
+		runnercommon.GatewayConfiguration{},
 	).Return(nil, k8serrors.NewForbidden(schema.GroupResource{}, "", errors.New("test")))
 
 	err := runner.Start(context.Background())

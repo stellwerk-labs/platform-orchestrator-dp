@@ -5,11 +5,11 @@
     DATADOG_ENV: ""
     RUNNER_TOKEN_SALT: vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=
     VAULT_URL: "http://vault:8200"
-    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v2.0.0"
+    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0"
+    RUNNER_GATEWAY_URL: "http://runner-gateway:8080/runner-gateway"
+    RUNNER_GATEWAY_INTERNAL_URL: "http://runner-gateway:8080/runner-gateway"
     OIDC_ISSUER_URL: https://oidc.platform-orchestrator.io
     NATS_URL: nats://nats:4222
-    RUNNER_NATS_URL: nats://nats:4222
-    RUNNER_NATS_TOKEN: ""
     UI_HOST_URL: http://localhost:8080
     SENDGRID_API_KEY: mock
     AUTH_TOKEN_SALT: Hmq56BHF7dyEWC8Twjr2S3sOlJ4a5vhKBNxmVvYcoFUq

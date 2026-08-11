@@ -53,7 +53,7 @@ func Setup(
 	remoteRunnerCommandPublisher runners.RemoteRunnerCommandPublisher,
 	kubernetesRunnerPodSchedulingDelay time.Duration,
 	runnerCommandTTL time.Duration,
-	runnerNATSConfiguration runners.RunnerNATSConfiguration,
+	runnerGatewayConfiguration runners.RunnerGatewayConfiguration,
 	bundleStore RunnerBundleStore,
 ) (*CreateDepHandler, error) {
 	return &CreateDepHandler{
@@ -71,7 +71,7 @@ func Setup(
 			remoteRunnerCommandPublisher,
 			kubernetesRunnerPodSchedulingDelay,
 			runnerCommandTTL,
-			runnerNATSConfiguration,
+			runnerGatewayConfiguration,
 		),
 	}, nil
 }

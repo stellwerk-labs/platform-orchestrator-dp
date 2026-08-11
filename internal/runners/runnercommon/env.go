@@ -5,14 +5,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 )
 
-type NATSConfiguration struct {
-	URL   string
-	Token string
+type GatewayConfiguration struct {
+	URL             string
+	RunnerTokenSalt string
 }
 
-func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary, natsConfigurations ...NATSConfiguration) iter.Seq2[string, string] {
+func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary, gatewayConfigurations ...GatewayConfiguration) iter.Seq2[string, string] {
 	return func(yield func(string, string) bool) {
 		yield("ORG_ID", d.OrgId)
 		if d.RunnerId != "" {
@@ -30,17 +31,10 @@ func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary,
 			yield("ENCRYPTING_LOGS_KEY", d.EncryptedLogsRecipient.Must())
 		}
 		yield("LOG_LEVEL", d.RunnerLogLevel)
-		if len(natsConfigurations) > 0 && natsConfigurations[0].URL != "" {
-			natsConfig := natsConfigurations[0]
-			for _, variable := range []struct{ key, value string }{
-				{"NATS_URL", natsConfig.URL}, {"NATS_TOKEN", natsConfig.Token},
-				{"NATS_BUNDLE_BUCKET", "PO_RUNNER_BUNDLES"}, {"NATS_BUNDLE_KEY", d.OrgId + "/" + d.Id.String()},
-			} {
-				key, value := variable.key, variable.value
-				if value != "" {
-					yield(key, value)
-				}
-			}
+		if len(gatewayConfigurations) > 0 && gatewayConfigurations[0].URL != "" {
+			gatewayConfig := gatewayConfigurations[0]
+			yield("RUNNER_GATEWAY_URL", gatewayConfig.URL)
+			yield("TOKEN", util.GenerateHashedRunnerToken(gatewayConfig.RunnerTokenSalt, d.OrgId, d.Id.String()))
 		}
 		if metadataOutputKey != "" {
 			yield("METADATA_KEY", metadataOutputKey)

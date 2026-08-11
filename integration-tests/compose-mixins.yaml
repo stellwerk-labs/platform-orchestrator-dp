@@ -25,7 +25,6 @@ services:
   platform-orchestrator-dp-platform-orchestrator-dp:
     environment:
       NATS_BOOTSTRAP: "true"
-      RUNNER_NATS_URL: nats://nats:4222
       LOG_LEVEL: debug
       DD_AGENT_HOST: ""
       SHUTDOWN_DELAY: 1s
@@ -38,6 +37,25 @@ services:
         condition: service_completed_successfully
       platform-orchestrator-iam-platform-orchestrator-iam:
         condition: service_started
+  platform-orchestrator-dp-ready:
+    image: nats:2.12-alpine
+    entrypoint: ["sh", "-c"]
+    command:
+      - timeout 60 sh -c 'until wget --spider -q http://platform-orchestrator-dp-platform-orchestrator-dp:8080/health; do sleep 1; done'
+    depends_on:
+      platform-orchestrator-dp-platform-orchestrator-dp:
+        condition: service_started
+  runner-gateway:
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
+    command: ["gateway"]
+    environment:
+      NATS_URL: nats://nats:4222
+      CONTROL_PLANE_URL: http://platform-orchestrator-cp-platform-orchestrator-cp:8080
+      RUNNER_TOKEN_SALT: vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=
+      RUNNER_GATEWAY_RECEIPT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    depends_on:
+      platform-orchestrator-dp-ready:
+        condition: service_completed_successfully
   platform-orchestrator-iam-platform-orchestrator-iam:
     environment:
       NATS_BOOTSTRAP_STREAMS: "true"
