@@ -44,8 +44,6 @@ containers:
       CONTROL_PLANE_URL: http://${resources.platform-orchestrator-cp.name}:8080
       UI_HOST_URL: ${resources.env.UI_HOST_URL}
       SENDGRID_API_KEY: ${resources.env.SENDGRID_API_KEY}
-      SPICEDB_URL: ${resources.spicedb.hostname}:50051
-      SPICEDB_PRE_SHARED_KEY: ${resources.spicedb.preshared_key}
       NATS_URL: ${resources.env.NATS_URL}
       WORKOS_API_KEY: ${resources.env.WORKOS_API_KEY}
       WORKOS_CLIENT_ID: ${resources.env.WORKOS_CLIENT_ID}
@@ -68,6 +66,3 @@ resources:
       host: ${resources.dns.host}
       port: 8080
       path: /(auth/register|auth/logout|auth/login|auth/device|(users/.+)|(orgs/[^/]+/memberships.*)|(orgs/[^/]+/service-users.*)|(orgs/[^/]+/invitations.*)|(orgs/[^/]+/roles.*)|current-user|(devicelogins/.+))
-  spicedb:
-    type: spicedb
-    id: spicedb
