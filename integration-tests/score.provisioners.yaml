@@ -28,9 +28,3 @@
   type: service
   outputs: |
     name: {{ .Id | trimPrefix .SourceWorkload | trimPrefix "." }}
-
-- uri: template://spicedb
-  type: spicedb
-  outputs: |
-    preshared_key: t0k3n
-    hostname: spicedb

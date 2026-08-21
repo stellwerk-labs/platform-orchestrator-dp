@@ -7,7 +7,7 @@ NAME := runner
 DEFAULT_K8S_RES := platform-orchestrator-runner
 RUNNER_CONFIGURATION := runner_config.json
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
-IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.0.0
+IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.1.0
 RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
 RUNNER_IMAGE_PULL ?= true
 
