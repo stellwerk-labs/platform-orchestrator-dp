@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
+	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/authz"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
@@ -18,7 +19,7 @@ import (
 func (s *Server) CreateMetadataKey(ctx context.Context, request CreateMetadataKeyRequestObject) (CreateMetadataKeyResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgManageAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionMetadataKeyWrite); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +47,7 @@ func (s *Server) CreateMetadataKey(ctx context.Context, request CreateMetadataKe
 func (s *Server) GetMetadataKey(ctx context.Context, request GetMetadataKeyRequestObject) (GetMetadataKeyResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionMetadataKeyRead); err != nil {
 		return nil, err
 	}
 
@@ -64,7 +65,7 @@ func (s *Server) GetMetadataKey(ctx context.Context, request GetMetadataKeyReque
 func (s *Server) ListMetadataKeys(ctx context.Context, request ListMetadataKeysRequestObject) (ListMetadataKeysResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionMetadataKeyRead); err != nil {
 		return nil, err
 	}
 
@@ -95,7 +96,7 @@ func (s *Server) ListMetadataKeys(ctx context.Context, request ListMetadataKeysR
 func (s *Server) UpdateMetadataKey(ctx context.Context, request UpdateMetadataKeyRequestObject) (UpdateMetadataKeyResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgManageAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionMetadataKeyWrite); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +153,7 @@ func (s *Server) UpdateMetadataKey(ctx context.Context, request UpdateMetadataKe
 func (s *Server) DeleteMetadataKey(ctx context.Context, request DeleteMetadataKeyRequestObject) (DeleteMetadataKeyResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgManageAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionMetadataKeyWrite); err != nil {
 		return nil, err
 	}
 

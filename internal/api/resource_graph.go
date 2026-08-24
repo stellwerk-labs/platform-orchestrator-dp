@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/pkg/errors"
+	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/authz"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -14,7 +15,7 @@ import (
 func (s *Server) ListDeploymentResourceNodes(ctx context.Context, request ListDeploymentResourceNodesRequestObject) (ListDeploymentResourceNodesResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionResourceGraphRead); err != nil {
 		return nil, err
 	}
 

@@ -39,7 +39,7 @@ func mockOrgReadAuth(t *testing.T, s *Server, userId uuid.UUID, orgId string) {
 	s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface).
 		EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck(orgId)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionResourceGraphRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil)

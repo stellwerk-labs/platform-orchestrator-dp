@@ -98,7 +98,7 @@ func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(3)
@@ -835,7 +835,7 @@ output "platform_orchestrator_metadata" {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -997,7 +997,7 @@ output "one" {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -1122,7 +1122,7 @@ output "one" {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -1247,7 +1247,7 @@ output "one" {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -1418,7 +1418,7 @@ output "one" {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -1727,10 +1727,10 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 	userId := userid.NewHumanUserId()
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 
-	// First call: CanWriteEnvironmentCheck fails with 403
+	// First call: deployment_write environment check fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -1742,10 +1742,10 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 		},
 	}, nil).Times(1)
 
-	// Second call (fallback): CanWriteOrgCheck succeeds with 204
+	// Second call (fallback): deployment_write organization check succeeds with 204
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -1842,10 +1842,10 @@ func TestCreateDeployment_authorization_failure(t *testing.T) {
 	userId := userid.NewHumanUserId()
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 
-	// First call: CanWriteEnvironmentCheck fails with 403
+	// First call: deployment_write environment check fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -1857,10 +1857,10 @@ func TestCreateDeployment_authorization_failure(t *testing.T) {
 		},
 	}, nil).Times(1)
 
-	// Second call (fallback): CanWriteOrgCheck also fails with 403
+	// Second call (fallback): deployment_write organization check also fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -2043,7 +2043,7 @@ func TestWaitForDeploymentComplete_max_waiters(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -2068,10 +2068,10 @@ func TestWaitForDeploymentComplete_authorization_fallback_to_org(t *testing.T) {
 	userId := userid.NewHumanUserId()
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 
-	// First call: CanWriteEnvironmentCheck fails with 403
+	// First call: deployment_write environment check fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -2083,10 +2083,10 @@ func TestWaitForDeploymentComplete_authorization_fallback_to_org(t *testing.T) {
 		},
 	}, nil).Times(1)
 
-	// Second call (fallback): CanWriteOrgCheck succeeds with 204
+	// Second call (fallback): deployment_write organization check succeeds with 204
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -2128,10 +2128,10 @@ func TestWaitForDeploymentComplete_authorization_failure(t *testing.T) {
 	userId := userid.NewHumanUserId()
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 
-	// First call: CanWriteEnvironmentCheck fails with 403
+	// First call: deployment_write environment check fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -2143,10 +2143,10 @@ func TestWaitForDeploymentComplete_authorization_failure(t *testing.T) {
 		},
 	}, nil).Times(1)
 
-	// Second call (fallback): CanWriteOrgCheck also fails with 403
+	// Second call (fallback): deployment_write organization check also fails with 403
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentWrite)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusForbidden},
 		JSON403: &platformorchestratoriam.Error{
@@ -2372,7 +2372,7 @@ func TestGetDeployment_not_found(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -2478,7 +2478,7 @@ func TestGetDeploymentLogs_deployment_not_found(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -3087,7 +3087,7 @@ func TestListDeployments_org_not_found(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)
@@ -3117,7 +3117,7 @@ func TestListLastDeployments_org_not_found(t *testing.T) {
 	mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 	mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck("my-org")},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck("my-org", authz.PermissionDeploymentRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil).Times(1)

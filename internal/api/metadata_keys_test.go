@@ -163,7 +163,7 @@ func TestServer_CreateMetadataKey(t *testing.T) {
 			mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 			mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 				UserId: userId,
-				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanManageOrgCheck(orgId)},
+				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionMetadataKeyWrite)},
 			}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 			}, nil)
@@ -256,7 +256,7 @@ func TestServer_GetMetadataKey(t *testing.T) {
 			mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 			mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 				UserId: userId,
-				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck(orgId)},
+				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionMetadataKeyRead)},
 			}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 			}, nil)
@@ -380,7 +380,7 @@ func TestServer_ListMetadataKeys(t *testing.T) {
 			mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 			mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 				UserId: userId,
-				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck(orgId)},
+				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionMetadataKeyRead)},
 			}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 			}, nil)
@@ -679,7 +679,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 			mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 			mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 				UserId: userId,
-				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanManageOrgCheck(orgId)},
+				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionMetadataKeyWrite)},
 			}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 			}, nil)
@@ -768,7 +768,7 @@ func TestServer_DeleteMetadataKey(t *testing.T) {
 			mockIamClient := s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface)
 			mockIamClient.EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 				UserId: userId,
-				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanManageOrgCheck(orgId)},
+				Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, authz.PermissionMetadataKeyWrite)},
 			}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 			}, nil)

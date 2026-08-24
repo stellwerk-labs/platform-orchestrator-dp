@@ -79,18 +79,14 @@ func GetAuthenticatedUserIdOr401(ctx context.Context) (uuid.UUID, *echo.HTTPErro
 	return uuid.Nil, echo.NewHTTPError(http.StatusUnauthorized)
 }
 
-func (s *Server) checkOrgReadAuthorization(ctx context.Context, userId uuid.UUID, orgId string) error {
-	return s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck(orgId)})
+func (s *Server) checkOrgAuthorization(ctx context.Context, userId uuid.UUID, orgId, permission string) error {
+	return s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, permission)})
 }
 
-func (s *Server) checkOrgManageAuthorization(ctx context.Context, userId uuid.UUID, orgId string) error {
-	return s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.CanManageOrgCheck(orgId)})
-}
-
-func (s *Server) checkEnvWriteAuthorization(ctx context.Context, userId uuid.UUID, orgId string, envUuid uuid.UUID) error {
-	if scopedErr := s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteEnvironmentCheck(envUuid)}); scopedErr != nil {
-		// If the scoped check fails, we fall back to the org manage check for compatibility with older envs
-		if orgErr := s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.CanWriteOrgCheck(orgId)}); orgErr != nil {
+func (s *Server) checkEnvAuthorization(ctx context.Context, userId uuid.UUID, orgId string, envUuid uuid.UUID, permission string) error {
+	if scopedErr := s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, permission)}); scopedErr != nil {
+		// If the scoped check fails, fall back to the same permission at org scope for compatibility with older environments.
+		if orgErr := s.checkOrgAuthorization(ctx, userId, orgId, permission); orgErr != nil {
 			return scopedErr
 		}
 	}
