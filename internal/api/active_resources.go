@@ -8,7 +8,6 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
-	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/authz"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
@@ -19,7 +18,7 @@ import (
 func (s *Server) ListActiveResourceNodes(ctx context.Context, request ListActiveResourceNodesRequestObject) (ListActiveResourceNodesResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, authz.PermissionActiveResourceRead); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionActiveResourceRead); err != nil {
 		return nil, err
 	}
 

@@ -12,7 +12,6 @@ import (
 	"github.com/stellwerk-labs/golib/herrors"
 	"github.com/stellwerk-labs/golib/hlogger"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/authz"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 
@@ -80,11 +79,11 @@ func GetAuthenticatedUserIdOr401(ctx context.Context) (uuid.UUID, *echo.HTTPErro
 }
 
 func (s *Server) checkOrgAuthorization(ctx context.Context, userId uuid.UUID, orgId, permission string) error {
-	return s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.OrgCheck(orgId, permission)})
+	return s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{orgCheck(orgId, permission)})
 }
 
 func (s *Server) checkEnvAuthorization(ctx context.Context, userId uuid.UUID, orgId string, envUuid uuid.UUID, permission string) error {
-	if scopedErr := s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{authz.EnvironmentCheck(envUuid, permission)}); scopedErr != nil {
+	if scopedErr := s.innerCheck(ctx, userId, orgId, []platformorchestratoriam.ResourcePermissionCheck{environmentCheck(envUuid, permission)}); scopedErr != nil {
 		// If the scoped check fails, fall back to the same permission at org scope for compatibility with older environments.
 		if orgErr := s.checkOrgAuthorization(ctx, userId, orgId, permission); orgErr != nil {
 			return scopedErr
