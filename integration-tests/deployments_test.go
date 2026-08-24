@@ -107,7 +107,7 @@ func TestDeployments(t *testing.T) {
 			EncryptedOutputsRecipient: ref.Ref("age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"),
 		})
 		if assert.NoError(t, err) && assert.Equal(t, http.StatusForbidden, res.StatusCode(), string(res.Body)) {
-			assert.Contains(t, string(res.Body), fmt.Sprintf(`"permission":"write","resource":"env:%s"`, env.Uuid.String()))
+			assert.Contains(t, string(res.Body), fmt.Sprintf(`"permission":"deployment_write","resource":"env:%s"`, env.Uuid.String()))
 		}
 	})
 
