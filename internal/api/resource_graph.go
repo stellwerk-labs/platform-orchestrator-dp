@@ -14,7 +14,7 @@ import (
 func (s *Server) ListDeploymentResourceNodes(ctx context.Context, request ListDeploymentResourceNodesRequestObject) (ListDeploymentResourceNodesResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionResourceGraphRead); err != nil {
 		return nil, err
 	}
 

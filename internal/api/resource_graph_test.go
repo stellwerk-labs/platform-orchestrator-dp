@@ -9,7 +9,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hecho"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
-	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/authz"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"github.com/stretchr/testify/assert"
@@ -39,7 +38,7 @@ func mockOrgReadAuth(t *testing.T, s *Server, userId uuid.UUID, orgId string) {
 	s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface).
 		EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{authz.CanReadOrgCheck(orgId)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{orgCheck(orgId, PermissionResourceGraphRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil)

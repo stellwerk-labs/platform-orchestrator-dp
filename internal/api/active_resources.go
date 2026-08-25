@@ -18,7 +18,7 @@ import (
 func (s *Server) ListActiveResourceNodes(ctx context.Context, request ListActiveResourceNodesRequestObject) (ListActiveResourceNodesResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionActiveResourceRead); err != nil {
 		return nil, err
 	}
 

@@ -191,7 +191,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 	} else if e.StatusCode() != http.StatusOK {
 		return nil, errors.Errorf("unexpected status code when getting environment: %s: %s", e.Status(), string(e.Body))
 	} else {
-		if err := s.checkEnvWriteAuthorization(ctx, uid, request.OrgId, e.JSON200.Uuid); err != nil {
+		if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, e.JSON200.Uuid, PermissionDeploymentWrite); err != nil {
 			return nil, err
 		}
 		env = *e.JSON200
@@ -317,7 +317,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 func (s *Server) ListDeployments(ctx context.Context, request ListDeploymentsRequestObject) (ListDeploymentsResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 
@@ -358,7 +358,7 @@ func (s *Server) ListDeployments(ctx context.Context, request ListDeploymentsReq
 func (s *Server) ListLastDeployments(ctx context.Context, request ListLastDeploymentsRequestObject) (ListLastDeploymentsResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 
@@ -398,7 +398,7 @@ func (s *Server) ListLastDeployments(ctx context.Context, request ListLastDeploy
 func (s *Server) GetDeployment(ctx context.Context, request GetDeploymentRequestObject) (GetDeploymentResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 
@@ -443,7 +443,7 @@ func (s *Server) GetDeploymentBundle(ctx context.Context, request GetDeploymentB
 func (s *Server) GetDeploymentTf(ctx context.Context, request GetDeploymentTfRequestObject) (GetDeploymentTfResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgManageAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentDebugRead); err != nil {
 		return nil, err
 	}
 
@@ -870,7 +870,7 @@ func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLog
 		With(logging.ZapOrgId(request.OrgId), logging.ZapDeploymentId(request.DeploymentId.String()))
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 
@@ -949,7 +949,7 @@ func (s *Server) WaitForDeploymentComplete(ctx context.Context, request WaitForD
 			}
 			return nil, errors.Wrap(err, "failed to get deployment")
 		} else {
-			if err := s.checkEnvWriteAuthorization(ctx, uid, request.OrgId, d.DeploymentEnvUuid); err != nil {
+			if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, d.DeploymentEnvUuid, PermissionDeploymentWrite); err != nil {
 				return nil, err
 			}
 		}
@@ -1030,7 +1030,7 @@ func ScheduleDeploymentOutputsCleaning(ctx context.Context, interval time.Durati
 func (s *Server) GetDeploymentEncryptedOutputs(ctx context.Context, request GetDeploymentEncryptedOutputsRequestObject) (GetDeploymentEncryptedOutputsResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 
@@ -1094,7 +1094,7 @@ func (s *Server) InternalForceFailDeployment(ctx context.Context, request Intern
 func (s *Server) CalculateDeploymentDiff(ctx context.Context, request CalculateDeploymentDiffRequestObject) (CalculateDeploymentDiffResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
 		return nil, err
-	} else if err := s.checkOrgReadAuthorization(ctx, uid, request.OrgId); err != nil {
+	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 	ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)

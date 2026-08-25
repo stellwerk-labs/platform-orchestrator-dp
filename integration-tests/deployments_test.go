@@ -107,7 +107,7 @@ func TestDeployments(t *testing.T) {
 			EncryptedOutputsRecipient: ref.Ref("age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"),
 		})
 		if assert.NoError(t, err) && assert.Equal(t, http.StatusForbidden, res.StatusCode(), string(res.Body)) {
-			assert.Contains(t, string(res.Body), fmt.Sprintf(`"permission":"write","resource":"env:%s"`, env.Uuid.String()))
+			assert.Contains(t, string(res.Body), fmt.Sprintf(`"permission":"deployment_write","resource":"env:%s"`, env.Uuid.String()))
 		}
 	})
 
@@ -2206,8 +2206,10 @@ output "main" {
 		res, err := dpClient.ListLastDeploymentsWithResponse(t.Context(), orgId, &serverclient.ListLastDeploymentsParams{ProjectId: ref.Ref(env.ProjectId), EnvId: ref.Ref(env.Id)})
 		require.NoError(collect, err)
 		require.Equal(collect, http.StatusOK, res.StatusCode(), string(res.Body))
-		require.Equal(collect, "destroy", res.JSON200.Items[0].Mode)
-		dep.Id = res.JSON200.Items[0].Id
+		if assert.NotNil(collect, res.JSON200) && assert.NotEmpty(collect, res.JSON200.Items) {
+			require.Equal(collect, "destroy", res.JSON200.Items[0].Mode)
+			dep.Id = res.JSON200.Items[0].Id
+		}
 	}, time.Minute, time.Second, "failed to find destroy deployment")
 	assert.Equal(t, `terraform {
   backend "kubernetes" {
