@@ -23,6 +23,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
+	github.com/oapi-codegen/nullable v1.2.0
 	github.com/oapi-codegen/runtime v1.4.0
 	github.com/pkg/errors v0.9.1
 	github.com/pressly/goose/v3 v3.27.0

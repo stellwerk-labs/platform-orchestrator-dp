@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/oapi-codegen/nullable"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
 	"go.uber.org/zap"
@@ -14,6 +15,18 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 )
+
+func applyNullableStringUpdate(update nullable.Nullable[string], current **string) {
+	if !update.IsSpecified() {
+		return
+	}
+	if update.IsNull() {
+		*current = nil
+		return
+	}
+	value := update.MustGet()
+	*current = &value
+}
 
 func (s *Server) CreateMetadataKey(ctx context.Context, request CreateMetadataKeyRequestObject) (CreateMetadataKeyResponseObject, error) {
 	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
@@ -119,19 +132,13 @@ func (s *Server) UpdateMetadataKey(ctx context.Context, request UpdateMetadataKe
 			return nil, errors.Wrap(err, "failed to get metadata key")
 		}
 
-		if request.Body.Description != nil {
-			metadataKey.Description = request.Body.Description
-		}
+		applyNullableStringUpdate(request.Body.Description, &metadataKey.Description)
 		if request.Body.Schema != nil {
 			if request.Body.Schema.Type != nil {
 				metadataKey.Schema.Type = string(ref.DerefOr(request.Body.Schema.Type, UpdateMetadataKeySchemaTypeString))
 			}
-			if request.Body.Schema.Format != nil {
-				metadataKey.Schema.Format = request.Body.Schema.Format
-			}
-			if request.Body.Schema.Pattern != nil {
-				metadataKey.Schema.Pattern = request.Body.Schema.Pattern
-			}
+			applyNullableStringUpdate(request.Body.Schema.Format, &metadataKey.Schema.Format)
+			applyNullableStringUpdate(request.Body.Schema.Pattern, &metadataKey.Schema.Pattern)
 		}
 
 		err = s.Database.UpdateMetadataKey(ctx, tx, request.OrgId, metadataKey)
