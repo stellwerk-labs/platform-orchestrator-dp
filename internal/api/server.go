@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	strictecho "github.com/oapi-codegen/runtime/strictmiddleware/echo"
 	"github.com/stellwerk-labs/golib/hecho"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
@@ -47,11 +48,11 @@ type Server struct {
 
 func (s *Server) MapRoutes(e *echo.Echo) {
 	apiHandler := NewStrictHandler(s, []StrictMiddlewareFunc{
-		hecho.OperationIdCollectorMiddleware,
-		hecho.BuildContextTimeoutMiddlewareWithDuration(RequestHandlerTimeout),
-		middleware.NewAuthZAsserter(regexp.MustCompile("^Internal.*$")),
-		hecho.AuthMiddleware(UserIdHeaderScopes),
-		token.StrictEncryptionMiddleware(),
+		adaptStrictMiddleware(hecho.OperationIdCollectorMiddleware),
+		adaptStrictMiddleware(hecho.BuildContextTimeoutMiddlewareWithDuration(RequestHandlerTimeout)),
+		adaptStrictMiddleware(middleware.NewAuthZAsserter(regexp.MustCompile("^Internal.*$"))),
+		adaptStrictMiddleware(hecho.AuthMiddleware(string(UserIdHeaderScopes))),
+		adaptStrictMiddleware(token.StrictEncryptionMiddleware()),
 	})
 	RegisterHandlers(e, apiHandler)
 
@@ -85,6 +86,12 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		"/internal/orgs/*/deployments/*/actions/forceFailure": "/internal/orgs/$1/deployments/$2/actions/force-failure",
 		"/internal/orgs/*/modules/*/actions/checkUsage":       "/internal/orgs/$1/modules/$2/actions/check-usage",
 	}))
+}
+
+func adaptStrictMiddleware(middleware strictecho.StrictEchoMiddlewareFunc) StrictMiddlewareFunc {
+	return func(handler StrictHandlerFunc, operationID string) StrictHandlerFunc {
+		return StrictHandlerFunc(middleware(strictecho.StrictEchoHandlerFunc(handler), operationID))
+	}
 }
 
 // StrictServerInterface is the interface that your Server implementation should generate methods for.

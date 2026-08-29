@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/oapi-codegen/nullable"
 	"github.com/stellwerk-labs/golib/hecho"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
@@ -431,7 +432,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 				},
 			},
 			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
@@ -472,7 +473,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 					Schema: &UpdateMetadataKeySchema{
 						Type: (*UpdateMetadataKeySchemaType)(&newType),
 					},
@@ -517,8 +518,8 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
 					Schema: &UpdateMetadataKeySchema{
-						Format:  &newFormat,
-						Pattern: &newPattern,
+						Format:  nullable.NewNullableWithValue(newFormat),
+						Pattern: nullable.NewNullableWithValue(newPattern),
 					},
 				},
 			},
@@ -555,12 +556,57 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 			},
 		},
 		{
+			name: "clear optional metadata key fields successfully",
+			request: UpdateMetadataKeyRequestObject{
+				OrgId:           orgId,
+				MetadataKeyName: metadataKey,
+				Body: &UpdateMetadataKeyJSONRequestBody{
+					Description: nullable.NewNullNullable[string](),
+					Schema: &UpdateMetadataKeySchema{
+						Format:  nullable.NewNullNullable[string](),
+						Pattern: nullable.NewNullNullable[string](),
+					},
+				},
+			},
+			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
+				db.EXPECT().GetMetadataKey(gomock.Any(), gomock.Any(), orgId, metadataKey).Return(&model.MetadataKey{
+					Name:        metadataKey,
+					Description: &metadataKeyDescription,
+					Schema: model.MetadataKeySchema{
+						Type:    metadataKeyType,
+						Format:  &metadataKeyFormat,
+						Pattern: &metadataKeyPattern,
+					},
+				}, nil)
+			},
+			updateMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
+				db.EXPECT().UpdateMetadataKey(gomock.Any(), gomock.Any(), orgId, &model.MetadataKey{
+					Name:        metadataKey,
+					Description: nil,
+					Schema: model.MetadataKeySchema{
+						Type:    metadataKeyType,
+						Format:  nil,
+						Pattern: nil,
+					},
+				}).Return(nil)
+			},
+			want: UpdateMetadataKey200JSONResponse{
+				Name:        metadataKey,
+				Description: nil,
+				Schema: MetadataKeySchema{
+					Type:    MetadataKeySchemaType(metadataKeyType),
+					Format:  nil,
+					Pattern: nil,
+				},
+			},
+		},
+		{
 			name: "get metadata key not found",
 			request: UpdateMetadataKeyRequestObject{
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 				},
 			},
 			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
@@ -579,7 +625,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 				},
 			},
 			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
@@ -593,7 +639,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 				},
 			},
 			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {
@@ -631,7 +677,7 @@ func TestServer_UpdateMetadataKey(t *testing.T) {
 				OrgId:           orgId,
 				MetadataKeyName: metadataKey,
 				Body: &UpdateMetadataKeyJSONRequestBody{
-					Description: &newDescription,
+					Description: nullable.NewNullableWithValue(newDescription),
 				},
 			},
 			getMetadataKeyBehavior: func(db *mock_model.MockDatabaser) {

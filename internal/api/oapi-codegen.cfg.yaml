@@ -8,3 +8,6 @@ generate:
 output: server.gen.go
 output-options:
   skip-prune: true
+  nullable-type: true
+compatibility:
+  enable-auth-scopes-on-context: true

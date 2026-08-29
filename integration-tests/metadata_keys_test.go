@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oapi-codegen/nullable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -105,7 +106,7 @@ func TestMetadataKeys(t *testing.T) {
 		description := "Updated description"
 
 		updateResp, err := dpClient.UpdateMetadataKeyWithResponse(ctx, testOrg, "Test-Key-1", serverclient.UpdateMetadataKeyJSONRequestBody{
-			Description: &description,
+			Description: nullable.NewNullableWithValue(description),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, updateResp.StatusCode())
@@ -118,13 +119,37 @@ func TestMetadataKeys(t *testing.T) {
 
 		updateResp, err := dpClient.UpdateMetadataKeyWithResponse(ctx, testOrg, "Test-Key-1", serverclient.UpdateMetadataKeyJSONRequestBody{
 			Schema: &serverclient.UpdateMetadataKeySchema{
-				Format: &format,
+				Format: nullable.NewNullableWithValue(format),
 			},
 		})
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, updateResp.StatusCode())
 		assert.NotNil(t, updateResp.JSON200)
 		assert.Equal(t, format, *updateResp.JSON200.Schema.Format)
+	})
+
+	t.Run("should clear optional metadata key fields", func(t *testing.T) {
+		updateResp, err := dpClient.UpdateMetadataKeyWithResponse(ctx, testOrg, "Test-Key-1", serverclient.UpdateMetadataKeyJSONRequestBody{
+			Description: nullable.NewNullNullable[string](),
+			Schema: &serverclient.UpdateMetadataKeySchema{
+				Format:  nullable.NewNullNullable[string](),
+				Pattern: nullable.NewNullNullable[string](),
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, updateResp.StatusCode())
+		require.NotNil(t, updateResp.JSON200)
+		assert.Nil(t, updateResp.JSON200.Description)
+		assert.Nil(t, updateResp.JSON200.Schema.Format)
+		assert.Nil(t, updateResp.JSON200.Schema.Pattern)
+
+		getResp, err := dpClient.GetMetadataKeyWithResponse(ctx, testOrg, "Test-Key-1")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, getResp.StatusCode())
+		require.NotNil(t, getResp.JSON200)
+		assert.Nil(t, getResp.JSON200.Description)
+		assert.Nil(t, getResp.JSON200.Schema.Format)
+		assert.Nil(t, getResp.JSON200.Schema.Pattern)
 	})
 
 	t.Run("should delete metadata key", func(t *testing.T) {

@@ -906,7 +906,7 @@ func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLog
 	}
 
 	if request.Params.DecryptKey == nil {
-		return GetDeploymentLogs200TextResponse{Body: string(decodedContent), Headers: GetDeploymentLogs200ResponseHeaders{ContentDisposition: fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId)}}, nil
+		return GetDeploymentLogs200TextResponse{Body: string(decodedContent), Headers: GetDeploymentLogs200ResponseHeaders{ContentDisposition: ref.Ref(fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId))}}, nil
 	}
 
 	agePrivateKey, err := age.ParseX25519Identity(*request.Params.DecryptKey)
@@ -927,7 +927,7 @@ func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLog
 	return GetDeploymentLogs200TextResponse{
 		Body: decryptedBuf.String(),
 		Headers: GetDeploymentLogs200ResponseHeaders{
-			ContentDisposition: fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId),
+			ContentDisposition: ref.Ref(fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId)),
 		},
 	}, nil
 }
