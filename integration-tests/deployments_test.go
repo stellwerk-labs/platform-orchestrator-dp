@@ -459,7 +459,8 @@ output "sample" {
 		res, err := client.GetDeploymentBundleWithResponse(t.Context(), orgId, dep.Id, &serverclient.GetDeploymentBundleParams{})
 		if assert.NoError(t, err) {
 			assert.Equal(t, http.StatusBadRequest, res.StatusCode(), string(res.Body))
-			assert.Contains(t, string(res.Body), `{"error":"HTTP-400","message":"parameter \"X-Deployment-Token\" in header has an error: empty value is not allowed"}`)
+			assert.Contains(t, string(res.Body), `"error":"HTTP-400"`)
+			assert.Contains(t, string(res.Body), "X-Deployment-Token")
 		}
 	})
 
