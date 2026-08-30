@@ -77,5 +77,7 @@ configure-cluster:
 	$(KUBECTL) create namespace $(DEFAULT_K8S_RES)
 	$(KUBECTL) apply -f runner-cluster/config -R
 	@printf '{"cluster_data":{"certificate_authority_data": "%s", "server": "%s"},"auth":{"client_certificate_data": "%s", "client_key_data": "%s"}}\n' "$$($(KUBECTL_INTERNAL) config view -o jsonpath='{.clusters[?(@.name == "$(CLUSTER_NAME)")].cluster.certificate-authority-data}' --raw )" "$$($(KUBECTL_INTERNAL) config view -o jsonpath='{.clusters[?(@.name == "$(CLUSTER_NAME)")].cluster.server}' --raw )" "$$( $(KUBECTL_INTERNAL) config view -o jsonpath='{.users[?(@.name == "$(CLUSTER_NAME)")].user.client-certificate-data}' --raw )" "$$( $(KUBECTL_INTERNAL) config view -o jsonpath='{.users[?(@.name == "$(CLUSTER_NAME)")].user.client-key-data}' --raw )" > $(RUNNER_CONFIGURATION)
-	if [ "$(RUNNER_IMAGE_PULL)" = "true" ]; then docker pull $(RUNNER_IMAGE); fi
-	kind load docker-image --name ${NAME} $(RUNNER_IMAGE)
+	if [ "$(RUNNER_IMAGE_PULL)" = "true" ]; then \
+		printf 'FROM %s\n' "$(RUNNER_IMAGE)" | docker buildx build --pull --load --provenance=false --platform "linux/$$(docker version --format '{{.Server.Arch}}')" --tag "$(RUNNER_IMAGE)" -; \
+	fi
+	kind load docker-image --name $(NAME) "$(RUNNER_IMAGE)"

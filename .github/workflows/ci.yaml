@@ -3,12 +3,15 @@ name: CI
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOCKER_BUILDKIT: "1"
@@ -19,21 +22,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           check-latest: true
           cache: true
-
-      - name: Install yq
-        run: |
-          sudo curl --fail --location --silent --show-error \
-            https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_linux_amd64 \
-            --output /usr/local/bin/yq
-          sudo chmod +x /usr/local/bin/yq
 
       - name: Generate
         run: make generate
@@ -57,7 +53,7 @@ jobs:
         run: make test-unit
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@db9de0fc1a667e1a49d2291a1a042dff081d78f6 # v9
         with:
           version: v2.11.4
 
@@ -65,7 +61,7 @@ jobs:
         run: docker build --target final --tag platform-orchestrator-dp:ci .
 
       - name: Upload unit test coverage
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: unit-test-coverage
           path: cover.out
@@ -76,11 +72,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Disable Docker containerd image store
         run: |
@@ -89,21 +84,21 @@ jobs:
           sudo systemctl restart docker
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           check-latest: true
           cache: false
 
       - name: Setup Score Compose
-        uses: score-spec/setup-score@v3.2.4
+        uses: score-spec/setup-score@888a7deafd396c3f3f05e00d2d9b0ab225799ac0 # v3.2.4
         with:
           file: score-compose
           version: 0.17.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
 
       - name: Run integration tests
         run: make test-integration
@@ -119,34 +114,36 @@ jobs:
         run: make clean
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'stellwerk-labs/platform-orchestrator-dp' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - verify
       - integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       contents: write
-      id-token: write
       issues: write
       packages: write
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Release
         id: release
-        uses: stellwerk-labs/semantic-release-action@main
+        uses: stellwerk-labs/semantic-release-action@b1269e93b486873118eef1646bfcd46a9d23d3a3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
         if: steps.release.outputs.version != ''
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -154,15 +151,16 @@ jobs:
 
       - name: Setup QEMU
         if: steps.release.outputs.version != ''
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.0.0
 
       - name: Setup Docker Buildx
         if: steps.release.outputs.version != ''
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
 
       - name: Build and push image
         if: steps.release.outputs.version != ''
-        uses: docker/build-push-action@v7
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -171,3 +169,15 @@ jobs:
           tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ steps.release.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify published image
+        if: steps.release.outputs.version != ''
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST"
+          docker buildx imagetools inspect "ghcr.io/stellwerk-labs/platform-orchestrator-dp@${IMAGE_DIGEST}"
