@@ -74,6 +74,7 @@ output "value" { value = terraform_data.value.output }`
 			"semantic_version": version, "module_source": "inline", "module_source_code": source,
 			"module_inputs": map[string]any{"value": value}, "module_params": map[string]any{},
 			"provider_mapping": map[string]any{}, "dependencies": map[string]any{}, "coprovisioned": []any{},
+			"output_schema": fixtureOutputSchema(),
 		}, http.StatusCreated, nil)
 	}
 	transition := func(version, action string) {

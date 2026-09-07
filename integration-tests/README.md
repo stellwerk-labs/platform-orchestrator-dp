@@ -8,6 +8,11 @@ publication. CI fails early when a required candidate input is absent instead
 of testing against a pre-versioning public image. No Enterprise credential is
 required by the OSS workflow.
 
+Managed Module fixtures declare their known output interfaces explicitly. They
+do not copy Resource Type schemas from the server or manufacture artifact
+digests. External digest claims are optional; real legacy and managed deployment
+tests still require the referenced artifact to be available on the Runner.
+
 Local builds can use `CP_IMAGE`, `IAM_IMAGE`, and `RUNNER_IMAGE` Make overrides.
 The Data Plane image is built from this worktree. The integration Makefile also
 accepts `COMPOSE_PROJECT_NAME`, `NAME`, `PUBLIC_PORT`, `DATABASE_PORT`, `CP_PORT`,

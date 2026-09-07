@@ -811,7 +811,11 @@ output "name" {
 }`),
 		},
 	} {
-		res, err := createManagedModuleWithResponse(t, cpClient, orgId, d)
+		outputName := "name"
+		if d.ResourceType == "postgres" {
+			outputName = "conn"
+		}
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, d, outputName)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -1246,7 +1250,7 @@ func Test_CreateDeployment_with_long_poll(t *testing.T) {
 	}
 	{
 		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}})
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -1374,7 +1378,7 @@ func Test_CreateDeployment_with_long_poll_with_pod_spec(t *testing.T) {
 	}
 	{
 		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"project": "my-gcp-project"}})
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -1903,7 +1907,7 @@ func Test_CreateDeployment_with_long_poll_fail_job_stuck(t *testing.T) {
 	}
 	{
 		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}})
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -2724,7 +2728,7 @@ func TestDeployment_ModuleErrorEnrichment(t *testing.T) {
 output "connection_string" {
   value = "postgres://localhost/${var.db_name}"
 }`),
-		})
+		}, "connection_string")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		moduleId = res.JSON201.Id

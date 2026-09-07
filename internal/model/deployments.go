@@ -105,7 +105,7 @@ type ModuleArtifactRequirement struct {
 	SemanticVersion           string `json:"semantic_version,omitempty"`
 	MigrationGeneration       string `json:"migration_generation,omitempty"`
 	Source                    string `json:"source"`
-	ArtifactDigest            string `json:"artifact_digest"`
+	ArtifactDigest            string `json:"artifact_digest,omitempty"`
 	RetainedArtifactException bool   `json:"retained_artifact_exception,omitempty"`
 	// Captured only after exact-version confirmation and scoped authorization.
 	// Background bundle reconstruction must not drop this operation's authority.

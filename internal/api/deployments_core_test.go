@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -50,6 +51,26 @@ func TestModuleArtifactRequirementsRejectMissingMetadata(t *testing.T) {
 	}
 	_, err := moduleArtifactRequirements(graph, nil, false)
 	require.ErrorContains(t, err, "no immutable version metadata")
+}
+
+func TestModuleArtifactRequirementsOmitAbsentDigestWithoutInventingClaim(t *testing.T) {
+	for _, generation := range []string{"v0", "v1", "managed"} {
+		t.Run(generation, func(t *testing.T) {
+			body := []byte(`{"modules":[{"id":"database","version_id":"exact-version","module_source":"git::https://example.com/database?ref=exact","migration_generation":"` + generation + `"}]}`)
+			artifacts, err := decodeCatalogueArtifacts(body, nil)
+			require.NoError(t, err)
+			coordinate := platform_orchestrator_graph.ResourceCoordinate{Type: "database", Class: "default", Id: "shared.db"}
+			graph := &platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]{Nodes: map[platform_orchestrator_graph.ResourceCoordinate]platform_orchestrator_graph.ResourceNode[*graphs.GraphNodeModuleConfig]{
+				coordinate: {ModuleConfiguration: &graphs.GraphNodeModuleConfig{DefinitionId: "database", VersionId: "exact-version"}},
+			}}
+			requirements, err := moduleArtifactRequirements(graph, artifacts, false)
+			require.NoError(t, err)
+			encoded, err := json.Marshal(requirements)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), "artifact_digest")
+			assert.Equal(t, generation, requirements[0].MigrationGeneration)
+		})
+	}
 }
 
 func TestModuleArtifactRequirementsRetainAuthoritativeLegacyGeneration(t *testing.T) {

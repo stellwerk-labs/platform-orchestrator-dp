@@ -267,7 +267,7 @@ resource "terraform_data" "value" { input = var.value }
 output "value" { value = terraform_data.value.output }`
 	created, err := createManagedModuleWithResponse(t, control, orgID, cp.ModuleCreateBody{
 		Id: moduleID, ResourceType: rt.JSON201.Id, ModuleSource: "inline", ModuleSourceCode: ref.Ref(source), ModuleInputs: map[string]interface{}{"value": "first"},
-	})
+	}, "value")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, created.StatusCode(), string(created.Body))
 	rule, err := control.CreateModuleRuleInOrgWithResponse(t.Context(), orgID, cp.RuleCreateBody{ModuleId: moduleID})
@@ -293,7 +293,7 @@ output "value" { value = terraform_data.value.output }`
 	deploy(envA, "first")
 	updated, err := updateManagedModuleWithResponse(t, control, orgID, moduleID, cp.ModuleUpdateBody{
 		ModuleSource: ref.Ref("inline"), ModuleSourceCode: ref.Ref(source), ModuleInputs: ref.Ref(map[string]interface{}{"value": "second"}),
-	})
+	}, "value")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, updated.StatusCode(), string(updated.Body))
 	deploy(envB, "second")

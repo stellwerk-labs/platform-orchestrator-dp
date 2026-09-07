@@ -71,7 +71,7 @@ func TestLegacyModuleExecutionAndHistoryRollback(t *testing.T) {
 			assert.Empty(t, artifacts[0].ArtifactDigest)
 		} else {
 			assert.Equal(t, expectedVersion, artifacts[0].SemanticVersion)
-			assert.NotEmpty(t, artifacts[0].ArtifactDigest)
+			assert.Empty(t, artifacts[0].ArtifactDigest, "managed external artifacts may omit the digest without inventing a claim")
 		}
 		return completed.Id
 	}
@@ -83,7 +83,7 @@ func TestLegacyModuleExecutionAndHistoryRollback(t *testing.T) {
 	deploy(serverclient.DeploymentCreateBodyModeDeploy, nil, "legacy-value", legacyVersion, "v0")
 	updated, err := updateManagedModuleWithResponse(t, cpClient, orgID, moduleID, platformorchestratorcp.ModuleUpdateBody{
 		ModuleSource: ref.Ref(source), ModuleInputs: ref.Ref(map[string]interface{}{"a": "managed-", "b": "value"}),
-	})
+	}, "c")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, updated.StatusCode(), string(updated.Body))
 	deploy(serverclient.DeploymentCreateBodyModeDeploy, nil, "managed-value", "1.0.1", "v1")

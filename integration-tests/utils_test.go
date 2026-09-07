@@ -543,35 +543,36 @@ func MustCreateResourceType(t *testing.T, cpClient platformorchestratorcp.Client
 	return res.JSON201
 }
 
-func createManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, body platformorchestratorcp.ModuleCreateBody) (*platformorchestratorcp.CreateModuleResponse, error) {
+func createManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, body platformorchestratorcp.ModuleCreateBody, outputNames ...string) (*platformorchestratorcp.CreateModuleResponse, error) {
 	t.Helper()
-	digest := ""
-	if body.ModuleSourceCode == nil {
-		sum := sha256.Sum256([]byte(body.ModuleSource))
-		digest = "sha256:" + hex.EncodeToString(sum[:])
-	}
-	response, err := cpClient.CreateModuleWithResponse(t.Context(), orgID, body, moduleVersionRequestEditor("1.0.0", digest))
+	response, err := cpClient.CreateModuleWithResponse(t.Context(), orgID, body, moduleVersionRequestEditor("1.0.0", "", outputNames...))
 	if err == nil && response.StatusCode() == http.StatusCreated {
 		err = promoteManagedModuleVersion(t.Context(), cpClient, orgID, body.Id, "1.0.0")
 	}
 	return response, err
 }
 
-func updateManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID, moduleID string, body platformorchestratorcp.ModuleUpdateBody) (*platformorchestratorcp.UpdateModuleResponse, error) {
+func updateManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID, moduleID string, body platformorchestratorcp.ModuleUpdateBody, outputNames ...string) (*platformorchestratorcp.UpdateModuleResponse, error) {
 	t.Helper()
-	digest := ""
-	if body.ModuleSourceCode == nil {
-		sum := sha256.Sum256([]byte(moduleID + ":1.0.1"))
-		digest = "sha256:" + hex.EncodeToString(sum[:])
-	}
-	response, err := cpClient.UpdateModuleWithResponse(t.Context(), orgID, moduleID, body, moduleVersionRequestEditor("1.0.1", digest))
+	response, err := cpClient.UpdateModuleWithResponse(t.Context(), orgID, moduleID, body, moduleVersionRequestEditor("1.0.1", "", outputNames...))
 	if err == nil && response.StatusCode() == http.StatusOK {
 		err = promoteManagedModuleVersion(t.Context(), cpClient, orgID, moduleID, "1.0.1")
 	}
 	return response, err
 }
 
-func moduleVersionRequestEditor(version, digest string) platformorchestratorcp.RequestEditorFn {
+// These fixtures declare an object with named string outputs. No names means
+// the deliberately unconstrained object contract used by the common fixtures.
+// Publication never retrieves or copies the server's Resource Type declaration.
+func fixtureOutputSchema(names ...string) map[string]any {
+	properties := map[string]any{}
+	for _, name := range names {
+		properties[name] = map[string]any{"type": "string"}
+	}
+	return map[string]any{"type": "object", "properties": properties}
+}
+
+func moduleVersionRequestEditor(version, digest string, outputNames ...string) platformorchestratorcp.RequestEditorFn {
 	return func(_ context.Context, request *http.Request) error {
 		payload, err := io.ReadAll(request.Body)
 		if err != nil {
@@ -582,6 +583,7 @@ func moduleVersionRequestEditor(version, digest string) platformorchestratorcp.R
 			return err
 		}
 		body["semantic_version"] = version
+		body["output_schema"] = fixtureOutputSchema(outputNames...)
 		if digest != "" {
 			body["artifact_digest"] = digest
 		}

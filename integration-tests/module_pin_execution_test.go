@@ -32,7 +32,7 @@ resource "terraform_data" "value" { input = var.value }
 output "value" { value = terraform_data.value.output }`
 	created, err := createManagedModuleWithResponse(t, cp, orgID, platformorchestratorcp.ModuleCreateBody{
 		Id: moduleID, ResourceType: resourceType.JSON201.Id, ModuleSource: "inline", ModuleSourceCode: ref.Ref(source), ModuleInputs: map[string]interface{}{"value": "initial"},
-	})
+	}, "value")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, created.StatusCode(), string(created.Body))
 	rule, err := cp.CreateModuleRuleInOrgWithResponse(t.Context(), orgID, platformorchestratorcp.RuleCreateBody{ModuleId: moduleID})
@@ -78,7 +78,7 @@ output "value" { value = terraform_data.value.output }`
 	}, http.StatusCreated, &pin)
 	updated, err := updateManagedModuleWithResponse(t, cp, orgID, moduleID, platformorchestratorcp.ModuleUpdateBody{
 		ModuleSource: ref.Ref("inline"), ModuleSourceCode: ref.Ref(source), ModuleInputs: ref.Ref(map[string]interface{}{"value": "advanced"}),
-	})
+	}, "value")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, updated.StatusCode(), string(updated.Body))
 	deploy("initial", nil)
