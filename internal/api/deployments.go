@@ -681,6 +681,11 @@ func (s *Server) UpdateDeploymentResults(ctx context.Context, request UpdateDepl
 
 var errRunnerOutputsInvalidBase64 = errors.New("outputs were invalid base64, expected std encoding")
 
+// ErrRunnerEventTargetInvalid identifies an authoritative, permanent rejection.
+// Retrying cannot recreate a deleted Deployment, change its Runner identity, or
+// overwrite a completed result. Other persistence errors remain retryable.
+var ErrRunnerEventTargetInvalid = errors.New("runner event target is no longer valid")
+
 func (s *Server) deploymentResultUpdateParams(
 	ctx context.Context,
 	orgID string,
@@ -728,6 +733,9 @@ func (s *Server) ApplyRunnerDeploymentResult(
 	)
 	updateParams, err := s.deploymentResultUpdateParams(ctx, orgID, deploymentID, &body)
 	if err != nil {
+		if _, missing := model.IsErrNotFound(err); missing {
+			return fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, err)
+		}
 		return err
 	}
 	request := UpdateDeploymentResultsRequestObject{
@@ -796,9 +804,12 @@ func (s *Server) commonUpdateDeploymentResults(
 
 		dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, request.OrgId, request.DeploymentId, model.GetModeForUpdate)
 		if err != nil {
+			if _, missing := model.IsErrNotFound(err); runnerEvent != nil && missing {
+				return nil, fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, err)
+			}
 			return nil, errors.Wrap(err, "failed to get deployment")
 		} else if runnerEvent != nil && dep.RunnerId != runnerEvent.RunnerID {
-			return nil, model.NewErrConflict("runner event does not belong to the deployment runner")
+			return nil, fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, model.NewErrConflict("runner event does not belong to the deployment runner"))
 		} else if runnerEvent != nil {
 			inserted, err := s.Database.TryRecordRunnerEvent(
 				ctx,
@@ -822,6 +833,9 @@ func (s *Server) commonUpdateDeploymentResults(
 		}
 
 		if dep.CompletedAt.IsSet() {
+			if runnerEvent != nil {
+				return nil, fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, model.NewErrConflict("deployment already completed"))
+			}
 			return nil, model.NewErrConflict("deployment already completed")
 		} else {
 			ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)

@@ -81,7 +81,7 @@ func (h *Handler) Handle(ctx context.Context, logger *zap.Logger, delivery hmess
 			return hmessaging.NewTerminalError(fmt.Errorf("invalid deployment result status %q", result.Status))
 		}
 		if err := h.Applier.ApplyRunnerDeploymentResult(ctx, envelope.OrganizationID, envelope.RunnerID, deploymentID, envelope.EventID, result); err != nil {
-			return errors.Wrap(err, "failed to apply deployment result")
+			return applicationError(err, "failed to apply deployment result")
 		}
 	case EventTypeRunnerError:
 		var runnerError runnerErrorPayload
@@ -99,9 +99,17 @@ func (h *Handler) Handle(ctx context.Context, logger *zap.Logger, delivery hmess
 			return nil
 		}
 		if err := h.Applier.ApplyRunnerError(ctx, envelope.OrganizationID, envelope.RunnerID, deploymentID, envelope.EventID, runnerError.Code, runnerError.Message); err != nil {
-			return errors.Wrap(err, "failed to apply runner error")
+			return applicationError(err, "failed to apply runner error")
 		}
 	}
 	logger.Info("applied runner event", zap.String("event_id", envelope.EventID), zap.String("event_type", envelope.Type))
 	return nil
+}
+
+func applicationError(err error, message string) error {
+	err = errors.Wrap(err, message)
+	if errors.Is(err, api.ErrRunnerEventTargetInvalid) {
+		return hmessaging.NewTerminalError(err)
+	}
+	return err
 }

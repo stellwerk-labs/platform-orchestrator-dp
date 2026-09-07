@@ -3,6 +3,8 @@ package runnerresulthandler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"go.uber.org/zap/zaptest"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
 type recordingApplier struct {
@@ -106,4 +109,26 @@ func TestHandleRejectsSubjectEnvelopeIdentityMismatch(t *testing.T) {
 	err := handler.Handle(t.Context(), zaptest.NewLogger(t), delivery)
 	require.Error(t, err)
 	assert.True(t, hmessaging.IsTerminalError(err))
+}
+
+func TestApplicationErrorRetriesOnlyRecoverableResults(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		terminal bool
+	}{
+		{"deleted target", fmt.Errorf("%w: %w", api.ErrRunnerEventTargetInvalid, model.NewErrNotFound("deleted deployment")), true},
+		{"completed target", fmt.Errorf("%w: %w", api.ErrRunnerEventTargetInvalid, model.NewErrConflict("deployment already completed")), true},
+		{"unclassified persistence absence", model.NewErrNotFound("other persistence record"), false},
+		{"unclassified transaction conflict", model.NewErrConflict("concurrent transaction"), false},
+		{"database unavailable", errors.New("database unavailable"), false},
+		{"IAM unavailable", errors.New("IAM unavailable"), false},
+		{"cancelled request", context.Canceled, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := applicationError(test.err, "failed to apply result")
+			assert.Equal(t, test.terminal, hmessaging.IsTerminalError(err))
+			require.ErrorIs(t, err, test.err)
+		})
+	}
 }
