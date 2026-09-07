@@ -166,6 +166,7 @@ type pinRecord struct {
 	VersionUUID       uuid.UUID `json:"version_uuid"`
 	CreatedBy         uuid.UUID `json:"created_by"`
 	ActivationEventID uuid.UUID `json:"activation_event_id"`
+	BulkOperationID   uuid.UUID `json:"bulk_operation_id"`
 	ResourceVersion   int64     `json:"resource_version"`
 	Status            string    `json:"status"`
 }
@@ -183,6 +184,7 @@ type pinPreview struct {
 		VersionUUID     uuid.UUID `json:"version_uuid"`
 		Eligible        bool      `json:"eligible"`
 		Problem         string    `json:"problem"`
+		PinID           uuid.UUID `json:"pin_id"`
 	} `json:"items"`
 }
 
@@ -245,6 +247,48 @@ func requireConcurrentPinBulkReplay(t *testing.T, actor uuid.UUID, path string, 
 		require.NoError(t, json.Unmarshal(result.body, &actual))
 		require.Equal(t, expected, actual)
 	}
+}
+
+func makePinsOverriddenForDiscard(t *testing.T, database *sql.DB, orgID string, actor uuid.UUID, pins []pinRecord) map[uuid.UUID]uuid.UUID {
+	t.Helper()
+	require.NotEmpty(t, pins)
+	tx, err := database.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	activationByPin := make(map[uuid.UUID]uuid.UUID, len(pins))
+	for _, pin := range pins {
+		operationID := uuid.New()
+		eventID := uuid.New()
+		reason := "Synthetic neutral overridden Pin fixture for bulk Discard; no Deployment outcome asserted"
+		var eventRevision int64
+		require.NoError(t, tx.QueryRowContext(t.Context(), `SELECT COALESCE(MAX(revision), 0) + 1
+			FROM environment_module_version_pin_events WHERE pin_id = $1`, pin.ID).Scan(&eventRevision))
+		var activationEventID uuid.UUID
+		var resourceVersion int64
+		var deploymentID *uuid.UUID
+		require.NoError(t, tx.QueryRowContext(t.Context(), `UPDATE environment_module_version_pins SET
+			status = 'overridden',
+			resource_version = resource_version + 1,
+			override_operation_id = $3,
+			override_target_version_uuid = $4,
+			override_actor = $5,
+			override_reason = $6,
+			override_deployment_id = NULL,
+			updated_at = now()
+			WHERE org_id = $1 AND id = $2 AND status = 'active'
+			RETURNING activation_event_id, resource_version, override_deployment_id`,
+			orgID, pin.ID, operationID, pin.VersionUUID, actor, reason).Scan(&activationEventID, &resourceVersion, &deploymentID))
+		require.Equal(t, pin.ResourceVersion+1, resourceVersion)
+		require.Nil(t, deploymentID)
+		_, err = tx.ExecContext(t.Context(), `INSERT INTO environment_module_version_pin_events
+			(id, pin_id, revision, event_type, from_status, to_status, activation_event_id, actor, actor_type, reason, operation_id, deployment_id, bulk_operation_id)
+			VALUES ($1, $2, $3, 'override_fixture', 'active', 'overridden', $4, $5, 'addon', $6, $7, NULL, $8)`,
+			eventID, pin.ID, eventRevision, activationEventID, actor, reason, operationID, pin.BulkOperationID)
+		require.NoError(t, err)
+		activationByPin[pin.ID] = activationEventID
+	}
+	require.NoError(t, tx.Commit())
+	return activationByPin
 }
 
 func TestBulkPinsUseFrozenDeployedVersionsAndRealScopedAuthority(t *testing.T) {
@@ -315,6 +359,9 @@ output "value" { value = terraform_data.value.output }`
 	reviewer := mustPinScopePrincipal(t, orgID,
 		pinScopeGrant{Scope: "project:" + projectA.Uuid.String(), Permissions: corePermissions},
 		pinScopeGrant{Scope: "env:" + envB.Uuid.String(), Permissions: []string{"module.version.pin-override"}})
+	discarder := mustPinScopePrincipal(t, orgID,
+		pinScopeGrant{Scope: "project:" + projectA.Uuid.String(), Permissions: []string{"module.version.unpin"}},
+		pinScopeGrant{Scope: "env:" + envB.Uuid.String(), Permissions: []string{"module.version.unpin"}})
 	database, err := sql.Open("postgres", os.Getenv("CP_DB_CONNECTION_STRING"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
@@ -441,14 +488,75 @@ output "value" { value = terraform_data.value.output }`
 	eligible = preview(creator, "pin")
 	bulk(creator, "pin", eligible, "second-bulk-pin", http.StatusOK)
 	eligible = preview(creator, "unpin")
-	removed := bulk(creator, "unpin", eligible, "complete-bulk-unpin", http.StatusOK)
+	completeUnpinPreview := eligible
+	removed := bulk(creator, "unpin", completeUnpinPreview, "complete-bulk-unpin", http.StatusOK)
 	require.Len(t, removed.Pins, 2)
 	for _, pin := range removed.Pins {
 		require.Equal(t, "removed", pin.Status)
 	}
 	before = pinDatabaseSnapshot(t, database, orgID)
-	require.Equal(t, removed, bulk(creator, "unpin", eligible, "complete-bulk-unpin", http.StatusOK))
+	require.Equal(t, removed, bulk(creator, "unpin", completeUnpinPreview, "complete-bulk-unpin", http.StatusOK))
 	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
+
+	eligible = preview(creator, "pin")
+	discardFixture := bulk(creator, "pin", eligible, "discard-fixture-bulk-pin", http.StatusOK)
+	require.Len(t, discardFixture.Pins, 2)
+	activationByPin := makePinsOverriddenForDiscard(t, database, orgID, creator, discardFixture.Pins)
+	before = pinDatabaseSnapshot(t, database, orgID)
+	discardDenied := preview(reviewer, "discard")
+	require.False(t, discardDenied.Eligible)
+	require.Len(t, discardDenied.Items, 2)
+	for _, item := range discardDenied.Items {
+		require.Equal(t, item.EnvironmentUUID == envA.Uuid, item.Eligible)
+		if !item.Eligible {
+			require.Empty(t, item.EnvironmentID, "a denied preview must not disclose the Environment name")
+			require.Empty(t, item.EnvironmentType)
+			require.Empty(t, item.ProjectID)
+			require.Equal(t, uuid.Nil, item.ProjectUUID)
+			require.Equal(t, uuid.Nil, item.VersionUUID)
+			require.Equal(t, uuid.Nil, item.PinID)
+			require.False(t, item.Production)
+		}
+	}
+	bulk(reviewer, "discard", discardDenied, "partial-discard-denied", http.StatusConflict)
+	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
+	eligible = preview(discarder, "discard")
+	require.True(t, eligible.Eligible)
+	discardVersions := map[uuid.UUID]uuid.UUID{}
+	for _, item := range eligible.Items {
+		require.True(t, item.Eligible)
+		require.NotEqual(t, uuid.Nil, item.PinID)
+		discardVersions[item.EnvironmentUUID] = item.VersionUUID
+	}
+	require.Equal(t, map[uuid.UUID]uuid.UUID{envA.Uuid: oldVersion, envB.Uuid: newVersion}, discardVersions)
+	discarded := bulk(discarder, "discard", eligible, "complete-bulk-discard", http.StatusOK)
+	require.Len(t, discarded.Pins, 2)
+	for _, pin := range discarded.Pins {
+		require.Equal(t, "removed", pin.Status)
+		require.Equal(t, activationByPin[pin.ID], pin.ActivationEventID)
+	}
+	before = pinDatabaseSnapshot(t, database, orgID)
+	require.Equal(t, discarded, bulk(discarder, "discard", eligible, "complete-bulk-discard", http.StatusOK))
+	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
+	for _, pin := range discarded.Pins {
+		var discardEvents []struct {
+			Actor             uuid.UUID  `json:"actor"`
+			EventType         string     `json:"event_type"`
+			Reason            string     `json:"reason"`
+			ActivationEventID uuid.UUID  `json:"activation_event_id"`
+			DeploymentID      *uuid.UUID `json:"deployment_id"`
+		}
+		pinActorJSON(t, uuid.Nil, http.MethodGet, root+"/module-version-pins/"+pin.ID.String()+"/events", nil, "", http.StatusOK, &discardEvents)
+		require.Len(t, discardEvents, 3)
+		require.Equal(t, "override_fixture", discardEvents[1].EventType)
+		require.Contains(t, discardEvents[1].Reason, "no Deployment outcome asserted")
+		require.Nil(t, discardEvents[1].DeploymentID)
+		require.Equal(t, "discarded", discardEvents[2].EventType)
+		require.Equal(t, discarder, discardEvents[2].Actor)
+		require.Equal(t, "Freeze the reviewed project snapshot", discardEvents[2].Reason)
+		require.Equal(t, activationByPin[pin.ID], discardEvents[2].ActivationEventID)
+		require.Nil(t, discardEvents[2].DeploymentID)
+	}
 
 	// Revocation is performed through real IAM, not a test-local permission map.
 	var memberships struct {
@@ -475,7 +583,7 @@ output "value" { value = terraform_data.value.output }`
 			assert.Equal(c, http.StatusForbidden, allowed.StatusCode(), string(allowed.Body))
 		}
 	}, 70*time.Second, 100*time.Millisecond)
-	bulk(creator, "unpin", eligible, "complete-bulk-unpin", http.StatusForbidden)
+	bulk(creator, "unpin", completeUnpinPreview, "complete-bulk-unpin", http.StatusForbidden)
 	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
 	deploymentDatabase, err := sql.Open("postgres", os.Getenv("DB_CONNECTION_STRING"))
 	require.NoError(t, err)
