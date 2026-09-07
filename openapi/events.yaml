@@ -12,6 +12,7 @@ components:
         - io.platform-orchestrator.deployment.created
         - io.platform-orchestrator.deployment.updated
         - io.platform-orchestrator.runner.check_status
+        - io.platform-orchestrator.module.version.adoption-changed
 
     OrgId:
       type: string
@@ -53,6 +54,29 @@ components:
           $ref: "#/components/schemas/Revision"
         status:
           type: string
+
+    ModuleVersionAdoptionChangedData:
+      required:
+        - org_id
+        - project_id
+        - env_id
+        - env_uuid
+        - deployment_id
+        - observed_at
+      properties:
+        org_id:
+          $ref: '#/components/schemas/OrgId'
+        project_id:
+          $ref: '#/components/schemas/ProjectId'
+        env_id:
+          $ref: '#/components/schemas/EnvId'
+        env_uuid:
+          $ref: '#/components/schemas/EnvUuid'
+        deployment_id:
+          $ref: '#/components/schemas/DeploymentId'
+        observed_at:
+          type: string
+          format: date-time
 
     RunnerStatusCheckData:
       required:

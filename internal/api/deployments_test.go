@@ -424,9 +424,7 @@ output "two" {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
 
-			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
-				PinnedModuleVersions: []string{"d1@v1", "d2@v1", "d3@v1"},
-			}).
+			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}, gomock.Any()).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 					HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 					JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -609,7 +607,7 @@ output "one" {
 			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 				PinnedModuleVersions: []string{"d1@v1", "d2@v1", "d3@v1"},
 				AreRulesIgnored:      true,
-			}).
+			}, gomock.Any()).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 					HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 					JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -759,12 +757,12 @@ func TestCreateDeployment_with_rollback(t *testing.T) {
 		},
 	})
 	mdb.EXPECT().GetDeployment(gomock.Any(), gomock.Not(nil), "my-org", rollbackToId, model.GetModeDefault).
-		Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid}, encodedManifest, nil, encodedGraph, nil)
+		Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Status: model.DeploymentStatusSucceeded}, encodedManifest, nil, encodedGraph, nil)
 
 	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 		PinnedModuleVersions: []string{"some-def@some-ver"},
 		AreRulesIgnored:      true,
-	}).
+	}, gomock.Any(), gomock.Any()).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -2426,6 +2424,7 @@ func TestGetDeploymentBundle(t *testing.T) {
 	s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GenerateInternalModuleCatalogueWithResponse(
 		gomock.Any(), "my-org", "my-project", "my-env",
 		platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{AreRulesIgnored: true, PinnedModuleVersions: []string{"thing1@v2"}},
+		gomock.Any(),
 	).Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 		JSON200: &platformorchestratorcp.InternalModuleCatalogue{

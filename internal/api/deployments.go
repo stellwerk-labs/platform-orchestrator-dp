@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/bundles"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -210,6 +212,9 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 	} else if request.Body.Mode != DeploymentCreateBodyModeRollback && request.Body.RollbackToDeploymentId != nil {
 		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response(fmt.Sprintf("rollback_to_deployment_id must not be set when mode is %s", request.Body.Mode))}, nil
 	}
+	if request.Body.Mode == DeploymentCreateBodyModeRollback && len(request.Body.ModuleVersions) > 0 {
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("module_versions cannot be provided for a rollback deployment")}, nil
+	}
 
 	if request.Body.Manifest != nil {
 		for name, workload := range request.Body.Manifest.Workloads {
@@ -281,11 +286,37 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 			}
 		}()
 
-		dep, messages, diff, err := CreateDeployment(
+		options := DeploymentOptions{
+			ExplicitModuleVersions:  request.Body.ModuleVersions,
+			RestrictedConfirmations: request.Body.ConfirmRestrictedModuleVersionUuids,
+		}
+		needsModuleVersionAuthorization := len(request.Body.ModuleVersions) > 0 || len(request.Body.ConfirmRestrictedModuleVersionUuids) > 0
+		if needsModuleVersionAuthorization {
+			options.AuthorizeModuleVersion = func(_ string, explicitlySelected bool, artifact catalogueArtifact) error {
+				switch artifact.Status {
+				case "proposed":
+					if explicitlySelected {
+						return s.checkEnvAuthorization(ctx, uid, request.OrgId, env.Uuid, PermissionModuleVersionUseProposed)
+					}
+				case "defective":
+					if artifact.VersionUUID == uuid.Nil || !slices.Contains(request.Body.ConfirmRestrictedModuleVersionUuids, artifact.VersionUUID) {
+						return model.NewErrBadRequest("Defective Module Version requires explicit confirmation of its exact Version UUID")
+					}
+					permission := PermissionModuleVersionPinDefective
+					if modelMode == model.DeploymentModeRollback || modelMode == model.DeploymentModeRollbackPlan {
+						permission = PermissionModuleVersionRollbackRestricted
+					}
+					return s.checkEnvAuthorization(ctx, uid, request.OrgId, env.Uuid, permission)
+				}
+				return nil
+			}
+		}
+
+		dep, messages, diff, err := CreateDeploymentWithOptions(
 			ctx, logger, uid,
 			request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, opt.OfRef(request.Body.RollbackToDeploymentId),
 			ref.DerefOr(request.Body.Manifest, DeploymentManifest{}), request.Body.EncryptedOutputsRecipient, request.Body.EncryptedLogsRecipient, request.Params.IdempotencyKey, request.Body.IsDryRun,
-			request.Body.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx,
+			request.Body.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx, options,
 		)
 		if err != nil {
 			if e, ok := model.IsErrBadRequest(err); ok {
@@ -838,11 +869,30 @@ func (s *Server) commonUpdateDeploymentResults(
 				}
 			}
 
-			msg := &hstandardoutbox.PendingEventMessage{
+			pendingMessages := []*hstandardoutbox.PendingEventMessage{{
 				Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
 				Payload: model.ConvertDeploymentToEventPayload(dep),
+			}}
+			if dep.Mode != model.DeploymentModeDeployPlan && updateParams.Status == model.DeploymentStatusSucceeded {
+				observedAt := time.Now().UTC()
+				if dep.CompletedAt.IsSet() {
+					observedAt = dep.CompletedAt.Must()
+				}
+				payload, marshalErr := json.Marshal(events.CloudEvent[genevents.ModuleVersionAdoptionChangedData]{
+					SpecVersion: events.CloudEventSpecVersion1{}, Type: genevents.IoPlatformOrchestratorModuleVersionAdoptionChanged,
+					Time: observedAt, Data: genevents.ModuleVersionAdoptionChangedData{
+						OrgId: dep.OrgId, ProjectId: dep.ProjectId, EnvId: dep.EnvId, EnvUuid: dep.DeploymentEnvUuid,
+						DeploymentId: dep.Id, ObservedAt: observedAt,
+					},
+				})
+				if marshalErr != nil {
+					return nil, errors.Wrap(marshalErr, "failed to encode Module adoption event")
+				}
+				pendingMessages = append(pendingMessages, &hstandardoutbox.PendingEventMessage{
+					Subject: string(genevents.IoPlatformOrchestratorModuleVersionAdoptionChanged), Payload: payload,
+				})
 			}
-			if messages, err := s.Database.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{msg}); err != nil {
+			if messages, err := s.Database.InsertPendingEventMessages(ctx, tx, pendingMessages); err != nil {
 				return nil, errors.Wrap(err, "failed to insert pending event messages")
 			} else if err := tx.Commit(); err != nil {
 				return nil, errors.Wrap(err, "failed to commit transaction")

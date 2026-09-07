@@ -57,11 +57,13 @@ type DeploymentSummary struct {
 	Status        DeploymentStatus
 	StatusMessage string
 
-	RunnerId                  string
-	Metrics                   DeploymentMetrics
-	EncryptedOutputsRecipient opt.Opt[string]
-	EncryptedLogsRecipient    opt.Opt[string]
-	RunnerLogLevel            string
+	RunnerId                   string
+	Metrics                    DeploymentMetrics
+	EncryptedOutputsRecipient  opt.Opt[string]
+	EncryptedLogsRecipient     opt.Opt[string]
+	RunnerLogLevel             string
+	ModuleArtifacts            []ModuleArtifactRequirement
+	ModuleVersionRequestDigest string
 }
 
 type UpdateDeploymentStatusAndOutputsParams struct {
@@ -80,19 +82,34 @@ type EncodedDeploymentGraph json.RawMessage
 type RawTofu []byte
 
 type CreateDeploymentParams struct {
-	CreatedBy                 uuid.UUID
-	DeploymentEnvUuid         uuid.UUID
-	Mode                      DeploymentMode
-	Manifest                  EncodedDeploymentManifest
-	RollbackToId              opt.Opt[uuid.UUID]
-	Graph                     EncodedDeploymentGraph
-	Tofu                      RawTofu
-	IdempotencyKeyDigest      opt.Opt[string]
-	RunnerId                  string
-	EncryptedOutputsRecipient opt.Opt[string]
-	EncryptedLogsRecipient    opt.Opt[string]
-	Metrics                   DeploymentMetrics
-	RunnerLogLevel            string
+	CreatedBy                  uuid.UUID
+	DeploymentEnvUuid          uuid.UUID
+	Mode                       DeploymentMode
+	Manifest                   EncodedDeploymentManifest
+	RollbackToId               opt.Opt[uuid.UUID]
+	Graph                      EncodedDeploymentGraph
+	Tofu                       RawTofu
+	IdempotencyKeyDigest       opt.Opt[string]
+	RunnerId                   string
+	EncryptedOutputsRecipient  opt.Opt[string]
+	EncryptedLogsRecipient     opt.Opt[string]
+	Metrics                    DeploymentMetrics
+	RunnerLogLevel             string
+	ModuleArtifacts            []ModuleArtifactRequirement
+	ModuleVersionRequestDigest string
+}
+
+type ModuleArtifactRequirement struct {
+	ModuleID                  string `json:"module_id"`
+	Version                   string `json:"version"`
+	SemanticVersion           string `json:"semantic_version,omitempty"`
+	MigrationGeneration       string `json:"migration_generation,omitempty"`
+	Source                    string `json:"source"`
+	ArtifactDigest            string `json:"artifact_digest"`
+	RetainedArtifactException bool   `json:"retained_artifact_exception,omitempty"`
+	// Captured only after exact-version confirmation and scoped authorization.
+	// Background bundle reconstruction must not drop this operation's authority.
+	ConfirmedRestrictedVersionUUID *uuid.UUID `json:"confirmed_restricted_version_uuid,omitempty"`
 }
 
 type ListDeploymentsParams struct {
@@ -151,22 +168,24 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	}
 
 	out := &DeploymentSummary{
-		OrgId:                     orgId,
-		ProjectId:                 projectId,
-		EnvId:                     envId,
-		DeploymentEnvUuid:         params.DeploymentEnvUuid,
-		Id:                        uuid.New(),
-		Mode:                      params.Mode,
-		RollbackToId:              params.RollbackToId,
-		CreatedAt:                 time.Now().UTC(),
-		CreatedBy:                 params.CreatedBy,
-		Status:                    DeploymentStatusExecuting,
-		StatusMessage:             "Deploying...",
-		RunnerId:                  params.RunnerId,
-		EncryptedOutputsRecipient: params.EncryptedOutputsRecipient,
-		EncryptedLogsRecipient:    params.EncryptedLogsRecipient,
-		Metrics:                   params.Metrics,
-		Revision:                  1,
+		OrgId:                      orgId,
+		ProjectId:                  projectId,
+		EnvId:                      envId,
+		DeploymentEnvUuid:          params.DeploymentEnvUuid,
+		Id:                         uuid.New(),
+		Mode:                       params.Mode,
+		RollbackToId:               params.RollbackToId,
+		CreatedAt:                  time.Now().UTC(),
+		CreatedBy:                  params.CreatedBy,
+		Status:                     DeploymentStatusExecuting,
+		StatusMessage:              "Deploying...",
+		RunnerId:                   params.RunnerId,
+		EncryptedOutputsRecipient:  params.EncryptedOutputsRecipient,
+		EncryptedLogsRecipient:     params.EncryptedLogsRecipient,
+		Metrics:                    params.Metrics,
+		Revision:                   1,
+		ModuleArtifacts:            params.ModuleArtifacts,
+		ModuleVersionRequestDigest: params.ModuleVersionRequestDigest,
 	}
 
 	{
@@ -197,10 +216,27 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 
 	if err := tx.QueryRowContext(
 		ctx,
-		`INSERT INTO deployments (de_id, id, created_at, created_by, mode, status, status_message, manifest, graph, tofu, runner_id, idempotency_key_digest, encrypted_outputs_recipient, encrypted_logs_recipient, metrics, runner_log_level, rollback_to_id) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING created_at`,
-		out.DeploymentEnvUuid, out.Id, out.CreatedAt, out.CreatedBy, params.Mode, DeploymentStatusExecuting, "Deploying...", params.Manifest, params.Graph, params.Tofu, params.RunnerId,
-		params.IdempotencyKeyDigest.Ref(), params.EncryptedOutputsRecipient.Ref(), params.EncryptedLogsRecipient.Ref(), asJson(&params.Metrics), params.RunnerLogLevel, params.RollbackToId.Ref(),
+		`INSERT INTO deployments (de_id, id, created_at, created_by, mode, status, status_message, manifest, graph, tofu, runner_id, idempotency_key_digest, encrypted_outputs_recipient, encrypted_logs_recipient, metrics, runner_log_level, rollback_to_id, module_artifacts, module_version_request_digest)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING created_at`,
+		out.DeploymentEnvUuid,
+		out.Id,
+		out.CreatedAt,
+		out.CreatedBy,
+		params.Mode,
+		DeploymentStatusExecuting,
+		"Deploying...",
+		params.Manifest,
+		params.Graph,
+		params.Tofu,
+		params.RunnerId,
+		params.IdempotencyKeyDigest.Ref(),
+		params.EncryptedOutputsRecipient.Ref(),
+		params.EncryptedLogsRecipient.Ref(),
+		asJson(&params.Metrics),
+		params.RunnerLogLevel,
+		params.RollbackToId.Ref(),
+		asJson(&params.ModuleArtifacts),
+		params.ModuleVersionRequestDigest,
 	).Scan(&out.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to insert deployment")
 	}
@@ -324,16 +360,28 @@ func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgI
 }
 
 func (d *databaser) GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error) {
+	if optionalTx != nil {
+		// A row lock cannot serialize the first use of a key, before a row exists.
+		// Keep the key locked through the caller's create/replay transaction.
+		identity, err := json.Marshal([]string{"deployment-command", orgId, projectId, envId, idempotencyKeyDigest})
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "failed to encode deployment command lock")
+		}
+		if _, err := optionalTx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", string(identity)); err != nil {
+			return nil, nil, errors.Wrap(err, "failed to lock deployment command")
+		}
+	}
 	out := &DeploymentSummary{
 		OrgId: orgId,
 	}
 	var rawManifest json.RawMessage
 	if err := d.txOrDb(optionalTx).QueryRowContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.runner_id, d.metrics, d.revision, d.rollback_to_id FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id 
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.module_version_request_digest FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id
 		WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 AND d.idempotency_key_digest = $4 AND d.created_at > $5 FOR UPDATE`,
 		orgId, projectId, envId, idempotencyKeyDigest, time.Now().UTC().Add(-idempotencyDigestTimeLimit),
-	).Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Id, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId)); err != nil {
+	).
+		Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Id, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId), &out.ModuleVersionRequestDigest); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, NewErrNotFound("no deployment found with the given idempotency key digest")
 		}
@@ -350,7 +398,7 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 	var rawManifest json.RawMessage
 	var tofu []byte
 	var graph json.RawMessage
-	query := `SELECT e.project_id, e.env_id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.tofu, d.runner_id, d.graph, d.metrics, d.encrypted_outputs_recipient, d.encrypted_logs_recipient, d.revision, d.runner_log_level, d.rollback_to_id 
+	query := `SELECT e.project_id, e.env_id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.tofu, d.runner_id, d.graph, d.metrics, d.encrypted_outputs_recipient, d.encrypted_logs_recipient, d.revision, d.runner_log_level, d.rollback_to_id, d.module_artifacts, d.module_version_request_digest
 	FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`
 	query += GetModeSuffix(mode)
 	if err := d.txOrDb(optionalTx).QueryRowContext(
@@ -358,7 +406,7 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 		query,
 		orgId, deploymentId,
 	).Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &tofu, &out.RunnerId, &graph, asJson(&out.Metrics),
-		opt.Scan(&out.EncryptedOutputsRecipient), opt.Scan(&out.EncryptedLogsRecipient), &out.Revision, &out.RunnerLogLevel, opt.Scan(&out.RollbackToId)); err != nil {
+		opt.Scan(&out.EncryptedOutputsRecipient), opt.Scan(&out.EncryptedLogsRecipient), &out.Revision, &out.RunnerLogLevel, opt.Scan(&out.RollbackToId), asJson(&out.ModuleArtifacts), &out.ModuleVersionRequestDigest); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, nil, nil, NewErrNotFound(fmt.Sprintf("deployment '%s' not found", deploymentId))
 		}

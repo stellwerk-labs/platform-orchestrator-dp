@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
@@ -79,8 +80,7 @@ func (s *Server) ListActiveResourceNodes(ctx context.Context, request ListActive
 
 func (s *Server) InternalCheckModuleUsage(ctx context.Context, request InternalCheckModuleUsageRequestObject) (InternalCheckModuleUsageResponseObject, error) {
 	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).With(logging.ZapOrgId(request.OrgId))
-	out := InternalCheckModuleUsage200JSONResponse{EnvIdsByProjectId: make(map[string][]string)}
-	// Go through all the envs that may use this module.
+	out := InternalCheckModuleUsage200JSONResponse{EnvIdsByProjectId: make(map[string][]string), Items: []InternalModuleUsageItem{}, ObservedAt: time.Now().UTC()}
 	if tx, err := s.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true}); err != nil {
 		return nil, errors.Wrap(err, "failed to begin transaction")
 	} else {
@@ -89,24 +89,18 @@ func (s *Server) InternalCheckModuleUsage(ctx context.Context, request InternalC
 				logger.Error("failed to rollback transaction", zap.Error(err))
 			}
 		}()
-		var i int
-		var pageToken string
-		for ; i == 0 || pageToken != ""; i++ {
-			page, pt, err := s.Database.ListLastDeploymentsByNodeProperties(ctx, tx, request.OrgId, pageToken, defaultPaginationSize, model.ListLastDeploymentsByNodePropertiesParams{
-				ModuleId:      opt.Of(request.ModuleId),
-				ModuleVersion: opt.OfRef(request.Params.ModuleVersion),
+		usage, err := s.Database.ListModuleVersionUsage(ctx, tx, request.OrgId, request.ModuleId, opt.OfRef(request.Params.ModuleVersion))
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to list Module Version usage")
+		}
+		for _, item := range usage {
+			if !slices.Contains(out.EnvIdsByProjectId[item.ProjectID], item.EnvironmentID) {
+				out.EnvIdsByProjectId[item.ProjectID] = append(out.EnvIdsByProjectId[item.ProjectID], item.EnvironmentID)
+			}
+			out.Items = append(out.Items, InternalModuleUsageItem{
+				ProjectId: item.ProjectID, EnvId: item.EnvironmentID, EnvironmentUuid: item.EnvironmentUUID,
+				ModuleVersion: item.ModuleVersion, DeploymentId: item.DeploymentID, ObservedAt: item.ObservedAt,
 			})
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to list last deployments")
-			}
-			pageToken = pt
-			for _, summary := range page {
-				if envs, ok := out.EnvIdsByProjectId[summary.ProjectId]; ok {
-					out.EnvIdsByProjectId[summary.ProjectId] = append(envs, summary.EnvId)
-				} else {
-					out.EnvIdsByProjectId[summary.ProjectId] = []string{summary.EnvId}
-				}
-			}
 		}
 	}
 	return out, nil

@@ -65,4 +65,4 @@ resources:
     params:
       host: ${resources.dns.host}
       port: 8080
-      path: /(auth/register|auth/logout|auth/login|auth/device|(users/.+)|(orgs/[^/]+/memberships.*)|(orgs/[^/]+/service-users.*)|(orgs/[^/]+/invitations.*)|(orgs/[^/]+/roles.*)|current-user|(devicelogins/.+))
+      path: /(auth/register|auth/logout|auth/login|auth/device|auth/check-permissions|(users/.+)|(orgs/[^/]+/memberships.*)|(orgs/[^/]+/service-users.*)|(orgs/[^/]+/invitations.*)|(orgs/[^/]+/roles.*)|current-user|(devicelogins/.+))

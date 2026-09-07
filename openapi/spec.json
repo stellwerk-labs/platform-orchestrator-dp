@@ -1522,6 +1522,25 @@
             "format": "uuid",
             "example": "01234567-89ab-cdef-0123-456789abcdef"
           },
+          "module_versions": {
+            "description": "Exact canonical SemVer selections by Module slug. Proposed versions require the scoped module.version.use-proposed capability.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            },
+            "x-go-type-skip-optional-pointer": true
+          },
+          "confirm_restricted_module_version_uuids": {
+            "description": "Exact Defective Module Version UUIDs explicitly confirmed for an authorised Pin carry-forward or Rollback.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-go-type-skip-optional-pointer": true
+          },
           "project_id": {
             "description": "The Project to deploy to.",
             "type": "string",
@@ -2039,7 +2058,9 @@
       "InternalModuleUsage": {
         "type": "object",
         "required": [
-          "env_ids_by_project_id"
+          "env_ids_by_project_id",
+          "items",
+          "observed_at"
         ],
         "properties": {
           "env_ids_by_project_id": {
@@ -2050,6 +2071,50 @@
                 "type": "string"
               }
             }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternalModuleUsageItem"
+            }
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InternalModuleUsageItem": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "env_id",
+          "environment_uuid",
+          "module_version",
+          "deployment_id",
+          "observed_at"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "env_id": {
+            "type": "string"
+          },
+          "environment_uuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "module_version": {
+            "type": "string"
+          },
+          "deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

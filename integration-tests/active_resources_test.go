@@ -38,7 +38,7 @@ func TestActiveResourceNodes(t *testing.T) {
 
 	var childModuleDef platformorchestratorcp.Module
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "child", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1", Description: ref.Ref("child def")})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "child", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1", Description: ref.Ref("child def")})
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		childModuleDef = *res.JSON201
@@ -49,9 +49,7 @@ func TestActiveResourceNodes(t *testing.T) {
 
 	var parentModuleDef platformorchestratorcp.Module
 	{
-		res, err := cpClient.CreateModuleWithResponse(
-			t.Context(),
-			orgId,
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId,
 			platformorchestratorcp.ModuleCreateBody{Id: "parent", ResourceType: "thing", ModuleSource: "acme/k8ss/generic@v1", Description: ref.Ref("parent def"), Dependencies: map[string]platformorchestratorcp.ModuleDependencyManifest{"child": {Type: "thing", Class: ref.Ref("child")}}},
 		)
 		require.NoError(t, err)
@@ -196,17 +194,32 @@ func TestActiveResourceNodes(t *testing.T) {
 	t.Run("can check usage of a used module", func(t *testing.T) {
 		ar, err := internalDpClient.InternalCheckModuleUsageWithResponse(t.Context(), dep.OrgId, "parent", &serverclient.InternalCheckModuleUsageParams{})
 		require.NoError(t, err)
-		assert.Equal(t, &serverclient.InternalModuleUsage{
-			EnvIdsByProjectId: map[string][]string{
-				dep.ProjectId: {dep.EnvId},
-			},
-		}, ar.JSON200, string(ar.Body))
+		require.Equal(t, http.StatusOK, ar.StatusCode(), string(ar.Body))
+		require.NotNil(t, ar.JSON200)
+		assert.Equal(t, map[string][]string{
+			dep.ProjectId: {dep.EnvId},
+		}, ar.JSON200.EnvIdsByProjectId)
+		require.Len(t, ar.JSON200.Items, 1)
+		assert.Equal(t, serverclient.InternalModuleUsageItem{
+			ProjectId:       dep.ProjectId,
+			EnvId:           dep.EnvId,
+			EnvironmentUuid: env.Uuid,
+			ModuleVersion:   parentModuleDef.VersionId,
+			DeploymentId:    dep.Id,
+			ObservedAt:      ar.JSON200.Items[0].ObservedAt,
+		}, ar.JSON200.Items[0])
+		assert.False(t, ar.JSON200.Items[0].ObservedAt.IsZero())
+		assert.False(t, ar.JSON200.ObservedAt.IsZero())
 	})
 
 	t.Run("can check usage of un-used module", func(t *testing.T) {
 		ar, err := internalDpClient.InternalCheckModuleUsageWithResponse(t.Context(), dep.OrgId, "unused-module", &serverclient.InternalCheckModuleUsageParams{})
 		require.NoError(t, err)
-		assert.Equal(t, &serverclient.InternalModuleUsage{EnvIdsByProjectId: map[string][]string{}}, ar.JSON200, string(ar.Body))
+		require.Equal(t, http.StatusOK, ar.StatusCode(), string(ar.Body))
+		require.NotNil(t, ar.JSON200)
+		assert.Equal(t, map[string][]string{}, ar.JSON200.EnvIdsByProjectId)
+		assert.Empty(t, ar.JSON200.Items)
+		assert.False(t, ar.JSON200.ObservedAt.IsZero())
 	})
 
 	// NOW we remove a resource and add another workload and see what happens

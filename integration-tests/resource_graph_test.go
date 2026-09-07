@@ -45,7 +45,7 @@ func TestListDeploymentResourceNodes_returnsGraphNodes(t *testing.T) {
 
 	var childModuleDef platformorchestratorcp.Module
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "child", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1"})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "child", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1"})
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		childModuleDef = *res.JSON201
@@ -56,7 +56,7 @@ func TestListDeploymentResourceNodes_returnsGraphNodes(t *testing.T) {
 
 	var parentModuleDef platformorchestratorcp.Module
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{
 			Id: "parent", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1",
 			Dependencies: map[string]platformorchestratorcp.ModuleDependencyManifest{"child": {Type: "thing", Class: ref.Ref("child")}},
 		})
@@ -139,7 +139,7 @@ func TestListDeploymentResourceNodes_matchesActiveResourceNodes(t *testing.T) {
 	MustCreateResourceType(t, cpClient, orgId, "thing")
 
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "mymod", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1"})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "mymod", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1"})
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		res2, err := cpClient.CreateModuleRuleInOrgWithResponse(t.Context(), orgId, platformorchestratorcp.RuleCreateBody{ModuleId: "mymod", ResourceClass: ref.Ref("mymod")})

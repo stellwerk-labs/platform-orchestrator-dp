@@ -27,7 +27,7 @@ func TestRemoteRunnerCommandBuffering(t *testing.T) {
 	require.NoError(t, err)
 	publisher := hnats.NewPublisher(js, hmessaging.RunnerCommandsStreamName, zaptest.NewLogger(t))
 	envelope := hmessaging.CommandEnvelope{
-		ProtocolVersion: hmessaging.ProtocolVersionV1, CommandID: "command-1",
+		ProtocolVersion: hmessaging.ProtocolVersionV1, CommandID: runnerID + "-command-1",
 		OrganizationID: "test-org", RunnerID: runnerID, DeploymentID: "deployment-1",
 		Type: hmessaging.CommandTypeCreateJob, CreatedAt: time.Now().UTC(),
 		Payload: json.RawMessage(`{"job_id":"deployment-1","namespace":"jobs","configuration":{}}`),

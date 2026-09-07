@@ -3,8 +3,8 @@ services:
     image: nats:2.12-alpine
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_HEALTH_PORT:-8222}:8222"
     volumes:
       - nats-data:/data
     healthcheck:
@@ -70,7 +70,7 @@ services:
     cap_add:
       - IPC_LOCK
     ports:
-      - "8200:8200"
+      - "${VAULT_PORT:-8200}:8200"
   vault-init:
     image: hashicorp/vault:1.14
     environment:

@@ -51,6 +51,68 @@ type GraphNodeModuleConfig struct {
 	Definition *platformorchestratorcp.InternalModuleCatalogueModule `json:"-"`
 }
 
+const providerSubsEncodingVersion = 1
+
+type encodedProviderSubsMap struct {
+	Version int
+	Entries []encodedProviderSubsEntry
+}
+
+type encodedProviderSubsEntry struct {
+	LocalRef      string
+	Substitutions []encodedProviderSubstitution
+}
+
+type encodedProviderSubstitution struct {
+	Key   string
+	Value platform_orchestrator_graph.PlaceholderSub
+}
+
+func encodeProviderSubsMap(providerSubs map[string]map[string]platform_orchestrator_graph.PlaceholderSub) ([]byte, error) {
+	encoded := encodedProviderSubsMap{Version: providerSubsEncodingVersion}
+	for _, localRef := range slices.Sorted(maps.Keys(providerSubs)) {
+		entry := encodedProviderSubsEntry{LocalRef: localRef}
+		for _, key := range slices.Sorted(maps.Keys(providerSubs[localRef])) {
+			entry.Substitutions = append(entry.Substitutions, encodedProviderSubstitution{
+				Key: key, Value: providerSubs[localRef][key],
+			})
+		}
+		encoded.Entries = append(encoded.Entries, entry)
+	}
+
+	var buffer bytes.Buffer
+	if err := gob.NewEncoder(&buffer).Encode(encoded); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func decodeProviderSubsMap(encoded []byte) (map[string]map[string]platform_orchestrator_graph.PlaceholderSub, error) {
+	var canonical encodedProviderSubsMap
+	if err := gob.NewDecoder(bytes.NewReader(encoded)).Decode(&canonical); err == nil {
+		if canonical.Version != providerSubsEncodingVersion {
+			return nil, fmt.Errorf("unsupported ProviderSubsMap encoding version %d", canonical.Version)
+		}
+		result := make(map[string]map[string]platform_orchestrator_graph.PlaceholderSub, len(canonical.Entries))
+		for _, entry := range canonical.Entries {
+			substitutions := make(map[string]platform_orchestrator_graph.PlaceholderSub, len(entry.Substitutions))
+			for _, substitution := range entry.Substitutions {
+				substitutions[substitution.Key] = substitution.Value
+			}
+			result[entry.LocalRef] = substitutions
+		}
+		return result, nil
+	}
+
+	// Graphs written before the canonical encoding stored the map directly.
+	// Retain read compatibility so ordinary deployments can advance them.
+	var legacy map[string]map[string]platform_orchestrator_graph.PlaceholderSub
+	if err := gob.NewDecoder(bytes.NewReader(encoded)).Decode(&legacy); err != nil {
+		return nil, err
+	}
+	return legacy, nil
+}
+
 // MarshalJSON implements custom JSON marshaling for GraphNodeModuleConfig
 func (g *GraphNodeModuleConfig) MarshalJSON() ([]byte, error) {
 	type Alias GraphNodeModuleConfig
@@ -58,12 +120,11 @@ func (g *GraphNodeModuleConfig) MarshalJSON() ([]byte, error) {
 	// Encode ProviderSubsMap as base64-encoded gob blob
 	var encodedSubsMap string
 	if g.ProviderSubsMap != nil {
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		if err := enc.Encode(g.ProviderSubsMap); err != nil {
+		encoded, err := encodeProviderSubsMap(g.ProviderSubsMap)
+		if err != nil {
 			return nil, fmt.Errorf("failed to encode ProviderSubsMap: %w", err)
 		}
-		encodedSubsMap = base64.StdEncoding.EncodeToString(buf.Bytes())
+		encodedSubsMap = base64.StdEncoding.EncodeToString(encoded)
 	}
 
 	return json.Marshal(&struct {
@@ -97,8 +158,8 @@ func (g *GraphNodeModuleConfig) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("failed to decode ProviderSubsMap: %w", err)
 		}
 
-		dec := gob.NewDecoder(bytes.NewReader(decoded))
-		if err := dec.Decode(&g.ProviderSubsMap); err != nil {
+		g.ProviderSubsMap, err = decodeProviderSubsMap(decoded)
+		if err != nil {
 			return fmt.Errorf("failed to decode ProviderSubsMap: %w", err)
 		}
 	}

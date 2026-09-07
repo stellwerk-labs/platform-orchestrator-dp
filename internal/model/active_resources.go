@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -12,9 +13,44 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 )
+
+type ModuleVersionUsage struct {
+	ProjectID       string
+	EnvironmentID   string
+	EnvironmentUUID uuid.UUID
+	ModuleVersion   string
+	DeploymentID    uuid.UUID
+	ObservedAt      time.Time
+}
+
+func (d *databaser) ListModuleVersionUsage(ctx context.Context, optionalTx Tx, orgID, moduleID string, moduleVersion opt.Opt[string]) ([]ModuleVersionUsage, error) {
+	rows, err := d.txOrDb(optionalTx).QueryContext(ctx, `SELECT DISTINCT e.project_id, e.env_id, e.id,
+		n.last_module_definition_version, d.id, COALESCE(d.completed_at, d.created_at)
+		FROM deployment_environments e
+		INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_state_deployment_id
+		INNER JOIN resource_nodes n ON n.env_uuid = e.id AND n.last_deployment_id = d.id
+		WHERE e.org_id = $1 AND n.last_module_definition_id = $2
+		AND ($3::text IS NULL OR n.last_module_definition_version = $3)
+		ORDER BY e.project_id, e.env_id, n.last_module_definition_version`, orgID, moduleID, moduleVersion)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list Module Version usage")
+	}
+	defer func() { _ = rows.Close() }()
+	result := make([]ModuleVersionUsage, 0)
+	for rows.Next() {
+		var item ModuleVersionUsage
+		if err := rows.Scan(&item.ProjectID, &item.EnvironmentID, &item.EnvironmentUUID, &item.ModuleVersion,
+			&item.DeploymentID, &item.ObservedAt); err != nil {
+			return nil, errors.Wrap(err, "failed to scan Module Version usage")
+		}
+		result = append(result, item)
+	}
+	return result, errors.Wrap(rows.Err(), "failed to iterate Module Version usage")
+}
 
 type ResourceNode struct {
 	Hash              string

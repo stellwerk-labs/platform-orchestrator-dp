@@ -73,7 +73,20 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      CP_IMAGE: ${{ vars.CORE_CP_INTEGRATION_IMAGE }}
+      IAM_IMAGE: ${{ vars.CORE_IAM_INTEGRATION_IMAGE }}
+      RUNNER_IMAGE: ${{ vars.CORE_RUNNER_INTEGRATION_IMAGE }}
     steps:
+      - name: Require the compatible Core candidate image set
+        shell: bash
+        run: |
+          for image_variable in CP_IMAGE IAM_IMAGE RUNNER_IMAGE; do
+            if [[ ! "${!image_variable}" =~ @sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Set CORE_${image_variable%_IMAGE}_INTEGRATION_IMAGE to the compatible image digest recorded in the OSS release manifest. Pre-module-management fallback images are not valid."
+              exit 1
+            fi
+          done
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -103,7 +116,8 @@ jobs:
       - name: Run integration tests
         run: make test-integration
         env:
-          RUNNER_IMAGE: ${{ vars.RUNNER_INTEGRATION_IMAGE || 'ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0' }}
+          TEST_PARALLEL: "1"
+          TEST_TIMEOUT: 20m
 
       - name: Show integration test logs
         if: always()

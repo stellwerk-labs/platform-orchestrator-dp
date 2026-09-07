@@ -1,6 +1,10 @@
 package graphs
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/gob"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -9,6 +13,51 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGraphNodeModuleConfigJSONIsDeterministic(t *testing.T) {
+	config := &GraphNodeModuleConfig{
+		DefinitionId: "workload", VersionId: "1.0.0",
+		ProviderSubsMap: map[string]map[string]platform_orchestrator_graph.PlaceholderSub{
+			"random": {},
+			"deepmerge": {
+				"environment": &platform_orchestrator_graph.ContextPlaceholder{Key: "environment_id"},
+				"project":     &platform_orchestrator_graph.ContextPlaceholder{Key: "project_id"},
+			},
+			"kubernetes": {},
+		},
+	}
+
+	first, err := json.Marshal(config)
+	require.NoError(t, err)
+	for range 100 {
+		next, err := json.Marshal(config)
+		require.NoError(t, err)
+		assert.Equal(t, first, next)
+	}
+
+	var decoded GraphNodeModuleConfig
+	require.NoError(t, json.Unmarshal(first, &decoded))
+	assert.Equal(t, config.ProviderSubsMap, decoded.ProviderSubsMap)
+}
+
+func TestGraphNodeModuleConfigReadsLegacyProviderSubsMap(t *testing.T) {
+	legacy := map[string]map[string]platform_orchestrator_graph.PlaceholderSub{
+		"kubernetes": {
+			"namespace": &platform_orchestrator_graph.ContextPlaceholder{Key: "environment_id"},
+		},
+	}
+	var buffer bytes.Buffer
+	require.NoError(t, gob.NewEncoder(&buffer).Encode(legacy))
+	payload, err := json.Marshal(map[string]any{
+		"definition_id": "workload", "version_id": "1.0.0",
+		"provider_subs_map": base64.StdEncoding.EncodeToString(buffer.Bytes()),
+	})
+	require.NoError(t, err)
+
+	var decoded GraphNodeModuleConfig
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	assert.Equal(t, legacy, decoded.ProviderSubsMap)
+}
 
 func TestDoesModuleParamTypeMatch(t *testing.T) {
 	type expectedMatch struct {

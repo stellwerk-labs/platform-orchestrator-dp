@@ -16,6 +16,7 @@ import (
 	"github.com/stellwerk-labs/golib/hpostgresconnect"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 //go:generate go tool mockgen  -destination mocks/databaser.go github.com/stellwerk-labs/platform-orchestrator-dp/internal/model Databaser,TxWithCommit
@@ -86,6 +87,7 @@ type Databaser interface {
 
 	InitActiveResourcesFromGraph(ctx context.Context, tx Tx, deploymentEnvUuid, deploymentId uuid.UUID, graph *platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]) error
 	GetActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid uuid.UUID) ([]ResourceNode, error)
+	ListModuleVersionUsage(ctx context.Context, optionalTx Tx, orgID, moduleID string, moduleVersion opt.Opt[string]) ([]ModuleVersionUsage, error)
 	DiscardOldActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid uuid.UUID, deploymentId uuid.UUID) error
 	BulkUpdateActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid, deploymentId uuid.UUID, params []UpdateResourceNodeParams) error
 }
