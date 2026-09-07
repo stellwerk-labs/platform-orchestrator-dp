@@ -20,6 +20,13 @@ It exports the generated connection settings without displaying passwords.
 Never use shell tracing or commit the generated Score state, kubeconfig,
 database connection strings, Runner identity or Terraform state.
 
+These fixtures use fixed, publicly known test authentication material and
+disposable credentials. Published Compose ports may bind all host interfaces;
+running locally does not by itself establish network isolation. Use only a
+trusted, isolated test host. Never deploy these fixtures to shared, externally
+exposed or production hosts, or reuse their credentials outside disposable
+tests.
+
 An optional `RUNNER_TEST_IMAGE` overrides only ordinary job fixtures. It can use
 the test-only filesystem provider-mirror image documented in the Runner
 repository. This runs the same candidate binary while avoiding external
