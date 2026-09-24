@@ -291,6 +291,59 @@ func makePinsOverriddenForDiscard(t *testing.T, database *sql.DB, orgID string, 
 	return activationByPin
 }
 
+func revokePinEnvironmentMembership(t *testing.T, orgID string, actor, environmentID uuid.UUID) {
+	t.Helper()
+	// Revocation is performed through real IAM, not a test-local permission map.
+	var memberships struct {
+		Items []struct {
+			ID    uuid.UUID `json:"id"`
+			Scope string    `json:"scope"`
+		} `json:"items"`
+	}
+	root := "/orgs/" + orgID
+	iamURL := os.Getenv("INTERNAL_IAM_URL")
+	pinJSONAt(t, iamURL, uuid.Nil, http.MethodGet, root+"/memberships?userId="+actor.String(), nil, "", http.StatusOK, &memberships)
+	var removedMembership bool
+	for _, membership := range memberships.Items {
+		if membership.Scope == "env:"+environmentID.String() {
+			pinJSONAt(t, iamURL, uuid.Nil, http.MethodDelete, root+"/memberships/"+membership.ID.String(), nil, "", http.StatusNoContent, nil)
+			removedMembership = true
+		}
+	}
+	require.True(t, removedMembership)
+	internalIAM := MustInternalIamClient(t)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		allowed, err := internalIAM.InternalAuthorizeWithResponse(t.Context(), iam.InternalAuthorizeBody{UserId: actor,
+			Checks: []iam.ResourcePermissionCheck{{Resource: "env:" + environmentID.String(), Permission: "module.version.unpin"}}})
+		if assert.NoError(c, err) {
+			assert.Equal(c, http.StatusForbidden, allowed.StatusCode(), string(allowed.Body))
+		}
+	}, 70*time.Second, 100*time.Millisecond)
+}
+
+func requirePinDiscardAudit(t *testing.T, orgID string, actor uuid.UUID, pins []pinRecord, activationByPin map[uuid.UUID]uuid.UUID) {
+	t.Helper()
+	for _, pin := range pins {
+		var events []struct {
+			Actor             uuid.UUID  `json:"actor"`
+			EventType         string     `json:"event_type"`
+			Reason            string     `json:"reason"`
+			ActivationEventID uuid.UUID  `json:"activation_event_id"`
+			DeploymentID      *uuid.UUID `json:"deployment_id"`
+		}
+		pinActorJSON(t, uuid.Nil, http.MethodGet, "/orgs/"+orgID+"/module-version-pins/"+pin.ID.String()+"/events", nil, "", http.StatusOK, &events)
+		require.Len(t, events, 3)
+		require.Equal(t, "override_fixture", events[1].EventType)
+		require.Contains(t, events[1].Reason, "no Deployment outcome asserted")
+		require.Nil(t, events[1].DeploymentID)
+		require.Equal(t, "discarded", events[2].EventType)
+		require.Equal(t, actor, events[2].Actor)
+		require.Equal(t, "Freeze the reviewed project snapshot", events[2].Reason)
+		require.Equal(t, activationByPin[pin.ID], events[2].ActivationEventID)
+		require.Nil(t, events[2].DeploymentID)
+	}
+}
+
 func TestBulkPinsUseFrozenDeployedVersionsAndRealScopedAuthority(t *testing.T) {
 	control, data := MustControlPlaneClient(t), MustDataPlaneClient(t)
 	orgID := MustCreateOrgId(t, MustInternalControlPlaneClient(t))
@@ -538,51 +591,9 @@ output "value" { value = terraform_data.value.output }`
 	before = pinDatabaseSnapshot(t, database, orgID)
 	require.Equal(t, discarded, bulk(discarder, "discard", eligible, "complete-bulk-discard", http.StatusOK))
 	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
-	for _, pin := range discarded.Pins {
-		var discardEvents []struct {
-			Actor             uuid.UUID  `json:"actor"`
-			EventType         string     `json:"event_type"`
-			Reason            string     `json:"reason"`
-			ActivationEventID uuid.UUID  `json:"activation_event_id"`
-			DeploymentID      *uuid.UUID `json:"deployment_id"`
-		}
-		pinActorJSON(t, uuid.Nil, http.MethodGet, root+"/module-version-pins/"+pin.ID.String()+"/events", nil, "", http.StatusOK, &discardEvents)
-		require.Len(t, discardEvents, 3)
-		require.Equal(t, "override_fixture", discardEvents[1].EventType)
-		require.Contains(t, discardEvents[1].Reason, "no Deployment outcome asserted")
-		require.Nil(t, discardEvents[1].DeploymentID)
-		require.Equal(t, "discarded", discardEvents[2].EventType)
-		require.Equal(t, discarder, discardEvents[2].Actor)
-		require.Equal(t, "Freeze the reviewed project snapshot", discardEvents[2].Reason)
-		require.Equal(t, activationByPin[pin.ID], discardEvents[2].ActivationEventID)
-		require.Nil(t, discardEvents[2].DeploymentID)
-	}
+	requirePinDiscardAudit(t, orgID, discarder, discarded.Pins, activationByPin)
 
-	// Revocation is performed through real IAM, not a test-local permission map.
-	var memberships struct {
-		Items []struct {
-			ID    uuid.UUID `json:"id"`
-			Scope string    `json:"scope"`
-		} `json:"items"`
-	}
-	iamURL := os.Getenv("INTERNAL_IAM_URL")
-	pinJSONAt(t, iamURL, uuid.Nil, http.MethodGet, root+"/memberships?userId="+creator.String(), nil, "", http.StatusOK, &memberships)
-	var removedMembership bool
-	for _, membership := range memberships.Items {
-		if membership.Scope == "env:"+envB.Uuid.String() {
-			pinJSONAt(t, iamURL, uuid.Nil, http.MethodDelete, root+"/memberships/"+membership.ID.String(), nil, "", http.StatusNoContent, nil)
-			removedMembership = true
-		}
-	}
-	require.True(t, removedMembership)
-	internalIAM := MustInternalIamClient(t)
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		allowed, err := internalIAM.InternalAuthorizeWithResponse(t.Context(), iam.InternalAuthorizeBody{UserId: creator,
-			Checks: []iam.ResourcePermissionCheck{{Resource: "env:" + envB.Uuid.String(), Permission: "module.version.unpin"}}})
-		if assert.NoError(c, err) {
-			assert.Equal(c, http.StatusForbidden, allowed.StatusCode(), string(allowed.Body))
-		}
-	}, 70*time.Second, 100*time.Millisecond)
+	revokePinEnvironmentMembership(t, orgID, creator, envB.Uuid)
 	bulk(creator, "unpin", completeUnpinPreview, "complete-bulk-unpin", http.StatusForbidden)
 	require.JSONEq(t, before, pinDatabaseSnapshot(t, database, orgID))
 	deploymentDatabase, err := sql.Open("postgres", os.Getenv("DB_CONNECTION_STRING"))
