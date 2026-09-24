@@ -198,7 +198,7 @@ func TestDestroyEnv_force(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
 			ModuleSource: "inline",
 			ModuleSourceCode: ref.Ref(`
 resource "terraform_data" "thing" {

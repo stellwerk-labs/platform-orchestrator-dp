@@ -811,7 +811,11 @@ output "name" {
 }`),
 		},
 	} {
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, d)
+		outputName := "name"
+		if d.ResourceType == "postgres" {
+			outputName = "conn"
+		}
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, d, outputName)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -857,9 +861,9 @@ output "name" {
 			MakeDiffDeterministic(res.JSON200.Diff)
 			assert.Equal(t, []serverclient.DeploymentDiffChange{
 				{Id: "<node-hash>", Resource: "workload.default@sample", Summary: "workload added", Type: "added"},
-				{Id: "<node-hash>", Resource: "k8s-namespace.default@workloads.sample.ns", Summary: "add resource using module default-k8s-namespace@<module-version-uuid> (dependency of workload.default@sample)", Type: "added"},
-				{Id: "<node-hash>", Resource: "postgres.default@workloads.sample.pg", Summary: "add resource using module default-postgres@<module-version-uuid> (dependency of workload.default@sample)", Type: "added"},
-				{Id: "<node-hash>", Resource: "k8s-secret.default@workloads.sample.pg_conn_secret", Summary: "add resource using module default-k8s-secret@<module-version-uuid> (dependency of workload.default@sample)", Type: "added"},
+				{Id: "<node-hash>", Resource: "k8s-namespace.default@workloads.sample.ns", Summary: "add resource using module default-k8s-namespace@1.0.0 (dependency of workload.default@sample)", Type: "added"},
+				{Id: "<node-hash>", Resource: "postgres.default@workloads.sample.pg", Summary: "add resource using module default-postgres@1.0.0 (dependency of workload.default@sample)", Type: "added"},
+				{Id: "<node-hash>", Resource: "k8s-secret.default@workloads.sample.pg_conn_secret", Summary: "add resource using module default-k8s-secret@1.0.0 (dependency of workload.default@sample)", Type: "added"},
 			}, res.JSON200.Diff.Changes)
 			assert.Empty(t, res.JSON200.Diff.FromDeploymentId)
 			assert.Empty(t, res.JSON200.Diff.ToDeploymentId)
@@ -1022,7 +1026,7 @@ func TestDeploymentModuleUpdate(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1", ModuleInputs: map[string]interface{}{"x": "a"}})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing", ModuleSource: "acme/thing/generic@v1", ModuleInputs: map[string]interface{}{"x": "a"}})
 		if assert.NoError(t, err) && assert.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body)) {
 			def := res.JSON201
 			res, err := cpClient.CreateModuleRuleInOrgWithResponse(t.Context(), orgId, platformorchestratorcp.RuleCreateBody{ModuleId: def.Id})
@@ -1060,7 +1064,7 @@ func TestDeploymentModuleUpdate(t *testing.T) {
 
 	var newModule platformorchestratorcp.Module
 	{
-		res, err := cpClient.UpdateModuleWithResponse(t.Context(), orgId, "thing-def", platformorchestratorcp.ModuleUpdateBody{ModuleInputs: &map[string]interface{}{"x": "a"}})
+		res, err := updateManagedModuleWithResponse(t, cpClient, orgId, "thing-def", platformorchestratorcp.ModuleUpdateBody{ModuleInputs: &map[string]interface{}{"x": "a"}})
 		if assert.NoError(t, err) && assert.Equal(t, http.StatusOK, res.StatusCode(), string(res.Body)) {
 			newModule = *res.JSON200
 		}
@@ -1101,7 +1105,7 @@ func TestDeploymentModuleUpdate(t *testing.T) {
 		assert.Equal(t, []serverclient.DeploymentDiffChange{
 			{
 				Id: "<node-hash>", Resource: "thing.default@workloads.sample.t",
-				Summary: "module changed from thing-def@<module-version-uuid> to thing-def@<module-version-uuid>",
+				Summary: "module changed from thing-def@1.0.0 to thing-def@1.0.1",
 				Type:    serverclient.DeploymentDiffChangeTypeModuleChanged,
 			},
 		}, diff.Changes)
@@ -1199,6 +1203,25 @@ func Test_CreateDeployment_with_idempotency(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		assert.Equal(t, dep.Id, res.JSON201.Id)
 	})
+	for _, changed := range []struct {
+		name          string
+		versions      map[string]string
+		confirmations []uuid.UUID
+	}{
+		{name: "exact Module Version target", versions: map[string]string{"redis": "1.0.0"}},
+		{name: "restricted Version confirmation", confirmations: []uuid.UUID{uuid.New()}},
+	} {
+		t.Run("rejects changed "+changed.name, func(t *testing.T) {
+			res, err := dpClient.CreateDeploymentWithResponse(t.Context(), orgId, &serverclient.CreateDeploymentParams{IdempotencyKey: ref.Ref("hello-world")}, serverclient.DeploymentCreateBody{
+				ProjectId: env.ProjectId, EnvId: env.Id, Mode: serverclient.DeploymentCreateBodyModeDeploy,
+				Manifest:       &serverclient.DeploymentManifest{Workloads: map[string]serverclient.DeploymentManifestWorkload{"sample": {}}},
+				ModuleVersions: changed.versions, ConfirmRestrictedModuleVersionUuids: changed.confirmations,
+			})
+			require.NoError(t, err)
+			require.Equal(t, http.StatusConflict, res.StatusCode(), string(res.Body))
+			require.Contains(t, res.JSON409.Message, "incorrect Module Version selection")
+		})
+	}
 }
 
 func Test_CreateDeployment_with_long_poll(t *testing.T) {
@@ -1226,8 +1249,8 @@ func Test_CreateDeployment_with_long_poll(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -1354,8 +1377,8 @@ func Test_CreateDeployment_with_long_poll_with_pod_spec(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"project": "my-gcp-project"}})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -1466,7 +1489,7 @@ func Test_CreateDeployment_with_inline_source_module(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
 			ModuleInputs: map[string]interface{}{"number": 42},
 			ModuleSource: "inline",
 			ModuleSourceCode: ref.Ref(`
@@ -1687,7 +1710,7 @@ func Test_CreateDeployment_and_force_fail(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "thing-def", ResourceType: "thing",
 			ModuleSource: "inline",
 			ModuleSourceCode: ref.Ref(`
 resource "terraform_data" "thing" {
@@ -1883,8 +1906,8 @@ func Test_CreateDeployment_with_long_poll_fail_job_stuck(t *testing.T) {
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
-			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}})
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{Id: "default-k8s-namespace", ResourceType: "k8s-namespace",
+			ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace", ModuleInputs: map[string]interface{}{"prefix": "${context.project_id}-${context.env_id}", "project": "my-gcp-project"}}, "name", "secret_name")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 	}
@@ -2197,7 +2220,16 @@ output "main" {
 }
 `, MakeTofuDeterministic(t, MustGetDeploymentTofu(t, dpClient, orgId, dep.Id), env.Uuid))
 
-	// Now let's destroy this env and check the tofu
+	// Hold the previous Deployment against deletion until the generated destroy
+	// has been inspected. A fast Runner can otherwise complete and delete all
+	// Environment history between two API polls.
+	historyTx, err := MustDatabaseConn(t).BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	defer func() { _ = historyTx.Rollback() }()
+	var retainedDeployment string
+	require.NoError(t, historyTx.QueryRowContext(t.Context(), `SELECT id FROM deployments
+		WHERE de_id=(SELECT de_id FROM deployments WHERE id=$1) AND id<>$1
+		ORDER BY created_at LIMIT 1 FOR KEY SHARE`, dep.Id).Scan(&retainedDeployment))
 	{
 		res, err := cpClient.DeleteEnvironmentWithResponse(t.Context(), orgId, env.ProjectId, env.Id, &platformorchestratorcp.DeleteEnvironmentParams{})
 		require.NoError(t, err)
@@ -2207,11 +2239,14 @@ output "main" {
 		res, err := dpClient.ListLastDeploymentsWithResponse(t.Context(), orgId, &serverclient.ListLastDeploymentsParams{ProjectId: ref.Ref(env.ProjectId), EnvId: ref.Ref(env.Id)})
 		require.NoError(collect, err)
 		require.Equal(collect, http.StatusOK, res.StatusCode(), string(res.Body))
-		if assert.NotNil(collect, res.JSON200) && assert.NotEmpty(collect, res.JSON200.Items) {
-			require.Equal(collect, "destroy", res.JSON200.Items[0].Mode)
-			dep.Id = res.JSON200.Items[0].Id
-		}
+		require.NotNil(collect, res.JSON200)
+		require.NotEmpty(collect, res.JSON200.Items)
+		require.Equal(collect, "destroy", res.JSON200.Items[0].Mode)
+		dep.Id = res.JSON200.Items[0].Id
 	}, time.Minute, time.Second, "failed to find destroy deployment")
+	dep = MustWaitForDeploymentComplete(t, dpClient, orgId, dep.Id)
+	require.Equal(t, "destroy", dep.Mode)
+	require.Equal(t, "succeeded", dep.Status)
 	assert.Equal(t, `terraform {
   backend "kubernetes" {
     secret_suffix     = "<env-uuid>"
@@ -2242,6 +2277,12 @@ output "main" {
   sensitive   = true
 }
 `, MakeTofuDeterministic(t, MustGetDeploymentTofu(t, dpClient, orgId, dep.Id), env.Uuid))
+	require.NoError(t, historyTx.Rollback())
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		res, err := cpClient.GetEnvironmentWithResponse(t.Context(), orgId, env.ProjectId, env.Id)
+		require.NoError(collect, err)
+		require.Equal(collect, http.StatusNotFound, res.StatusCode(), string(res.Body))
+	}, time.Minute, time.Second, "destroyed Environment was not removed")
 }
 
 func TestDeployment_with_deleted_dynamic_provider_flow(t *testing.T) {
@@ -2496,7 +2537,7 @@ output "boolean" {
 
 	// Now update the module with a "broken" module source
 	{
-		res, err := cpClient.UpdateModuleWithResponse(t.Context(), orgId, resType.Id, platformorchestratorcp.ModuleUpdateBody{
+		res, err := updateManagedModuleWithResponse(t, cpClient, orgId, resType.Id, platformorchestratorcp.ModuleUpdateBody{
 			ModuleSourceCode: ref.Ref(`
 output "unknown" {
   value = null
@@ -2539,7 +2580,7 @@ output "unknown" {
 		MakeDiffDeterministic(*diff)
 		assert.Equal(t, []serverclient.DeploymentDiffChange{{
 			Id: "<node-hash>", Resource: "thing.default@workloads.main.eg", Type: "module_changed",
-			Summary: "module changed from thing@<module-version-uuid> to thing@<module-version-uuid>",
+			Summary: "module changed from thing@1.0.0 to thing@1.0.1",
 		}}, diff.Changes)
 		assert.Equal(t, 1, diff.NumChanged)
 		assert.Equal(t, 0, diff.NumAdded)
@@ -2577,7 +2618,7 @@ output "unknown" {
 		MakeDiffDeterministic(*diff)
 		assert.Equal(t, []serverclient.DeploymentDiffChange{{
 			Id: "<node-hash>", Resource: "thing.default@workloads.main.eg", Type: "module_changed",
-			Summary: "module changed from thing@<module-version-uuid> to thing@<module-version-uuid>",
+			Summary: "module changed from thing@1.0.1 to thing@1.0.0",
 		}}, diff.Changes)
 		assert.Equal(t, 1, diff.NumChanged)
 		assert.Equal(t, 0, diff.NumAdded)
@@ -2676,7 +2717,7 @@ func TestDeployment_ModuleErrorEnrichment(t *testing.T) {
 	// Create a module with a REQUIRED parameter (non-optional)
 	var moduleId, moduleVersionId string
 	{
-		res, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{
+		res, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{
 			Id:           "database-module",
 			ResourceType: "database",
 			ModuleSource: "inline",
@@ -2687,7 +2728,7 @@ func TestDeployment_ModuleErrorEnrichment(t *testing.T) {
 output "connection_string" {
   value = "postgres://localhost/${var.db_name}"
 }`),
-		})
+		}, "connection_string")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, res.StatusCode(), string(res.Body))
 		moduleId = res.JSON201.Id

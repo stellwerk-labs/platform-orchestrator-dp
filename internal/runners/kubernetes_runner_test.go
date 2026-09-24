@@ -530,7 +530,7 @@ func TestKubernetesRunner_CheckStatus_JobActive_PodReady(t *testing.T) {
 
 	status, err := runner.CheckStatus(context.Background())
 	require.NoError(t, err)
-	assert.True(t, status.IsCompleted)
+	assert.False(t, status.IsCompleted)
 	assert.False(t, status.IsStuck)
 }
 
@@ -592,7 +592,7 @@ func TestKubernetesRunner_CheckStatus_JobActive_PodNotReady_ExceedsDelay(t *test
 	mockK8s.EXPECT().CheckJobStatus(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
 		Return(jobStatus, nil)
 	mockK8s.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
-		Return(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "platform-orchestrator-runner"}, Status: *podStatus}, nil)
+		Return(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "platform-orchestrator-runner"}, Status: *podStatus}, nil).Times(2)
 	mockK8s.EXPECT().GetObjectWarningEvents(gomock.Any(), "platform-orchestrator-runner", "test-pod").
 		Return(warningEvents, nil)
 
@@ -626,7 +626,7 @@ func TestKubernetesRunner_CheckStatus_PodNotFound_ExceedsDelay(t *testing.T) {
 	mockK8s.EXPECT().CheckJobStatus(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
 		Return(jobStatus, nil)
 	mockK8s.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
-		Return(nil, kubernetes.ErrNotFound)
+		Return(nil, kubernetes.ErrNotFound).Times(2)
 	mockK8s.EXPECT().GetObjectWarningEvents(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
 		Return(warningEvents, nil)
 
@@ -722,7 +722,7 @@ func TestKubernetesRunner_CheckStatus_GetObjectWarningEvents_Forbidden(t *testin
 	mockK8s.EXPECT().CheckJobStatus(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
 		Return(jobStatus, nil)
 	mockK8s.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deploymentSummary.Id.String()).
-		Return(&corev1.Pod{Status: *podStatus, ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "platform-orchestrator-runner"}}, nil)
+		Return(&corev1.Pod{Status: *podStatus, ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "platform-orchestrator-runner"}}, nil).Times(2)
 	mockK8s.EXPECT().GetObjectWarningEvents(gomock.Any(), "platform-orchestrator-runner", "test-pod").
 		Return(nil, kubernetes.ErrK8sActionForbidden)
 
@@ -731,4 +731,42 @@ func TestKubernetesRunner_CheckStatus_GetObjectWarningEvents_Forbidden(t *testin
 	assert.False(t, status.IsCompleted)
 	assert.True(t, status.IsStuck)
 	assert.Contains(t, status.Message, "job has not started and the runner configuration does not allow to read job events and pods in the target namespace, please check the runner configuration")
+}
+
+func TestKubernetesRunner_CheckStatusReadsPodWhenJobCountersLag(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mockk8s.NewMockKubernetesInterface(ctrl)
+	runner, deployment, _ := createTestKubernetesRunner(t, client, mockvault.NewMockVaultClientInterface(ctrl))
+	client.EXPECT().CheckJobStatus(gomock.Any(), "platform-orchestrator-runner", deployment.Id.String()).Return(&v1.JobStatus{
+		StartTime: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+	}, nil)
+	client.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deployment.Id.String()).Return(&corev1.Pod{
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}, nil)
+	status, err := runner.CheckStatus(t.Context())
+	require.NoError(t, err)
+	assert.False(t, status.IsStuck)
+	assert.False(t, status.IsCompleted)
+}
+
+func TestKubernetesRunner_CheckStatusRevalidatesAfterSlowWarningQuery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mockk8s.NewMockKubernetesInterface(ctrl)
+	runner, deployment, _ := createTestKubernetesRunner(t, client, mockvault.NewMockVaultClientInterface(ctrl))
+	gomock.InOrder(
+		client.EXPECT().CheckJobStatus(gomock.Any(), "platform-orchestrator-runner", deployment.Id.String()).Return(&v1.JobStatus{
+			Active: 1, StartTime: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+		}, nil),
+		client.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deployment.Id.String()).Return(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "slowly-scheduled"}, Status: corev1.PodStatus{Phase: corev1.PodPending},
+		}, nil),
+		client.EXPECT().GetObjectWarningEvents(gomock.Any(), "platform-orchestrator-runner", "slowly-scheduled").Return([]string{"old scheduling warning"}, nil),
+		client.EXPECT().GetPodJob(gomock.Any(), "platform-orchestrator-runner", deployment.Id.String()).Return(&corev1.Pod{
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		}, nil),
+	)
+	status, err := runner.CheckStatus(t.Context())
+	require.NoError(t, err)
+	assert.False(t, status.IsStuck)
+	assert.False(t, status.IsCompleted)
 }

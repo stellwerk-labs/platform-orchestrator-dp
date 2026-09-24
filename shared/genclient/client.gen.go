@@ -300,6 +300,9 @@ type Deployment struct {
 
 // DeploymentCreateBody defines model for DeploymentCreateBody.
 type DeploymentCreateBody struct {
+	// ConfirmRestrictedModuleVersionUuids Exact Defective Module Version UUIDs explicitly confirmed for an authorised Pin carry-forward or Rollback.
+	ConfirmRestrictedModuleVersionUuids []openapi_types.UUID `json:"confirm_restricted_module_version_uuids,omitempty"`
+
 	// EncryptedLogsRecipient A recipient public key must be provided in order to encrypt the logs produced by the runner. This must be an 'age' public key (see https://age-encryption.org).
 	// The caller must hold the matching private key in order to decrypt the logs when the logs url is provided. If the recipient key is not set, no logs will be captured
 	// by the runner.
@@ -334,6 +337,9 @@ type DeploymentCreateBody struct {
 	//
 	// Example: deploy
 	Mode DeploymentCreateBodyMode `json:"mode"`
+
+	// ModuleVersions Exact canonical SemVer selections by Module slug. Proposed versions require the scoped module.version.use-proposed capability.
+	ModuleVersions map[string]string `json:"module_versions,omitempty"`
 
 	// PlanOnly Whether the deployment should be planned only and not executed. This defaults to 'false' unless the mode is
 	// set to 'plan_only'.
@@ -640,7 +646,19 @@ type Error struct {
 
 // InternalModuleUsage defines model for InternalModuleUsage.
 type InternalModuleUsage struct {
-	EnvIdsByProjectId map[string][]string `json:"env_ids_by_project_id"`
+	EnvIdsByProjectId map[string][]string       `json:"env_ids_by_project_id"`
+	Items             []InternalModuleUsageItem `json:"items"`
+	ObservedAt        time.Time                 `json:"observed_at"`
+}
+
+// InternalModuleUsageItem defines model for InternalModuleUsageItem.
+type InternalModuleUsageItem struct {
+	DeploymentId    openapi_types.UUID `json:"deployment_id"`
+	EnvId           string             `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID `json:"environment_uuid"`
+	ModuleVersion   string             `json:"module_version"`
+	ObservedAt      time.Time          `json:"observed_at"`
+	ProjectId       string             `json:"project_id"`
 }
 
 // Jwk JSON Web Key

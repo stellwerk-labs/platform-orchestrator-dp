@@ -4,14 +4,17 @@
 package genevents
 
 import (
+	"time"
+
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for EventType.
 const (
-	IoPlatformOrchestratorDeploymentCreated EventType = "io.platform-orchestrator.deployment.created"
-	IoPlatformOrchestratorDeploymentUpdated EventType = "io.platform-orchestrator.deployment.updated"
-	IoPlatformOrchestratorRunnerCheckStatus EventType = "io.platform-orchestrator.runner.check_status"
+	IoPlatformOrchestratorDeploymentCreated            EventType = "io.platform-orchestrator.deployment.created"
+	IoPlatformOrchestratorDeploymentUpdated            EventType = "io.platform-orchestrator.deployment.updated"
+	IoPlatformOrchestratorModuleVersionAdoptionChanged EventType = "io.platform-orchestrator.module.version.adoption-changed"
+	IoPlatformOrchestratorRunnerCheckStatus            EventType = "io.platform-orchestrator.runner.check_status"
 )
 
 // Valid indicates whether the value is a known member of the EventType enum.
@@ -20,6 +23,8 @@ func (e EventType) Valid() bool {
 	case IoPlatformOrchestratorDeploymentCreated:
 		return true
 	case IoPlatformOrchestratorDeploymentUpdated:
+		return true
+	case IoPlatformOrchestratorModuleVersionAdoptionChanged:
 		return true
 	case IoPlatformOrchestratorRunnerCheckStatus:
 		return true
@@ -50,6 +55,16 @@ type EnvUuid = openapi_types.UUID
 
 // EventType defines model for EventType.
 type EventType string
+
+// ModuleVersionAdoptionChangedData defines model for ModuleVersionAdoptionChangedData.
+type ModuleVersionAdoptionChangedData struct {
+	DeploymentId DeploymentId `json:"deployment_id"`
+	EnvId        EnvId        `json:"env_id"`
+	EnvUuid      EnvUuid      `json:"env_uuid"`
+	ObservedAt   time.Time    `json:"observed_at"`
+	OrgId        OrgId        `json:"org_id"`
+	ProjectId    ProjectId    `json:"project_id"`
+}
 
 // OrgId defines model for OrgId.
 type OrgId = string

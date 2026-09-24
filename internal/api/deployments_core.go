@@ -10,6 +10,8 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -73,6 +75,23 @@ func CreateDeployment(
 	cp platformorchestratorcp.ClientWithResponsesInterface,
 	db model.Databaser, tx model.Tx,
 ) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
+	return CreateDeploymentWithOptions(ctx, logger, createdBy, orgId, projectId, envId, env, mode, rollbackTo, manifest,
+		encryptedOutputsRecipient, encryptedLogsRecipient, idempotencyKey, dryRun, runnerLogLevel, cp, db, tx, DeploymentOptions{})
+}
+
+type DeploymentOptions struct {
+	ExplicitModuleVersions  map[string]string
+	RestrictedConfirmations []uuid.UUID
+	AuthorizeModuleVersion  func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
+}
+
+func CreateDeploymentWithOptions(
+	ctx context.Context, logger *zap.Logger, createdBy uuid.UUID,
+	orgId, projectId, envId string, env platformorchestratorcp.Environment, mode model.DeploymentMode, rollbackTo opt.Opt[uuid.UUID], manifest DeploymentManifest,
+	encryptedOutputsRecipient, encryptedLogsRecipient, idempotencyKey *string, dryRun bool, runnerLogLevel *DeploymentCreateBodyRunnerLogLevel,
+	cp platformorchestratorcp.ClientWithResponsesInterface,
+	db model.Databaser, tx model.Tx, options DeploymentOptions,
+) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
 	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
 		return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("environment is in status '%s'", env.Status))
 	}
@@ -96,6 +115,7 @@ func CreateDeployment(
 
 	// If the idempotency key was provided, then we use the hex(sha256(.)) digest.
 	var idempotencyKeyDigest opt.Opt[string]
+	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
 	if idempotencyKey != nil {
 		h := sha256.New()
 		_, _ = h.Write([]byte(*idempotencyKey))
@@ -111,9 +131,11 @@ func CreateDeployment(
 				return nil, nil, nil, errors.Wrap(err, "failed to unmarshal deployment manifest")
 			} else if d.Mode != mode || (mode != model.DeploymentModeDestroy && !reflect.DeepEqual(otherManifest, manifest)) {
 				return nil, nil, nil, model.NewErrConflict("incorrect manifest or mode for this idempotency key")
-			} else {
-				return d, nil, nil, nil
 			}
+			if d.ModuleVersionRequestDigest != requestDigest || !reflect.DeepEqual(d.RollbackToId, rollbackTo) {
+				return nil, nil, nil, model.NewErrConflict("incorrect Module Version selection, restricted confirmation or rollback target for this idempotency key")
+			}
+			return d, nil, nil, nil
 		}
 	}
 
@@ -121,6 +143,7 @@ func CreateDeployment(
 	var lastGraph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
 	var lastManifest DeploymentManifest
 	var lastDeploymentMayHaveNotConverged bool
+	var lastDeploymentSucceeded bool
 	{
 		var d *model.DeploymentSummary
 		var m model.EncodedDeploymentManifest
@@ -150,13 +173,13 @@ func CreateDeployment(
 			return nil, nil, nil, errors.Wrap(err, "failed to parse reference deployment manifest")
 		} else if d != nil {
 			lastDeploymentId = d.Id
+			lastDeploymentSucceeded = d.Status == model.DeploymentStatusSucceeded
 			if d.Status == model.DeploymentStatusFailed {
 				lastDeploymentMayHaveNotConverged = true
 			}
 			logger.Info("identified reference deployment", zap.String("deployment_id", d.Id.String()))
 		}
 	}
-
 	if mode == model.DeploymentModeDestroy && lastGraph == nil {
 		return nil, nil, nil, model.NewErrConflict("cannot destroy an environment that has never been deployed")
 	}
@@ -175,19 +198,49 @@ func CreateDeployment(
 	// If the last graph was defined then the environment was deployed previously and may have pinned definitions that
 	// we need to request for the next deployment.
 	var pinnedDefinitions []string
-	if lastGraph != nil {
+	if lastGraph != nil && useLastGraph {
 		pinnedDefinitions = graphs.FindPinnedDefinitions(lastGraph)
 	}
-
+	var activeDefinitions []string
+	if lastGraph != nil && lastDeploymentSucceeded {
+		activeDefinitions = activeModuleDefinitions(lastGraph)
+	}
+	selectedModuleVersions := maps.Clone(options.ExplicitModuleVersions)
+	pinnedDefinitions = selectedPinnedDefinitions(pinnedDefinitions, selectedModuleVersions)
 	// Now we can look up all our definitions, rules, and providers from the control plane.
 	var moduleDefinitions []platformorchestratorcp.InternalModuleCatalogueModule
 	var moduleProviders []platformorchestratorcp.ModuleProvider
+	var moduleArtifacts map[string]catalogueArtifact
+	var catalogueEditors []platformorchestratorcp.RequestEditorFn
+	if isRollback {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Rollback", "true")
+			return nil
+		})
+	}
+	if len(options.RestrictedConfirmations) > 0 {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			confirmations := make([]string, len(options.RestrictedConfirmations))
+			for index, versionUUID := range options.RestrictedConfirmations {
+				confirmations[index] = versionUUID.String()
+			}
+			request.Header.Set("X-Stellwerk-Restricted-Version-Confirmations", strings.Join(confirmations, ","))
+			return nil
+		})
+	}
+	if len(activeDefinitions) > 0 {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Active-Module-Versions", strings.Join(activeDefinitions, ","))
+			return nil
+		})
+	}
 	if r, err := cp.GenerateInternalModuleCatalogueWithResponse(
 		ctx, orgId, projectId, envId,
 		platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 			PinnedModuleVersions: pinnedDefinitions,
 			AreRulesIgnored:      useLastGraph,
 		},
+		catalogueEditors...,
 	); err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to generate internal module catalogue")
 	} else if r.StatusCode() == http.StatusNotFound {
@@ -206,6 +259,26 @@ func CreateDeployment(
 	} else {
 		moduleDefinitions = r.JSON200.Modules
 		moduleProviders = r.JSON200.Providers
+		moduleArtifacts, err = decodeCatalogueArtifacts(r.Body, moduleDefinitions)
+		if err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to decode module artifact metadata")
+		}
+	}
+	if options.AuthorizeModuleVersion != nil {
+		for _, definition := range moduleDefinitions {
+			artifact, found := moduleArtifacts[definition.Id+"@"+definition.VersionId]
+			if !found {
+				return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("module %s@%s has no immutable version metadata", definition.Id, definition.VersionId))
+			}
+			explicitVersion, explicitlySelected := options.ExplicitModuleVersions[definition.Id]
+			explicitlySelected = explicitlySelected && explicitVersion == definition.VersionId
+			if err := options.AuthorizeModuleVersion(definition.Id, explicitlySelected, artifact); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
+	if err := applySelectedModuleVersions(moduleDefinitions, selectedModuleVersions); err != nil {
+		return nil, nil, nil, model.NewErrConflict(err.Error())
 	}
 
 	var newGraph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
@@ -287,6 +360,18 @@ func CreateDeployment(
 	} else {
 		diff = DiffGraphs(env.Uuid, &platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]{}, newGraph)
 	}
+	deploymentArtifacts, err := moduleArtifactRequirements(newGraph, moduleArtifacts, isRollback)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if options.AuthorizeModuleVersion != nil {
+		for index := range deploymentArtifacts {
+			artifact := moduleArtifacts[deploymentArtifacts[index].ModuleID+"@"+deploymentArtifacts[index].Version]
+			if artifact.Status == "defective" && artifact.VersionUUID != uuid.Nil && slices.Contains(options.RestrictedConfirmations, artifact.VersionUUID) {
+				deploymentArtifacts[index].ConfirmedRestrictedVersionUUID = ref.Ref(artifact.VersionUUID)
+			}
+		}
+	}
 
 	if dryRun {
 		return &model.DeploymentSummary{
@@ -308,19 +393,21 @@ func CreateDeployment(
 	}
 
 	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, model.CreateDeploymentParams{
-		CreatedBy:                 createdBy,
-		DeploymentEnvUuid:         env.Uuid,
-		Mode:                      mode,
-		Manifest:                  rawManifest,
-		RollbackToId:              rollbackTo,
-		Graph:                     rawNewGraph,
-		Tofu:                      rawTofu,
-		IdempotencyKeyDigest:      idempotencyKeyDigest,
-		RunnerId:                  runner.Id,
-		EncryptedOutputsRecipient: opt.OfRef(encryptedOutputsRecipient),
-		EncryptedLogsRecipient:    opt.OfRef(encryptedLogsRecipient),
-		Metrics:                   metrics,
-		RunnerLogLevel:            string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		CreatedBy:                  createdBy,
+		DeploymentEnvUuid:          env.Uuid,
+		Mode:                       mode,
+		Manifest:                   rawManifest,
+		RollbackToId:               rollbackTo,
+		Graph:                      rawNewGraph,
+		Tofu:                       rawTofu,
+		IdempotencyKeyDigest:       idempotencyKeyDigest,
+		RunnerId:                   runner.Id,
+		EncryptedOutputsRecipient:  opt.OfRef(encryptedOutputsRecipient),
+		EncryptedLogsRecipient:     opt.OfRef(encryptedLogsRecipient),
+		Metrics:                    metrics,
+		RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		ModuleArtifacts:            deploymentArtifacts,
+		ModuleVersionRequestDigest: requestDigest,
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
@@ -358,6 +445,158 @@ func CreateDeployment(
 	)
 
 	return d, messages, &diff, nil
+}
+
+func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid.UUID) string {
+	// Pre-management commands and explicitly empty collections retain their
+	// original identity. Never infer requested selection from resolved artifacts.
+	if len(selected) == 0 && len(confirmations) == 0 {
+		return ""
+	}
+	confirmed := make([]string, len(confirmations))
+	for index, id := range confirmations {
+		confirmed[index] = id.String()
+	}
+	slices.Sort(confirmed)
+	encoded, _ := json.Marshal(struct {
+		Selected  map[string]string `json:"selected,omitempty"`
+		Confirmed []string          `json:"confirmed,omitempty"`
+	}{Selected: selected, Confirmed: slices.Compact(confirmed)})
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func applySelectedModuleVersions(definitions []platformorchestratorcp.InternalModuleCatalogueModule, selected map[string]string) error {
+	for moduleID, version := range selected {
+		targetIndex := -1
+		var rules []platformorchestratorcp.InternalModuleCatalogueModuleRule
+		for index := range definitions {
+			definition := &definitions[index]
+			if definition.Id != moduleID {
+				continue
+			}
+			if definition.VersionId == version {
+				targetIndex = index
+			}
+			if len(definition.Rules) > 0 {
+				rules = append(rules, definition.Rules...)
+				definition.Rules = nil
+			}
+		}
+		if targetIndex < 0 {
+			return fmt.Errorf("module selection %s@%s is unavailable", moduleID, version)
+		}
+		if len(rules) == 0 {
+			return fmt.Errorf("module selection %s@%s has no applicable module rules", moduleID, version)
+		}
+		definitions[targetIndex].Rules = rules
+	}
+	return nil
+}
+
+func selectedPinnedDefinitions(pinned []string, selected map[string]string) []string {
+	if len(selected) == 0 {
+		return pinned
+	}
+
+	result := make([]string, 0, len(pinned)+len(selected))
+	for _, definition := range pinned {
+		moduleID, _, found := strings.Cut(definition, "@")
+		if found {
+			if _, overridden := selected[moduleID]; overridden {
+				continue
+			}
+		}
+		result = append(result, definition)
+	}
+	for moduleID, version := range selected {
+		result = append(result, fmt.Sprintf("%s@%s", moduleID, version))
+	}
+	slices.Sort(result)
+	return result
+}
+
+type catalogueArtifact struct {
+	ModuleUUID          uuid.UUID
+	VersionUUID         uuid.UUID
+	SemanticVersion     string
+	MigrationGeneration string
+	Source              string
+	Digest              string
+	Status              string
+}
+
+func decodeCatalogueArtifacts(body []byte, definitions []platformorchestratorcp.InternalModuleCatalogueModule) (map[string]catalogueArtifact, error) {
+	if len(body) == 0 {
+		result := make(map[string]catalogueArtifact, len(definitions))
+		for _, module := range definitions {
+			result[module.Id+"@"+module.VersionId] = catalogueArtifact{Source: module.ModuleSource}
+		}
+		return result, nil
+	}
+	var catalogue struct {
+		Modules []struct {
+			ID                  string    `json:"id"`
+			VersionID           string    `json:"version_id"`
+			ModuleUUID          uuid.UUID `json:"module_uuid"`
+			VersionUUID         uuid.UUID `json:"version_uuid"`
+			SemanticVersion     string    `json:"semantic_version"`
+			MigrationGeneration string    `json:"migration_generation"`
+			ModuleSource        string    `json:"module_source"`
+			ArtifactDigest      string    `json:"artifact_digest"`
+			SemanticStatus      string    `json:"semantic_status"`
+		} `json:"modules"`
+	}
+	if err := json.Unmarshal(body, &catalogue); err != nil {
+		return nil, err
+	}
+	result := make(map[string]catalogueArtifact, len(catalogue.Modules))
+	for _, module := range catalogue.Modules {
+		result[module.ID+"@"+module.VersionID] = catalogueArtifact{
+			ModuleUUID: module.ModuleUUID, VersionUUID: module.VersionUUID, SemanticVersion: module.SemanticVersion,
+			MigrationGeneration: module.MigrationGeneration,
+			Source:              module.ModuleSource, Digest: module.ArtifactDigest, Status: module.SemanticStatus,
+		}
+	}
+	return result, nil
+}
+
+func moduleArtifactRequirements(graph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig], artifacts map[string]catalogueArtifact, retainedArtifactException bool) ([]model.ModuleArtifactRequirement, error) {
+	byKey := make(map[string]model.ModuleArtifactRequirement)
+	for coordinate := range graph.DepthFirstIterate(platformorchestratorgraph.DepthFirstIteratePreOrder) {
+		configuration := graph.Nodes[coordinate].ModuleConfiguration
+		if configuration == nil || configuration.Deleted {
+			continue
+		}
+		key := configuration.DefinitionId + "@" + configuration.VersionId
+		artifact, found := artifacts[key]
+		if !found {
+			return nil, model.NewErrConflict(fmt.Sprintf("module %s has no immutable version metadata", key))
+		}
+		byKey[key] = model.ModuleArtifactRequirement{
+			ModuleID: configuration.DefinitionId, Version: configuration.VersionId, Source: artifact.Source,
+			SemanticVersion: artifact.SemanticVersion, MigrationGeneration: artifact.MigrationGeneration,
+			ArtifactDigest: artifact.Digest, RetainedArtifactException: retainedArtifactException,
+		}
+	}
+	result := make([]model.ModuleArtifactRequirement, 0, len(byKey))
+	for _, artifact := range byKey {
+		result = append(result, artifact)
+	}
+	slices.SortFunc(result, func(left, right model.ModuleArtifactRequirement) int {
+		return strings.Compare(left.ModuleID+"@"+left.Version, right.ModuleID+"@"+right.Version)
+	})
+	return result, nil
+}
+
+func activeModuleDefinitions(graph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]) []string {
+	definitions := make(map[string]struct{})
+	for _, node := range graph.Nodes {
+		if configuration := node.ModuleConfiguration; configuration != nil && !configuration.Deleted {
+			definitions[configuration.DefinitionId+"@"+configuration.VersionId] = struct{}{}
+		}
+	}
+	return slices.Sorted(maps.Keys(definitions))
 }
 
 func formatResourceCoordinate(rc platformorchestratorgraph.ResourceCoordinate) string {

@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -62,10 +64,67 @@ func MustControlPlaneClient(t *testing.T) platformorchestratorcp.ClientWithRespo
 		if strings.HasPrefix(req.URL.Path, "/internal") {
 			return fmt.Errorf("path %s is internal - MustInternalControlPlaneClient client required", req.URL.Path)
 		}
-		return nil
+		return runnerTestImageRequestEditor(req)
 	}), platformorchestratorcp.WithHTTPClient(testHttpClient))
 	require.NoError(t, err)
 	return client
+}
+
+func runnerTestImageRequestEditor(request *http.Request) error {
+	image := os.Getenv("RUNNER_TEST_IMAGE")
+	if image == "" || request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/runners") {
+		return nil
+	}
+	var body map[string]any
+	raw, err := io.ReadAll(request.Body)
+	if err != nil {
+		return err
+	}
+	request.Body = io.NopCloser(bytes.NewReader(raw))
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	configuration, ok := body["runner_configuration"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("Runner fixture has no runner_configuration")
+	}
+	job, ok := configuration["job"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	template, _ := job["pod_template"].(map[string]any)
+	if template == nil {
+		template = map[string]any{}
+		job["pod_template"] = template
+	}
+	spec, _ := template["spec"].(map[string]any)
+	if spec == nil {
+		spec = map[string]any{}
+		template["spec"] = spec
+	}
+	containers, _ := spec["containers"].([]any)
+	var main map[string]any
+	for _, container := range containers {
+		if value, ok := container.(map[string]any); ok && value["name"] == "main" {
+			main = value
+			break
+		}
+	}
+	if main == nil {
+		main = map[string]any{"name": "main"}
+		containers = append(containers, main)
+	}
+	if _, configured := main["image"]; !configured {
+		main["image"] = image
+	}
+	spec["containers"] = containers
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	request.Body = io.NopCloser(bytes.NewReader(encoded))
+	request.ContentLength = int64(len(encoded))
+	return nil
 }
 
 func MustInternalControlPlaneClient(t *testing.T) platformorchestratorcp.ClientWithResponsesInterface {
@@ -202,7 +261,6 @@ func MustOidcProviderClient(t *testing.T) serverclient.ClientWithResponsesInterf
 
 // MustDatabaseConn provides access to a raw database connection for the integration test.
 func MustDatabaseConn(t *testing.T) *hpostgresconnect.Database {
-	t.Log(os.Getenv("DB_CONNECTION_STRING"))
 	inner, err := hpostgresconnect.InitDatabase(t.Context(), &hpostgresconnect.Config{
 		Logger:  zaptest.NewLogger(t),
 		ConnStr: os.Getenv("DB_CONNECTION_STRING"),
@@ -321,6 +379,11 @@ func MustCreateRunnerWithRule(t *testing.T, cpClient platformorchestratorcp.Clie
 					"containers": []map[string]interface{}{
 						{
 							"name": "main",
+							"resources": map[string]interface{}{
+								"requests": map[string]interface{}{
+									"memory": "256Mi",
+								},
+							},
 							"volumeMounts": []map[string]interface{}{
 								{
 									"name":      "terraform-module-success",
@@ -463,8 +526,9 @@ func MustWaitForDeploymentComplete(t *testing.T, dpClient serverclient.ClientWit
 	var after *serverclient.Deployment
 	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 		res, err := dpClient.WaitForDeploymentCompleteWithResponse(t.Context(), orgId, deploymentId, &serverclient.WaitForDeploymentCompleteParams{})
-		assert.NoError(collect, err)
-		assert.Equal(collect, http.StatusOK, res.StatusCode())
+		require.NoError(collect, err)
+		require.Equal(collect, http.StatusOK, res.StatusCode())
+		require.NotNil(collect, res.JSON200)
 		after = res.JSON200
 	}, time.Minute*3, time.Second, "deployment %s not complete", deploymentId)
 	return after
@@ -479,9 +543,120 @@ func MustCreateResourceType(t *testing.T, cpClient platformorchestratorcp.Client
 	return res.JSON201
 }
 
+func createManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, body platformorchestratorcp.ModuleCreateBody, outputNames ...string) (*platformorchestratorcp.CreateModuleResponse, error) {
+	t.Helper()
+	response, err := cpClient.CreateModuleWithResponse(t.Context(), orgID, body, moduleVersionRequestEditor("1.0.0", "", outputNames...))
+	if err == nil && response.StatusCode() == http.StatusCreated {
+		err = promoteManagedModuleVersion(t.Context(), cpClient, orgID, body.Id, "1.0.0")
+	}
+	return response, err
+}
+
+func updateManagedModuleWithResponse(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID, moduleID string, body platformorchestratorcp.ModuleUpdateBody, outputNames ...string) (*platformorchestratorcp.UpdateModuleResponse, error) {
+	t.Helper()
+	response, err := cpClient.UpdateModuleWithResponse(t.Context(), orgID, moduleID, body, moduleVersionRequestEditor("1.0.1", "", outputNames...))
+	if err == nil && response.StatusCode() == http.StatusOK {
+		err = promoteManagedModuleVersion(t.Context(), cpClient, orgID, moduleID, "1.0.1")
+	}
+	return response, err
+}
+
+// These fixtures declare an object with named string outputs. No names means
+// the deliberately unconstrained object contract used by the common fixtures.
+// Publication never retrieves or copies the server's Resource Type declaration.
+func fixtureOutputSchema(names ...string) map[string]any {
+	properties := map[string]any{}
+	for _, name := range names {
+		properties[name] = map[string]any{"type": "string"}
+	}
+	return map[string]any{"type": "object", "properties": properties}
+}
+
+func moduleVersionRequestEditor(version, digest string, outputNames ...string) platformorchestratorcp.RequestEditorFn {
+	return func(_ context.Context, request *http.Request) error {
+		payload, err := io.ReadAll(request.Body)
+		if err != nil {
+			return err
+		}
+		var body map[string]any
+		if err := json.Unmarshal(payload, &body); err != nil {
+			return err
+		}
+		body["semantic_version"] = version
+		body["output_schema"] = fixtureOutputSchema(outputNames...)
+		if digest != "" {
+			body["artifact_digest"] = digest
+		}
+		payload, err = json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		request.Body = io.NopCloser(bytes.NewReader(payload))
+		request.ContentLength = int64(len(payload))
+		return nil
+	}
+}
+
+func promoteManagedModuleVersion(ctx context.Context, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgID, moduleID, semanticVersion string) error {
+	versions, err := cpClient.ListModulesWithResponse(ctx, orgID, &platformorchestratorcp.ListModulesParams{}, func(_ context.Context, request *http.Request) error {
+		request.URL.Path = fmt.Sprintf("/orgs/%s/modules/%s/versions", url.PathEscape(orgID), url.PathEscape(moduleID))
+		request.URL.RawQuery = ""
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if versions.StatusCode() != http.StatusOK {
+		return fmt.Errorf("list module versions returned %d: %s", versions.StatusCode(), versions.Body)
+	}
+	var page struct {
+		Items []struct {
+			Version struct {
+				UUID            string `json:"uuid"`
+				SemanticVersion string `json:"semantic_version"`
+				ResourceVersion int64  `json:"resource_version"`
+			} `json:"version"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(versions.Body, &page); err != nil {
+		return err
+	}
+	for _, item := range page.Items {
+		if item.Version.SemanticVersion != semanticVersion {
+			continue
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_resource_version": item.Version.ResourceVersion,
+			"reason":                    "Establish integration-test Default",
+		})
+		if err != nil {
+			return err
+		}
+		transition, err := cpClient.CreateModuleRuleInOrgWithResponse(ctx, orgID,
+			platformorchestratorcp.CreateModuleRuleInOrgJSONRequestBody{ModuleId: moduleID},
+			func(_ context.Context, request *http.Request) error {
+				request.URL.Path = fmt.Sprintf("/orgs/%s/modules/%s/versions/%s/actions/promote", url.PathEscape(orgID), url.PathEscape(moduleID), url.PathEscape(item.Version.UUID))
+				request.URL.RawQuery = ""
+				request.Body = io.NopCloser(bytes.NewReader(payload))
+				request.ContentLength = int64(len(payload))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Idempotency-Key", "integration-promote-"+semanticVersion)
+				return nil
+			})
+		if err != nil {
+			return err
+		}
+		if transition.StatusCode() != http.StatusOK {
+			return fmt.Errorf("promote module version returned %d: %s", transition.StatusCode(), transition.Body)
+		}
+		return nil
+	}
+	return fmt.Errorf("module version %s not found", semanticVersion)
+}
+
 func MustCreateModuleAndRule(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgId string, bod platformorchestratorcp.ModuleCreateBody) *platformorchestratorcp.Module {
 	t.Helper()
-	modRes, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, bod)
+	modRes, err := createManagedModuleWithResponse(t, cpClient, orgId, bod)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, modRes.StatusCode(), string(modRes.Body))
 	ruleRes, err := cpClient.CreateModuleRuleInOrgWithResponse(t.Context(), orgId, platformorchestratorcp.CreateModuleRuleInOrgJSONRequestBody{
@@ -494,7 +669,7 @@ func MustCreateModuleAndRule(t *testing.T, cpClient platformorchestratorcp.Clien
 
 func MustCreateModuleForEnv(t *testing.T, cpClient platformorchestratorcp.ClientWithResponsesInterface, orgId, projectId, envId string) *platformorchestratorcp.Rule {
 	t.Helper()
-	modRes, err := cpClient.CreateModuleWithResponse(t.Context(), orgId, platformorchestratorcp.ModuleCreateBody{
+	modRes, err := createManagedModuleWithResponse(t, cpClient, orgId, platformorchestratorcp.ModuleCreateBody{
 		Id:           "md-" + strings.ToLower(rand.Text()),
 		ResourceType: MustCreateResourceType(t, cpClient, orgId, "rt-"+strings.ToLower(rand.Text())).Id,
 		ModuleSource: "git::https://github.com/delca85/v2-module-sources//definitions/dummy-k8s-namespace",

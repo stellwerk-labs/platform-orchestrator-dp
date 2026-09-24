@@ -11,6 +11,11 @@ on:
         description: "Approved full 40-character commit SHA identified by that tag"
         required: true
         type: string
+      seed_only:
+        description: "Build only a human-approved CI dependency image, never a release"
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - main
@@ -27,24 +32,212 @@ env:
   DOCKER_BUILDKIT: "1"
 
 jobs:
-  require-candidate-ref:
-    if: github.event_name == 'workflow_dispatch'
+  candidate-preflight:
+    if: github.repository == 'stellwerk-labs/platform-orchestrator-dp' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 1
-    permissions: {}
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: Require the approved candidate workflow
+      - name: Checkout approved candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require immutable candidate and pre-provisioned reviewer approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
-          echo '::error::Select the approved release/module-management-rc.1 ref. This default-branch workflow cannot publish release candidates.'
-          exit 1
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/public-release-candidate" > "$RUNNER_TEMP/candidate-environment.json"
+          python3 scripts/candidate-release.py "$CANDIDATE_TAG" "$CANDIDATE_SHA" \
+            --environment-json "$RUNNER_TEMP/candidate-environment.json"
+
+  candidate-release:
+    if: github.repository == 'stellwerk-labs/platform-orchestrator-dp' && github.event_name == 'workflow_dispatch' && !inputs.seed_only
+    needs:
+      - candidate-preflight
+      - verify
+      - integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: public-release-candidate
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout tested immutable candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate candidate and refuse existing publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/public-release-candidate" > "$RUNNER_TEMP/candidate-environment.json"
+          python3 scripts/candidate-release.py "$CANDIDATE_TAG" "$CANDIDATE_SHA" \
+            --environment-json "$RUNNER_TEMP/candidate-environment.json" \
+            --check-image-absent "$GITHUB_REPOSITORY"
+
+      - name: Reserve candidate release without creating a tag or changing latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$CANDIDATE_TAG" --verify-tag --prerelease --latest=false \
+            --title "$CANDIDATE_TAG" --notes-file "docs/releases/$CANDIDATE_TAG.md"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.0.0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
+
+      - name: Build and push exact candidate image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          target: final
+          tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ inputs.candidate_tag }}
+          sbom: true
+          provenance: mode=max
+          labels: |
+            org.opencontainers.image.version=${{ inputs.candidate_tag }}
+            org.opencontainers.image.revision=${{ inputs.candidate_sha }}
+
+      - name: Verify candidate image by immutable digest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "ghcr.io/stellwerk-labs/platform-orchestrator-dp@$IMAGE_DIGEST"
+
+  candidate-seed:
+    if: github.repository == 'stellwerk-labs/platform-orchestrator-dp' && github.event_name == 'workflow_dispatch' && inputs.seed_only
+    needs:
+      - candidate-preflight
+      - verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: public-release-candidate
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout verified immutable candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate candidate and refuse an existing seed image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/public-release-candidate" > "$RUNNER_TEMP/candidate-environment.json"
+          python3 scripts/candidate-release.py "$CANDIDATE_TAG" "$CANDIDATE_SHA" \
+            --environment-json "$RUNNER_TEMP/candidate-environment.json" --seed-image
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.0.0
+
+      - name: Publish CI dependency image, not a qualified release
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
+        with:
+          context: .
+          target: final
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:ci-seed-${{ inputs.candidate_sha }}
+          sbom: true
+          provenance: mode=max
+          labels: |
+            org.opencontainers.image.revision=${{ inputs.candidate_sha }}
+            org.opencontainers.image.description=CI dependency seed; not a qualified release
+
+      - name: Record the immutable CI dependency pin
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="ghcr.io/stellwerk-labs/platform-orchestrator-dp@$IMAGE_DIGEST"
+          docker buildx imagetools inspect "$image"
+          printf 'CI dependency only: `%s`\n\nRun normal candidate integration and publication separately.\n' "$image" >> "$GITHUB_STEP_SUMMARY"
 
   verify:
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.ref }}
+
+      - name: Test publication contracts
+        run: |
+          python3 scripts/candidate-release_test.py
+          python3 scripts/stable-release-preflight_test.py
+
+      - name: Checkout the exact semantic-release action
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: stellwerk-labs/semantic-release-action
+          ref: b1269e93b486873118eef1646bfcd46a9d23d3a3
+          path: .release-tools
+          persist-credentials: false
+
+      - name: Test version assignment without credentials or network
+        run: |
+          set -euo pipefail
+          docker build -t dp-semantic-release-contract .release-tools
+          docker run --rm --network none \
+            --mount "type=bind,source=$PWD,target=/checkout,readonly" \
+            --entrypoint sh dp-semantic-release-contract \
+            /checkout/scripts/test-release-versioning.sh
 
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -79,6 +272,9 @@ jobs:
         with:
           version: v2.11.4
 
+      - name: Test digest-pinned Runner image references
+        run: bash scripts/integration-runner-image_test.sh
+
       - name: Build container
         run: docker build --target final --tag platform-orchestrator-dp:ci .
 
@@ -89,16 +285,31 @@ jobs:
           path: cover.out
 
   integration:
-    if: github.event_name != 'workflow_dispatch'
+    if: ${{ !inputs.seed_only }}
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: read
+    env:
+      CP_IMAGE: ${{ vars.CORE_CP_INTEGRATION_IMAGE }}
+      IAM_IMAGE: ${{ vars.CORE_IAM_INTEGRATION_IMAGE }}
+      RUNNER_IMAGE: ${{ vars.CORE_RUNNER_INTEGRATION_IMAGE }}
     steps:
+      - name: Require the compatible Core candidate image set
+        shell: bash
+        run: |
+          for image_variable in CP_IMAGE IAM_IMAGE RUNNER_IMAGE; do
+            if [[ ! "${!image_variable}" =~ @sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Set CORE_${image_variable%_IMAGE}_INTEGRATION_IMAGE to the compatible image digest recorded in the OSS release manifest. Pre-module-management fallback images are not valid."
+              exit 1
+            fi
+          done
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.ref }}
 
       - name: Disable Docker containerd image store
         run: |
@@ -126,7 +337,8 @@ jobs:
       - name: Run integration tests
         run: make test-integration
         env:
-          RUNNER_IMAGE: ${{ vars.RUNNER_INTEGRATION_IMAGE || 'ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0' }}
+          TEST_PARALLEL: "1"
+          TEST_TIMEOUT: 20m
 
       - name: Show integration test logs
         if: always()
@@ -158,11 +370,31 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Release
+      - name: Assign stable version and tag
         id: release
         uses: stellwerk-labs/semantic-release-action@b1269e93b486873118eef1646bfcd46a9d23d3a3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate stable source, notes, and unused destinations
+        if: steps.release.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/stable-release-preflight.py "$RELEASE_TAG" "$SOURCE_SHA"
+
+      - name: Reserve stable draft with reviewed notes
+        if: steps.release.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" --verify-tag --draft --latest=false \
+            --title "$RELEASE_TAG" --notes-file "docs/releases/$RELEASE_TAG.md"
 
       - name: Login to GitHub Container Registry
         if: steps.release.outputs.version != ''
@@ -192,6 +424,8 @@ jobs:
           tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ steps.release.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
           labels: |
             org.opencontainers.image.version=${{ steps.release.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -202,5 +436,14 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           set -euo pipefail
-          test -n "$IMAGE_DIGEST"
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           docker buildx imagetools inspect "ghcr.io/stellwerk-labs/platform-orchestrator-dp@${IMAGE_DIGEST}"
+
+      - name: Publish verified stable release
+        if: steps.release.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --draft=false --latest

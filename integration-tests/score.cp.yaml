@@ -56,4 +56,4 @@ resources:
     params:
       host: ${resources.dns.host}
       port: 8080
-      path: /orgs/[^/]+/(projects|env-types|resource-types|module-providers|runners|runner-rules|modules|module-rules)
+      path: /orgs($|/[^/]+/((envs|env-types|resource-types|module-providers|runners|runner-rules|modules|module-catalogue|module-versions|module-version-lifecycle-transactions|module-version-pins|module-rules|plugins)($|/.*)|projects($|/[^/]+($|/envs($|/[^/]+($|/(actions($|/.*)|available-resource-types|deletion-impact|module-catalogue)))))))

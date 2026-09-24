@@ -136,7 +136,7 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 
 	var podNotReady bool
 	var objectToFetchEventsAbout = k.deploymentSummary.Id.String()
-	if jobStatus.Active > 0 && ref.DerefOr(jobStatus.Ready, 0) == 0 {
+	if ref.DerefOr(jobStatus.Ready, 0) == 0 {
 		if podJob, err := k8sClient.GetPodJob(ctx, jobCfg.Namespace, k.deploymentSummary.Id.String()); err != nil {
 			if errors.Is(err, kubernetes.ErrNotFound) {
 				podNotReady = true
@@ -149,9 +149,13 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 			} else {
 				return nil, errors.Wrap(err, "failed to check pod job status")
 			}
-		} else if podJob != nil && podJob.Status.Phase == corev1.PodPending || podJob.Status.Phase == corev1.PodUnknown {
+		} else if podHasStarted(podJob) {
+			return &RunnerStatus{IsCompleted: podJob.Status.Phase == corev1.PodSucceeded || podJob.Status.Phase == corev1.PodFailed}, nil
+		} else {
 			podNotReady = true
-			objectToFetchEventsAbout = podJob.Name
+			if podJob != nil && podJob.Name != "" {
+				objectToFetchEventsAbout = podJob.Name
+			}
 		}
 	}
 
@@ -174,6 +178,19 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 			} else {
 				message = strings.Join(warningEvents, "\n")
 			}
+			// Job counters lag behind Pods, and fetching warning events can take
+			// long enough for scheduling to finish. Never finalize a running
+			// infrastructure operation from that earlier observation.
+			pod, err := k8sClient.GetPodJob(ctx, jobCfg.Namespace, k.deploymentSummary.Id.String())
+			if err != nil && !errors.Is(err, kubernetes.ErrNotFound) {
+				return &RunnerStatus{Message: "cannot confirm whether the runner Pod has started; waiting for its result"}, nil
+			}
+			if podHasStarted(pod) {
+				return &RunnerStatus{IsCompleted: pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed}, nil
+			}
+			if message == "" {
+				message = "runner Pod has not started within the configured scheduling timeout"
+			}
 
 			return &RunnerStatus{
 				IsCompleted: false,
@@ -182,7 +199,22 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 			}, nil
 		}
 	}
-	return &RunnerStatus{IsCompleted: true}, nil
+	return &RunnerStatus{IsCompleted: false}, nil
+}
+
+func podHasStarted(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return true
+	}
+	for _, container := range pod.Status.ContainerStatuses {
+		if container.State.Running != nil || container.State.Terminated != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func getJobConfiguration(cfg platformorchestratorcp.RunnerConfiguration) (platformorchestratorcp.K8sRunnerJobConfig, error) {

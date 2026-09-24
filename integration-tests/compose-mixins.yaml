@@ -3,8 +3,8 @@ services:
     image: nats:2.12-alpine
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_HEALTH_PORT:-8222}:8222"
     volumes:
       - nats-data:/data
     healthcheck:
@@ -20,6 +20,8 @@ services:
       VAULT_AUTH: token:mytoken
       DATA_PLANE_URL: http://platform-orchestrator-dp-platform-orchestrator-dp:8080
     depends_on:
+      platform-orchestrator-iam-ready:
+        condition: service_completed_successfully
       vault-init:
         condition: service_completed_successfully
   platform-orchestrator-dp-platform-orchestrator-dp:
@@ -35,8 +37,8 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
-      platform-orchestrator-iam-platform-orchestrator-iam:
-        condition: service_started
+      platform-orchestrator-iam-ready:
+        condition: service_completed_successfully
   platform-orchestrator-dp-ready:
     image: nats:2.12-alpine
     entrypoint: ["sh", "-c"]
@@ -62,6 +64,17 @@ services:
       LOG_LEVEL: debug
       DD_AGENT_HOST: ""
       SHUTDOWN_DELAY: 1s
+    depends_on:
+      nats:
+        condition: service_healthy
+  platform-orchestrator-iam-ready:
+    image: nats:2.12-alpine
+    entrypoint: ["sh", "-c"]
+    command:
+      - timeout 60 sh -c 'until wget --spider -q http://platform-orchestrator-iam-platform-orchestrator-iam:8080/health; do sleep 1; done'
+    depends_on:
+      platform-orchestrator-iam-platform-orchestrator-iam:
+        condition: service_started
   vault:
     image: hashicorp/vault:1.14
     environment:
@@ -70,7 +83,7 @@ services:
     cap_add:
       - IPC_LOCK
     ports:
-      - "8200:8200"
+      - "${VAULT_PORT:-8200}:8200"
   vault-init:
     image: hashicorp/vault:1.14
     environment:
@@ -81,7 +94,9 @@ services:
         condition: service_started
     command:
       - "sh"
-      - "-c"
-      - "until vault secrets disable transit; do sleep 3; done; vault secrets enable transit"
+      - "-ec"
+      - |
+        timeout 60 sh -c 'until vault status >/dev/null; do sleep 1; done'
+        vault secrets list -format=json | grep -q '"transit/"' || vault secrets enable transit
 volumes:
   nats-data:
