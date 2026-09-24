@@ -253,6 +253,9 @@ jobs:
         with:
           version: v2.11.4
 
+      - name: Test digest-pinned Runner image references
+        run: bash scripts/integration-runner-image_test.sh
+
       - name: Build container
         run: docker build --target final --tag platform-orchestrator-dp:ci .
 

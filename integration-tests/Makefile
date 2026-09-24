@@ -20,6 +20,9 @@ RUNNER_CONFIGURATION := runner_config.json
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
 IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.2.0
 RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
+# Docker tags and kind imports cannot use a registry digest as a tag. Keep the
+# immutable source in RUNNER_IMAGE and use a digest-derived alias only locally.
+RUNNER_TEST_IMAGE = $(if $(findstring @sha256:,$(RUNNER_IMAGE)),stellwerk-runner-integration:sha256-$(lastword $(subst :, ,$(RUNNER_IMAGE))),$(RUNNER_IMAGE))
 RUNNER_IMAGE_PULL ?= true
 TEST_PARALLEL ?= 2
 TEST_TIMEOUT ?= 10m
@@ -31,7 +34,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose init --no-sample --project $(COMPOSE_PROJECT_NAME)
 	cp score.provisioners.yaml .score-compose/
 	cp score.cp.yaml score.iam.yaml .score-compose/
-	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0"; "$(RUNNER_IMAGE)")' .score-compose/score.provisioners.yaml
+	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0"; "$(RUNNER_TEST_IMAGE)")' .score-compose/score.provisioners.yaml
 	yq -i '.containers.platform-orchestrator-cp.image = "$(CP_IMAGE)"' .score-compose/score.cp.yaml
 	yq -i '.containers.platform-orchestrator-iam.image = "$(IAM_IMAGE)"' .score-compose/score.iam.yaml
 	score-compose --quiet generate ../score.yaml --build 'platform-orchestrator-dp=$(BUILD_ARGS)'
@@ -39,7 +42,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose --quiet generate .score-compose/score.cp.yaml
 	score-compose --quiet generate --publish $(DATABASE_PORT):postgres.default#platform-orchestrator-dp.postgres.host:5432 --publish $(CP_PORT):platform-orchestrator-cp:8080 --publish $(DP_PORT):platform-orchestrator-dp:8080 --publish $(IAM_PORT):platform-orchestrator-iam:8080
 	yq eval-all '. as $$item ireduce ({}; . * $$item)' --inplace compose.yaml compose-mixins.yaml
-	yq -i '.services.runner-gateway.image = "$(RUNNER_IMAGE)"' compose.yaml
+	yq -i '.services.runner-gateway.image = "$(RUNNER_TEST_IMAGE)"' compose.yaml
 	yq -i '(.services[].ports[]? | select(.published == "8080").published) = "$(PUBLIC_PORT)"' compose.yaml
 
 .PHONY: build
@@ -98,6 +101,6 @@ configure-cluster:
 	$(KUBECTL) apply -f runner-cluster/config -R
 	@printf '{"cluster_data":{"certificate_authority_data": "%s", "server": "%s"},"auth":{"client_certificate_data": "%s", "client_key_data": "%s"}}\n' "$$($(KUBECTL_INTERNAL) config view -o jsonpath='{.clusters[?(@.name == "$(CLUSTER_NAME)")].cluster.certificate-authority-data}' --raw )" "$$($(KUBECTL_INTERNAL) config view -o jsonpath='{.clusters[?(@.name == "$(CLUSTER_NAME)")].cluster.server}' --raw )" "$$( $(KUBECTL_INTERNAL) config view -o jsonpath='{.users[?(@.name == "$(CLUSTER_NAME)")].user.client-certificate-data}' --raw )" "$$( $(KUBECTL_INTERNAL) config view -o jsonpath='{.users[?(@.name == "$(CLUSTER_NAME)")].user.client-key-data}' --raw )" > $(RUNNER_CONFIGURATION)
 	if [ "$(RUNNER_IMAGE_PULL)" = "true" ]; then \
-		printf 'FROM %s\n' "$(RUNNER_IMAGE)" | docker buildx build --pull --load --provenance=false --platform "linux/$$(docker version --format '{{.Server.Arch}}')" --tag "$(RUNNER_IMAGE)" -; \
+		printf 'FROM %s\n' "$(RUNNER_IMAGE)" | docker buildx build --pull --load --provenance=false --platform "linux/$$(docker version --format '{{.Server.Arch}}')" --tag "$(RUNNER_TEST_IMAGE)" -; \
 	fi
-	kind load docker-image --name $(NAME) "$(RUNNER_IMAGE)"
+	kind load docker-image --name $(NAME) "$(RUNNER_TEST_IMAGE)"
