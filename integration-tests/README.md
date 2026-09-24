@@ -5,8 +5,8 @@ set. CI requires `CORE_CP_INTEGRATION_IMAGE`, `CORE_IAM_INTEGRATION_IMAGE` and
 `CORE_RUNNER_INTEGRATION_IMAGE` repository variables pinned by image digest.
 Record their matching source revisions in the release manifest before
 publication. CI fails early when a required candidate input is absent instead
-of testing against a pre-versioning public image. No Enterprise credential is
-required by the OSS workflow.
+of testing against a pre-versioning public image. The workflow needs no
+credentials for private images.
 
 Managed Module fixtures declare their known output interfaces explicitly. They
 do not copy Resource Type schemas from the server or manufacture artifact
