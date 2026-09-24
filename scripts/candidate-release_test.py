@@ -11,6 +11,27 @@ SHA = "a" * 40
 
 
 class CandidateReleaseTests(unittest.TestCase):
+    def test_seed_identity_is_disjoint_from_release_channels(self):
+        self.assertEqual(candidate.seed_tag(SHA), "ci-seed-" + SHA)
+        for value in ("latest", "v3.2.0-rc.2", "a" * 39, "A" * 40, SHA + "\n", SHA + ";echo unsafe"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                candidate.seed_tag(value)
+
+    def test_seed_is_opt_in_protected_and_cannot_publish_a_release(self):
+        text = Path(__file__).parents[1].joinpath(".github/workflows/ci.yaml").read_text()
+        jobs = dict(re.findall(r"^  ([a-z-]+):\n(.*?)(?=^  [a-z-]+:\n|\Z)", text, re.M | re.S))
+        seed = jobs["candidate-seed"]
+        for required in ("github.event_name == 'workflow_dispatch' && inputs.seed_only",
+                         "environment: public-release-candidate", "- candidate-preflight", "- verify",
+                         "contents: read", "ref: ${{ inputs.candidate_sha }}", "--seed-image",
+                         "tags: ghcr.io/stellwerk-labs/platform-orchestrator-dp:ci-seed-${{ inputs.candidate_sha }}"):
+            self.assertIn(required, seed)
+        for forbidden in ("contents: write", "gh release", "git tag", ":latest", "semantic-release-action@"):
+            self.assertNotIn(forbidden, seed)
+        self.assertIn("!inputs.seed_only", jobs["candidate-release"])
+        self.assertIn("if: ${{ !inputs.seed_only }}", jobs["integration"])
+        self.assertIn("default: false\n        type: boolean", text)
+
     def test_canonical_candidate_and_exact_commit(self):
         for tag in ("v3.2.0-rc.1", "v3.2.0-rc.12", "v0.7.0-rc.1"):
             with self.subTest(tag=tag):

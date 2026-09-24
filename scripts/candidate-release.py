@@ -37,6 +37,12 @@ def validate_absence_status(status):
         raise ValueError(f"candidate image absence is not proven (HTTP {status}); refuse publication")
 
 
+def seed_tag(sha):
+    if not SHA.fullmatch(sha):
+        raise ValueError("seed source must be a full commit SHA")
+    return f"ci-seed-{sha}"
+
+
 def validate_release_page(tag, releases):
     if not isinstance(releases, list) or len(releases) > 100:
         raise ValueError("unexpected GitHub release list")
@@ -92,7 +98,11 @@ def main():
     parser.add_argument("sha")
     parser.add_argument("--environment-json", type=Path, required=True)
     parser.add_argument("--check-image-absent", metavar="OWNER/REPOSITORY")
+    parser.add_argument("--seed-image", action="store_true",
+                        help="check only the SHA-addressed CI dependency image, never a release tag")
     args = parser.parse_args()
+    if args.seed_image and args.check_image_absent:
+        parser.error("seed and release image checks are mutually exclusive")
     validate_identity(args.tag, args.sha, args.sha, args.sha)
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     tag = subprocess.check_output(["git", "rev-parse", "--verify", f"refs/tags/{args.tag}^{{commit}}"], text=True).strip()
@@ -105,6 +115,9 @@ def main():
             raise ValueError("only the reviewed public DP image destination is supported")
         assert_release_unreserved(args.tag)
         assert_image_absent(args.check_image_absent, args.tag)
+    if args.seed_image:
+        assert_release_unreserved(args.tag)
+        assert_image_absent(REPOSITORY, seed_tag(args.sha))
     print(f"Verified release candidate {args.tag} at {args.sha}; no publication performed.")
 
 
