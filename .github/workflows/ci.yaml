@@ -1,6 +1,16 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: "Pre-existing approved vX.Y.Z-rc.N tag (never stable/latest)"
+        required: true
+        type: string
+      candidate_sha:
+        description: "Approved full 40-character commit SHA identified by that tag"
+        required: true
+        type: string
   push:
     branches:
       - main
@@ -17,7 +27,19 @@ env:
   DOCKER_BUILDKIT: "1"
 
 jobs:
+  require-candidate-ref:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - name: Require the approved candidate workflow
+        run: |
+          echo '::error::Select the approved release/module-management-rc.1 ref. This default-branch workflow cannot publish release candidates.'
+          exit 1
+
   verify:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -67,6 +89,7 @@ jobs:
           path: cover.out
 
   integration:
+    if: github.event_name != 'workflow_dispatch'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
