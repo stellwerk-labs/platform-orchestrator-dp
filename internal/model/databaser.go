@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,8 @@ import (
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+var registerGoMigrations sync.Once
+
 // Model is the underlying type for the entire model.
 type databaser struct {
 	*sql.DB
@@ -43,7 +46,9 @@ func NewDatabaser(ctx context.Context, logger *zap.Logger, connStr string) (Data
 	goose.SetLogger(&gooseZapLogger{SugaredLogger: logger.Named("goose").Sugar()})
 	goose.SetBaseFS(embedMigrations)
 	goose.SetVerbose(logger.Level() <= zap.DebugLevel)
-	goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardoutbox.MigrateUp01, hstandardoutbox.MigrateDown01)
+	registerGoMigrations.Do(func() {
+		goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardoutbox.MigrateUp01, hstandardoutbox.MigrateDown01)
+	})
 
 	if inner, err := hpostgresconnect.InitDatabase(ctx, &hpostgresconnect.Config{
 		Logger:  logger,

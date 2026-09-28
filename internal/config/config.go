@@ -33,6 +33,12 @@ type Configuration struct {
 	ControlPlaneUrl string `env:"CONTROL_PLANE_URL" validate:"required,url"`
 	RunnerTokenSalt string `env:"RUNNER_TOKEN_SALT" validate:"required"`
 
+	PluginDeployEnabled bool   `env:"EXTERNAL_DEPLOYMENT_ENABLED, default=false"`
+	PluginIssuer        string `env:"EXTERNAL_DEPLOYMENT_ISSUER"`
+	PluginVerifyKeyFile string `env:"EXTERNAL_DEPLOYMENT_VERIFICATION_KEY_FILE"`
+	PluginCoreURL       string `env:"EXTERNAL_DEPLOYMENT_CORE_GATEWAY_URL"`
+	PluginCoreTokenFile string `env:"EXTERNAL_DEPLOYMENT_CORE_BEARER_TOKEN_FILE"`
+
 	// IamUrl is the internal url for the platform-orchestrator-iam service
 	IamUrl string `env:"IAM_URL" validate:"required,url"`
 

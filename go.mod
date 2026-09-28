@@ -39,6 +39,7 @@ require (
 	github.com/stellwerk-labs/golib/htelemetry v1.0.0
 	github.com/stellwerk-labs/golib/hvaultapi v1.0.0
 	github.com/stellwerk-labs/platform-orchestrator-cp/shared v1.0.0
+	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2 v2.0.0
 	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2 v2.0.0
 	github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0
 	github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.0.0

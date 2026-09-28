@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -227,13 +228,47 @@ func main() {
 		OidcIssuerUrl:            cfg.OidcIssuerUrl,
 		IamClient:                iamClient,
 	}
+	if cfg.PluginDeployEnabled {
+		if cfg.PluginIssuer == "" || cfg.PluginCoreURL == "" {
+			zap.L().Fatal("external deployment admission requires an issuer and Core gateway URL")
+		}
+		verificationKey, bearerToken, err := api.LoadExternalDeploymentCredentials(
+			cfg.PluginVerifyKeyFile,
+			cfg.PluginCoreTokenFile,
+		)
+		if err != nil {
+			zap.L().Fatal("failed to load external deployment credentials", zap.Error(err))
+		}
+		coreGatewayURL, err := url.Parse(cfg.PluginCoreURL)
+		if err != nil || (coreGatewayURL.Scheme != "http" && coreGatewayURL.Scheme != "https") ||
+			coreGatewayURL.Host == "" || coreGatewayURL.User != nil {
+			zap.L().Fatal("external deployment Core gateway URL is invalid")
+		}
+		grantHTTPClient := *http.DefaultClient
+		grantHTTPClient.Timeout = api.ExternalDeploymentGrantTimeout
+		grantHTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		grantClient := api.CoreExternalDeploymentGrantClient{
+			BaseURL: coreGatewayURL, HTTPClient: &grantHTTPClient, BearerToken: bearerToken,
+		}
+		server.ExternalDeployments = &api.ExternalDeploymentHTTPAdapter{
+			Issuer:             cfg.PluginIssuer,
+			VerificationKey:    verificationKey,
+			Admission:          api.ExternalDeploymentAdmissionService{Database: db, Authorizer: grantClient, Logger: zap.L()},
+			ControlPlaneClient: cpClient,
+			EventPublisher:     eventPublisher,
+			Logger:             zap.L(),
+		}
+	}
 	echo, err := hecho.DefaultEchoServerWithValidation(&hecho.ValidatedServerConfig{
 		AppName:          path.Base(buildInfo.Main.Path),
 		Logger:           server.Logger,
 		OpenAPIRawSchema: api.MustDecodeOpenApiSpec(),
 		Tracing:          hecho.TracingOTel,
 		OpenAPISkipperFn: func(c echo.Context) bool {
-			return c.Path() == "/alive" || c.Path() == "/health" || c.Path() == "/internal/actions/flush-pending-messages"
+			return c.Path() == "/alive" || c.Path() == "/health" || c.Path() == "/internal/actions/flush-pending-messages" ||
+				c.Path() == api.ExternalDeploymentAdmissionPath
 		},
 	})
 	if err != nil {

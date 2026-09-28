@@ -44,6 +44,7 @@ type Server struct {
 	OidcIssuerUrl            string
 	IamClient                platformorchestratoriam.ClientWithResponsesInterface
 	RunnerLogsReader         RunnerLogsReader
+	ExternalDeployments      *ExternalDeploymentHTTPAdapter
 }
 
 func (s *Server) MapRoutes(e *echo.Echo) {
@@ -55,6 +56,9 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		adaptStrictMiddleware(token.StrictEncryptionMiddleware()),
 	})
 	RegisterHandlers(e, apiHandler)
+	if s.ExternalDeployments != nil {
+		e.POST(ExternalDeploymentAdmissionPath, s.ExternalDeployments.Handle)
+	}
 
 	buildInfo, _ := debug.ReadBuildInfo()
 	e.GET("/alive", func(c echo.Context) error {
