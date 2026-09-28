@@ -57,6 +57,8 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	var checks atomic.Int64
 	var grantActive atomic.Bool
 	grantActive.Store(true)
+	callbackEntered := make(chan struct{}, 1)
+	callbackRelease := make(chan struct{})
 
 	coreServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
@@ -84,13 +86,17 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 				response.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			if !grantActive.Load() {
-				response.WriteHeader(http.StatusForbidden)
-				return
-			}
 			var check platformorchestratorcpv2.PluginDispatchCheck
 			if !assert.NoError(t, json.NewDecoder(request.Body).Decode(&check)) {
 				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if check.DispatchId == "dispatch-cancel" {
+				callbackEntered <- struct{}{}
+				<-callbackRelease
+			}
+			if !grantActive.Load() {
+				response.WriteHeader(http.StatusForbidden)
 				return
 			}
 			_ = json.NewEncoder(response).Encode(platformorchestratorcpv2.PluginDispatchAuthorization{
@@ -116,6 +122,7 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	}
 	server := echo.New()
 	server.POST(ExternalDeploymentAdmissionPath, adapter.Handle)
+	server.GET(ExternalDeploymentDispatchReadPath, adapter.HandleDispatchRead)
 
 	bodyBytes, err := json.Marshal(ExternalDeploymentAdmissionBody{
 		OperationRef: operationID.String(), Fence: 7,
@@ -134,17 +141,17 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	}
 	assertion, err := plugincontext.Sign(privateKey, claims, now)
 	require.NoError(t, err)
-	do := func(body []byte, signed string) *httptest.ResponseRecorder {
+	do := func(body []byte, signed, requestID string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Idempotency-Key", dispatchID)
+		request.Header.Set("Idempotency-Key", requestID)
 		request.Header.Set(plugincontext.Header, signed)
 		response := httptest.NewRecorder()
 		server.ServeHTTP(response, request)
 		return response
 	}
 
-	created := do(bodyBytes, assertion)
+	created := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var createdBody ExternalDeploymentAdmissionResponse
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
@@ -154,20 +161,68 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	require.Equal(t, actorID, deployment.CreatedBy)
 	require.Equal(t, model.DeploymentModeDeploy, deployment.Mode)
 
-	replayed := do(bodyBytes, assertion)
+	replayed := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
 	require.EqualValues(t, 2, checks.Load(), "replay must reauthorize before loading its receipt")
 
+	cancelClaims := claims
+	cancelClaims.RequestID = "dispatch-cancel"
+	cancelAssertion, err := plugincontext.Sign(privateKey, cancelClaims, now)
+	require.NoError(t, err)
+	admissionDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { admissionDone <- do(bodyBytes, cancelAssertion, cancelClaims.RequestID) }()
+	select {
+	case <-callbackEntered:
+	case <-ctx.Done():
+		t.Fatal("cancellation admission did not reach Core callback")
+	}
 	grantActive.Store(false)
-	revoked := do(bodyBytes, assertion)
+	dispatchPath := "/orgs/acme/plugins/dev.example.rollouts/projects/" + projectUUID.String() + "/envs/" + environmentUUID.String() + "/external-deployment-dispatches/" + cancelClaims.RequestID
+	readClaims := claims
+	readClaims.OperationID = ExternalDeploymentReadAction
+	readClaims.Method = http.MethodGet
+	readClaims.Path = dispatchPath
+	readClaims.BodySHA256 = plugincontext.Digest(nil)
+	readClaims.RequestID = "read-cancelled-dispatch"
+	readAssertion, err := plugincontext.Sign(privateKey, readClaims, now)
+	require.NoError(t, err)
+	readDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		request := httptest.NewRequest(http.MethodGet, dispatchPath, nil)
+		request.Header.Set(plugincontext.Header, readAssertion)
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		readDone <- response
+	}()
+	select {
+	case response := <-readDone:
+		t.Fatalf("receipt read returned %d before the in-flight admission resolved", response.Code)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(callbackRelease)
+	select {
+	case response := <-admissionDone:
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	case <-ctx.Done():
+		t.Fatal("cancelled admission did not return")
+	}
+	select {
+	case response := <-readDone:
+		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	case <-ctx.Done():
+		t.Fatal("receipt read did not observe authoritative absence")
+	}
+
+	grantActive.Store(false)
+	revoked := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusForbidden, revoked.Code, revoked.Body.String())
-	require.EqualValues(t, 3, checks.Load())
+	require.EqualValues(t, 4, checks.Load())
 
 	tampered := append([]byte(nil), bodyBytes...)
 	tampered = bytes.Replace(tampered, []byte(`"fence":7`), []byte(`"fence":8`), 1)
-	invalid := do(tampered, assertion)
+	invalid := do(tampered, assertion, dispatchID)
 	require.Equal(t, http.StatusUnauthorized, invalid.Code, invalid.Body.String())
-	require.EqualValues(t, 3, checks.Load(), "invalid assertion must fail before Core callbacks")
+	require.EqualValues(t, 4, checks.Load(), "invalid assertion must fail before Core callbacks")
 }
 
 func externalDeploymentTestDatabase(t *testing.T, ctx context.Context, connection string) model.Databaser {

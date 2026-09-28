@@ -106,6 +106,48 @@ func (e DeploymentResultsUpdateBodyStatus) Valid() bool {
 	}
 }
 
+// Defines values for ExternalDeploymentStatusResponseMode.
+const (
+	ExternalDeploymentStatusModeDeploy   ExternalDeploymentStatusResponseMode = "deploy"
+	ExternalDeploymentStatusModeDestroy  ExternalDeploymentStatusResponseMode = "destroy"
+	ExternalDeploymentStatusModeRollback ExternalDeploymentStatusResponseMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseMode enum.
+func (e ExternalDeploymentStatusResponseMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusModeDeploy:
+		return true
+	case ExternalDeploymentStatusModeDestroy:
+		return true
+	case ExternalDeploymentStatusModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentStatusResponseStatus.
+const (
+	ExternalDeploymentStatusExecuting ExternalDeploymentStatusResponseStatus = "executing"
+	ExternalDeploymentStatusFailed    ExternalDeploymentStatusResponseStatus = "failed"
+	ExternalDeploymentStatusSucceeded ExternalDeploymentStatusResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseStatus enum.
+func (e ExternalDeploymentStatusResponseStatus) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusExecuting:
+		return true
+	case ExternalDeploymentStatusFailed:
+		return true
+	case ExternalDeploymentStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalEnvironmentReadinessLatestMode.
 const (
 	ExternalEnvironmentReadinessLatestModeDeploy   ExternalEnvironmentReadinessLatestMode = "deploy"
@@ -738,6 +780,31 @@ type ExternalDeploymentReadinessBody struct {
 type ExternalDeploymentReadinessResponse struct {
 	Items []ExternalEnvironmentReadiness `json:"items"`
 }
+
+// ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
+type ExternalDeploymentStatusResponse struct {
+	CompletedAt      *time.Time                             `json:"completed_at,omitempty"`
+	CreatedAt        time.Time                              `json:"created_at"`
+	DeploymentId     openapi_types.UUID                     `json:"deployment_id"`
+	DispatchId       string                                 `json:"dispatch_id"`
+	EnvId            string                                 `json:"env_id"`
+	EnvironmentUuid  openapi_types.UUID                     `json:"environment_uuid"`
+	Fence            int64                                  `json:"fence"`
+	Mode             ExternalDeploymentStatusResponseMode   `json:"mode"`
+	ModuleVersions   map[string]openapi_types.UUID          `json:"module_versions"`
+	OperationRef     openapi_types.UUID                     `json:"operation_ref"`
+	ProjectId        string                                 `json:"project_id"`
+	ProjectUuid      openapi_types.UUID                     `json:"project_uuid"`
+	ReceiptCreatedAt time.Time                              `json:"receipt_created_at"`
+	Status           ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage    string                                 `json:"status_message"`
+}
+
+// ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.
+type ExternalDeploymentStatusResponseMode string
+
+// ExternalDeploymentStatusResponseStatus defines model for ExternalDeploymentStatusResponse.Status.
+type ExternalDeploymentStatusResponseStatus string
 
 // ExternalEnvironmentReadiness defines model for ExternalEnvironmentReadiness.
 type ExternalEnvironmentReadiness struct {
@@ -1489,6 +1556,11 @@ type ClientInterface interface {
 	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 	GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetExternalDeploymentDispatch Recover immutable Deployment receipt status after a lost admission response.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+	GetExternalDeploymentDispatch(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetExternalDeployment Get an ordinary Deployment only within its exact authorized Environment.
 	//
 	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
@@ -2022,6 +2094,21 @@ func (c *Client) GetExternalDeploymentReadinessWithBody(ctx context.Context, org
 // Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 func (c *Client) GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetExternalDeploymentReadinessRequest(c.Server, orgId, pluginId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentDispatch Recover immutable Deployment receipt status after a lost admission response.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+func (c *Client) GetExternalDeploymentDispatch(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentDispatchRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, dispatchId)
 	if err != nil {
 		return nil, err
 	}
@@ -3527,6 +3614,68 @@ func NewGetExternalDeploymentReadinessRequestWithBody(server string, orgId OrgId
 	return req, nil
 }
 
+// NewGetExternalDeploymentDispatchRequest constructs an http.Request for the GetExternalDeploymentDispatch method
+func NewGetExternalDeploymentDispatchRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "dispatchId", dispatchId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployment-dispatches/%s", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetExternalDeploymentRequest constructs an http.Request for the GetExternalDeployment method
 func NewGetExternalDeploymentRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
 	var err error
@@ -3897,6 +4046,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 	GetExternalDeploymentReadinessWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error)
+
+	// GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+	GetExternalDeploymentDispatchWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*GetExternalDeploymentDispatchResponse, error)
 
 	// GetExternalDeploymentWithResponse Get an ordinary Deployment only within its exact authorized Environment.
 	//
@@ -5197,17 +5353,65 @@ func (r GetExternalDeploymentReadinessResponse) ContentType() string {
 	return ""
 }
 
-type GetExternalDeploymentResponse struct {
+type GetExternalDeploymentDispatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *DeploymentSummary
+	JSON200 *ExternalDeploymentStatusResponse
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *N404NotFound
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetExternalDeploymentResponse) GetJSON200() *DeploymentSummary {
+func (r GetExternalDeploymentDispatchResponse) GetJSON200() *ExternalDeploymentStatusResponse {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentDispatchResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentDispatchResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentDispatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentDispatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentDispatchResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentStatusResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExternalDeploymentResponse) GetJSON200() *ExternalDeploymentStatusResponse {
 	return r.JSON200
 }
 
@@ -5694,6 +5898,19 @@ func (c *ClientWithResponses) GetExternalDeploymentReadinessWithResponse(ctx con
 		return nil, err
 	}
 	return ParseGetExternalDeploymentReadinessResponse(rsp)
+}
+
+// GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentDispatchWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*GetExternalDeploymentDispatchResponse, error) {
+	rsp, err := c.GetExternalDeploymentDispatch(ctx, orgId, pluginId, projectUUID, environmentUUID, dispatchId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentDispatchResponse(rsp)
 }
 
 // GetExternalDeploymentWithResponse Get an ordinary Deployment only within its exact authorized Environment.
@@ -6640,6 +6857,39 @@ func ParseGetExternalDeploymentReadinessResponse(rsp *http.Response) (*GetExtern
 	return response, nil
 }
 
+// ParseGetExternalDeploymentDispatchResponse parses an HTTP response from a GetExternalDeploymentDispatchWithResponse call
+func ParseGetExternalDeploymentDispatchResponse(rsp *http.Response) (*GetExternalDeploymentDispatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentDispatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentStatusResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetExternalDeploymentResponse parses an HTTP response from a GetExternalDeploymentWithResponse call
 func ParseGetExternalDeploymentResponse(rsp *http.Response) (*GetExternalDeploymentResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6655,7 +6905,7 @@ func ParseGetExternalDeploymentResponse(rsp *http.Response) (*GetExternalDeploym
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest DeploymentSummary
+		var dest ExternalDeploymentStatusResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

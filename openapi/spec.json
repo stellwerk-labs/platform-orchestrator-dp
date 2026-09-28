@@ -136,11 +136,71 @@
         ],
         "responses": {
           "200": {
-            "description": "Exact-environment Deployment summary, excluding material and runner data.",
+            "description": "Exact-environment plugin Deployment status and immutable operation identity.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeploymentSummary"
+                  "$ref": "#/components/schemas/ExternalDeploymentStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId}": {
+      "get": {
+        "operationId": "getExternalDeploymentDispatch",
+        "tags": [
+          "not-implemented"
+        ],
+        "summary": "Recover immutable Deployment receipt status after a lost admission response.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/orgIdPathParam"
+          },
+          {
+            "$ref": "#/components/parameters/pluginIdPathParam"
+          },
+          {
+            "name": "projectUUID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentUUID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dispatchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable receipt and current ordinary Deployment status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalDeploymentStatusResponse"
                 }
               }
             }
@@ -1681,6 +1741,106 @@
             "items": {
               "$ref": "#/components/schemas/ExternalModuleInventory"
             }
+          }
+        }
+      },
+      "ExternalDeploymentStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deployment_id",
+          "dispatch_id",
+          "operation_ref",
+          "fence",
+          "project_id",
+          "env_id",
+          "project_uuid",
+          "environment_uuid",
+          "mode",
+          "status",
+          "status_message",
+          "module_versions",
+          "created_at",
+          "receipt_created_at"
+        ],
+        "properties": {
+          "deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string"
+          },
+          "operation_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "env_id": {
+            "type": "string"
+          },
+          "project_uuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_uuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "rollback",
+              "destroy"
+            ],
+            "x-enum-varnames": [
+              "ExternalDeploymentStatusModeDeploy",
+              "ExternalDeploymentStatusModeRollback",
+              "ExternalDeploymentStatusModeDestroy"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "executing",
+              "failed",
+              "succeeded"
+            ],
+            "x-enum-varnames": [
+              "ExternalDeploymentStatusExecuting",
+              "ExternalDeploymentStatusFailed",
+              "ExternalDeploymentStatusSucceeded"
+            ]
+          },
+          "status_message": {
+            "type": "string"
+          },
+          "module_versions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receipt_created_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

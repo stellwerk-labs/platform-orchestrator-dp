@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 // ExternalOperationDeploymentKey is the durable idempotency identity for one
@@ -30,6 +32,8 @@ type ExternalOperationDeploymentReceipt struct {
 	ActorID           string
 	ProjectID         string
 	EnvID             string
+	ProjectUUID       opt.Opt[uuid.UUID]
+	EnvironmentUUID   opt.Opt[uuid.UUID]
 	DeploymentID      uuid.UUID
 	CreatedAt         time.Time
 }
@@ -51,7 +55,7 @@ func GetExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, key Exter
 
 	receipt := &ExternalOperationDeploymentReceipt{ExternalOperationDeploymentKey: key}
 	if err := tx.QueryRowContext(ctx, `
-		SELECT operation_ref, fence, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id, deployment_id, created_at
+		SELECT operation_ref, fence, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id, project_uuid, environment_uuid, deployment_id, created_at
 		FROM external_operation_deployments
 		WHERE org_id=$1 AND plugin_id=$2 AND request_id=$3
 		FOR UPDATE
@@ -64,6 +68,8 @@ func GetExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, key Exter
 		&receipt.ActorID,
 		&receipt.ProjectID,
 		&receipt.EnvID,
+		opt.Scan(&receipt.ProjectUUID),
+		opt.Scan(&receipt.EnvironmentUUID),
 		&receipt.DeploymentID,
 		&receipt.CreatedAt,
 	); err != nil {
@@ -71,6 +77,32 @@ func GetExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, key Exter
 			return nil, NewErrNotFound("no deployment receipt found for the external operation request")
 		}
 		return nil, errors.Wrap(err, "failed to query external operation deployment receipt")
+	}
+	return receipt, nil
+}
+
+func ReadExternalOperationDeploymentReceiptByDeployment(ctx context.Context, tx Tx, orgID, pluginID string, deploymentID uuid.UUID) (*ExternalOperationDeploymentReceipt, error) {
+	if tx == nil {
+		return nil, errors.New("transaction is required")
+	}
+	receipt := &ExternalOperationDeploymentReceipt{
+		ExternalOperationDeploymentKey: ExternalOperationDeploymentKey{OrgID: orgID, PluginID: pluginID},
+		DeploymentID:                   deploymentID,
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT request_id, operation_ref, fence, assertion_action, service_action, request_body_sha256, actor_id,
+		       project_id, env_id, project_uuid, environment_uuid, created_at
+		FROM external_operation_deployments
+		WHERE org_id=$1 AND plugin_id=$2 AND deployment_id=$3
+	`, orgID, pluginID, deploymentID).Scan(
+		&receipt.RequestID, &receipt.OperationRef, &receipt.Fence, &receipt.AssertionAction, &receipt.ServiceAction,
+		&receipt.RequestBodySHA256, &receipt.ActorID, &receipt.ProjectID, &receipt.EnvID,
+		opt.Scan(&receipt.ProjectUUID), opt.Scan(&receipt.EnvironmentUUID), &receipt.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, NewErrNotFound("no external operation receipt found for the deployment")
+		}
+		return nil, errors.Wrap(err, "failed to read external operation receipt by deployment")
 	}
 	return receipt, nil
 }
@@ -84,11 +116,12 @@ func CreateExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, receip
 	}
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO external_operation_deployments
-			(org_id, plugin_id, operation_ref, fence, request_id, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id, deployment_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			(org_id, plugin_id, operation_ref, fence, request_id, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id, project_uuid, environment_uuid, deployment_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING created_at
 	`, receipt.OrgID, receipt.PluginID, receipt.OperationRef, receipt.Fence, receipt.RequestID,
-		receipt.AssertionAction, receipt.ServiceAction, receipt.RequestBodySHA256, receipt.ActorID, receipt.ProjectID, receipt.EnvID, receipt.DeploymentID,
+		receipt.AssertionAction, receipt.ServiceAction, receipt.RequestBodySHA256, receipt.ActorID, receipt.ProjectID, receipt.EnvID,
+		receipt.ProjectUUID.Ref(), receipt.EnvironmentUUID.Ref(), receipt.DeploymentID,
 	).Scan(&receipt.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to insert external operation deployment receipt")
 	}

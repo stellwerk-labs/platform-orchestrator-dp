@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 const (
@@ -79,8 +80,10 @@ type ExternalDeploymentAdmissionResult struct {
 
 // ExternalDeploymentAdmissionService is an unrouted application boundary. An
 // HTTP adapter may call it only after independently verifying a DP-audience
-// assertion for the exact request. The service then reauthorizes the concrete
-// Core operation/fence before opening the atomic Deployment transaction.
+// assertion for the exact request. The service locks the durable dispatch key
+// before reauthorizing the concrete Core operation/fence. This ordering lets a
+// post-revocation receipt read wait until an already-admitted transaction has
+// either committed its receipt or rolled back without an effect.
 type ExternalDeploymentAdmissionService struct {
 	Database   model.Databaser
 	Authorizer ExternalDeploymentGrantAuthorizer
@@ -97,6 +100,27 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 	actorID, err := uuid.Parse(request.Claims.ActorID)
 	if err != nil {
 		return nil, model.NewErrBadRequest("external deployment actor is not a UUID")
+	}
+	tx, err := s.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to begin external deployment transaction")
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) && s.Logger != nil {
+			s.Logger.Error("failed to roll back external deployment transaction", zap.Error(rollbackErr))
+		}
+	}()
+
+	key := model.ExternalOperationDeploymentKey{
+		OrgID:     request.Claims.OrgID,
+		PluginID:  request.Claims.PluginID,
+		RequestID: request.Claims.RequestID,
+	}
+	receipt, receiptErr := model.GetExternalOperationDeploymentReceipt(ctx, tx, key)
+	if receiptErr != nil {
+		if _, missing := model.IsErrNotFound(receiptErr); !missing {
+			return nil, errors.Wrap(receiptErr, "failed to inspect external deployment receipt")
+		}
 	}
 	authorized, err := s.Authorizer.AuthorizeExternalDeployment(ctx, request.Claims, ExternalDeploymentGrantRequest{
 		OperationRef:  request.OperationRef,
@@ -116,24 +140,7 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 	if !externalDeploymentAuthorizationMatches(authorized, request) {
 		return nil, model.NewErrConflict("Core authorized a different external deployment intent")
 	}
-
-	tx, err := s.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to begin external deployment transaction")
-	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) && s.Logger != nil {
-			s.Logger.Error("failed to roll back external deployment transaction", zap.Error(rollbackErr))
-		}
-	}()
-
-	key := model.ExternalOperationDeploymentKey{
-		OrgID:     request.Claims.OrgID,
-		PluginID:  request.Claims.PluginID,
-		RequestID: request.Claims.RequestID,
-	}
-	receipt, err := model.GetExternalOperationDeploymentReceipt(ctx, tx, key)
-	if err == nil {
+	if receiptErr == nil {
 		if !externalDeploymentReceiptMatches(receipt, request, actorID, authorized) {
 			return nil, model.NewErrConflict("external deployment request identity was reused with different inputs")
 		}
@@ -148,9 +155,6 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 			return nil, errors.Wrap(err, "failed to commit external deployment replay")
 		}
 		return &ExternalDeploymentAdmissionResult{Deployment: deployment, Replayed: true}, nil
-	}
-	if _, missing := model.IsErrNotFound(err); !missing {
-		return nil, errors.Wrap(err, "failed to inspect external deployment receipt")
 	}
 
 	deployment, pendingEvents, err := request.Create(ctx, tx, actorID)
@@ -171,6 +175,8 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 		ActorID:                        request.Claims.ActorID,
 		ProjectID:                      request.ProjectID,
 		EnvID:                          request.EnvID,
+		ProjectUUID:                    opt.Of(request.ProjectUUID),
+		EnvironmentUUID:                opt.Of(request.EnvUUID),
 		DeploymentID:                   deployment.Id,
 	}); err != nil {
 		return nil, err
@@ -208,7 +214,9 @@ func externalDeploymentReceiptMatches(receipt *model.ExternalOperationDeployment
 		receipt.RequestBodySHA256 == request.Claims.BodySHA256 &&
 		receipt.ActorID == actorID.String() &&
 		receipt.ProjectID == request.ProjectID &&
-		receipt.EnvID == request.EnvID
+		receipt.EnvID == request.EnvID &&
+		receipt.ProjectUUID.IsSet() && receipt.ProjectUUID.Must() == request.ProjectUUID &&
+		receipt.EnvironmentUUID.IsSet() && receipt.EnvironmentUUID.Must() == request.EnvUUID
 }
 
 func externalDeploymentAuthorizationMatches(authorized AuthorizedExternalDeployment, request ExternalDeploymentAdmissionRequest) bool {

@@ -38,6 +38,8 @@ const (
 	externalDeploymentFailedCode            = "external_deployment_failed"
 	externalInvalidPluginContextCode        = "invalid_plugin_context"
 	externalInvalidPluginContextMessage     = "a valid request-bound plugin context is required"
+	externalInvalidActorMessage             = "plugin context actor is invalid"
+	externalDeploymentNotFoundCode          = "deployment_not_found"
 	externalQueryUnsupportedMessage         = "query parameters are not supported"
 	externalInvalidPathIdentityMessage      = "organization or plugin identity is invalid"
 	externalEnvironmentIdentityChangedCode  = "environment_identity_changed"

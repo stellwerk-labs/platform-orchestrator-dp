@@ -26,14 +26,15 @@ import (
 )
 
 const (
-	ExternalDeploymentReadinessPath   = "/orgs/:orgId/plugins/:pluginId/external-deployment-readiness"
-	ExternalDeploymentPlanningPath    = "/orgs/:orgId/plugins/:pluginId/external-deployment-plans"
-	ExternalDeploymentReadPath        = "/orgs/:orgId/plugins/:pluginId/projects/:projectUUID/envs/:environmentUUID/external-deployments/:deploymentId"
-	ExternalDeploymentReadinessAction = "external-deployment.readiness"
-	ExternalDeploymentPlanningAction  = "external-deployment.plan"
-	ExternalDeploymentReadAction      = "external-deployment.read"
-	maxExternalInspectionBodyBytes    = 1 << 20
-	maxExternalReadinessEnvironments  = 1000
+	ExternalDeploymentReadinessPath    = "/orgs/:orgId/plugins/:pluginId/external-deployment-readiness"
+	ExternalDeploymentPlanningPath     = "/orgs/:orgId/plugins/:pluginId/external-deployment-plans"
+	ExternalDeploymentReadPath         = "/orgs/:orgId/plugins/:pluginId/projects/:projectUUID/envs/:environmentUUID/external-deployments/:deploymentId"
+	ExternalDeploymentDispatchReadPath = "/orgs/:orgId/plugins/:pluginId/projects/:projectUUID/envs/:environmentUUID/external-deployment-dispatches/:dispatchId"
+	ExternalDeploymentReadinessAction  = "external-deployment.readiness"
+	ExternalDeploymentPlanningAction   = "external-deployment.plan"
+	ExternalDeploymentReadAction       = "external-deployment.read"
+	maxExternalInspectionBodyBytes     = 1 << 20
+	maxExternalReadinessEnvironments   = 1000
 )
 
 type externalEnvironmentRef struct {
@@ -134,6 +135,24 @@ type externalDeploymentPlanResponse struct {
 	ModuleVersions            []externalModuleInventory `json:"module_versions"`
 }
 
+type externalDeploymentStatusResponse struct {
+	DeploymentID     uuid.UUID            `json:"deployment_id"`
+	DispatchID       string               `json:"dispatch_id"`
+	OperationRef     string               `json:"operation_ref"`
+	Fence            int64                `json:"fence"`
+	ProjectID        string               `json:"project_id"`
+	EnvID            string               `json:"env_id"`
+	ProjectUUID      uuid.UUID            `json:"project_uuid"`
+	EnvironmentUUID  uuid.UUID            `json:"environment_uuid"`
+	Mode             string               `json:"mode"`
+	Status           string               `json:"status"`
+	StatusMessage    string               `json:"status_message"`
+	ModuleVersions   map[string]uuid.UUID `json:"module_versions"`
+	CreatedAt        time.Time            `json:"created_at"`
+	CompletedAt      *time.Time           `json:"completed_at,omitempty"`
+	ReceiptCreatedAt time.Time            `json:"receipt_created_at"`
+}
+
 func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 	if err := a.validateConfiguration(); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment read is unavailable"})
@@ -162,7 +181,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 	if _, err := uuid.Parse(claims.ActorID); err != nil {
-		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: "invalid_plugin_context", Message: "plugin context actor is invalid"})
+		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidActorMessage})
 	}
 	deploymentID, err := uuid.Parse(c.Param("deploymentId"))
 	projectUUID, projectErr := uuid.Parse(c.Param("projectUUID"))
@@ -170,15 +189,31 @@ func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 	if err != nil || projectErr != nil || environmentErr != nil || deploymentID == uuid.Nil || projectUUID == uuid.Nil || environmentUUID == uuid.Nil {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "deployment and environment identity is invalid"})
 	}
-	deployment, _, _, _, err := a.Admission.Database.GetDeployment(request.Context(), nil, orgID, deploymentID, model.GetModeDefault)
+	tx, err := a.Admission.Database.BeginTx(request.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return a.writeInspectionError(c, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	deployment, _, _, _, err := a.Admission.Database.GetDeployment(request.Context(), tx, orgID, deploymentID, model.GetModeDefault)
 	if err != nil {
 		if _, notFound := model.IsErrNotFound(err); notFound {
-			return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: "deployment_not_found", Message: "deployment was not found in the authorized environment"})
+			return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: externalDeploymentNotFoundCode, Message: "deployment was not found in the authorized environment"})
 		}
 		return a.writeInspectionError(c, err)
 	}
 	if deployment.DeploymentEnvUuid != environmentUUID {
-		return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: "deployment_not_found", Message: "deployment was not found in the authorized environment"})
+		return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: externalDeploymentNotFoundCode, Message: "deployment was not found in the authorized environment"})
+	}
+	receipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(request.Context(), tx, orgID, pluginID, deploymentID)
+	if err != nil {
+		if _, notFound := model.IsErrNotFound(err); notFound {
+			return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: externalDeploymentNotFoundCode, Message: "deployment is not owned by this plugin"})
+		}
+		return a.writeInspectionError(c, err)
+	}
+	if !receipt.ProjectUUID.IsSet() || !receipt.EnvironmentUUID.IsSet() || receipt.ProjectUUID.Must() != projectUUID || receipt.EnvironmentUUID.Must() != environmentUUID ||
+		receipt.ProjectID != deployment.ProjectId || receipt.EnvID != deployment.EnvId {
+		return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: externalDeploymentNotFoundCode, Message: "deployment was not found in the authorized Environment"})
 	}
 	resolved, exactErr := a.resolveExactEnvironment(request.Context(), orgID, externalEnvironmentRef{
 		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
@@ -186,7 +221,113 @@ func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 	if exactErr != nil || resolved == nil {
 		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: "authorized Environment identity is no longer current"})
 	}
-	return c.JSON(http.StatusOK, apiDepSummaryFromModel(*deployment))
+	response, err := projectExternalDeploymentStatus(*deployment, *receipt, projectUUID, environmentUUID)
+	if err != nil {
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
+	}
+	if err := tx.Commit(); err != nil {
+		return a.writeInspectionError(c, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (a *ExternalDeploymentHTTPAdapter) HandleDispatchRead(c echo.Context) error {
+	requestContext, cancel := context.WithTimeout(c.Request().Context(), RequestHandlerTimeout)
+	defer cancel()
+	c.SetRequest(c.Request().WithContext(requestContext))
+	if _, err := a.verifyInspectionGET(c, ExternalDeploymentReadAction); err != nil {
+		return err
+	}
+	dispatchID := c.Param("dispatchId")
+	projectUUID, projectErr := uuid.Parse(c.Param("projectUUID"))
+	environmentUUID, environmentErr := uuid.Parse(c.Param("environmentUUID"))
+	if dispatchID == "" || len(dispatchID) > 128 || projectErr != nil || environmentErr != nil || projectUUID == uuid.Nil || environmentUUID == uuid.Nil {
+		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "dispatch and Environment identity is invalid"})
+	}
+	// This transaction deliberately takes the same durable dispatch-key lock as
+	// admission. After Core revokes a dispatch, the read therefore cannot report
+	// absence until any callback that already crossed admission has committed or
+	// rolled back. Lock order is DP dispatch key, then the Core authorization
+	// callback; Core must commit revocation before starting this read.
+	tx, err := a.Admission.Database.BeginTx(c.Request().Context(), nil)
+	if err != nil {
+		return a.writeInspectionError(c, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	receipt, err := model.GetExternalOperationDeploymentReceipt(c.Request().Context(), tx, model.ExternalOperationDeploymentKey{
+		OrgID: c.Param("orgId"), PluginID: c.Param("pluginId"), RequestID: dispatchID,
+	})
+	if err != nil {
+		if _, missing := model.IsErrNotFound(err); missing {
+			return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: "dispatch_not_found", Message: "external deployment dispatch was not found"})
+		}
+		return a.writeInspectionError(c, err)
+	}
+	if !receipt.ProjectUUID.IsSet() || !receipt.EnvironmentUUID.IsSet() || receipt.ProjectUUID.Must() != projectUUID || receipt.EnvironmentUUID.Must() != environmentUUID {
+		return c.JSON(http.StatusNotFound, externalDeploymentErrorResponse{Error: "dispatch_not_found", Message: "external deployment dispatch was not found in the authorized Environment"})
+	}
+	deployment, _, _, _, err := a.Admission.Database.GetDeployment(c.Request().Context(), tx, c.Param("orgId"), receipt.DeploymentID, model.GetModeDefault)
+	if err != nil || deployment.DeploymentEnvUuid != environmentUUID || deployment.ProjectId != receipt.ProjectID || deployment.EnvId != receipt.EnvID {
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "dispatch_target_unavailable", Message: "dispatch target is no longer retained with verifiable ownership"})
+	}
+	if _, err := a.resolveExactEnvironment(c.Request().Context(), c.Param("orgId"), externalEnvironmentRef{
+		ProjectID: receipt.ProjectID, EnvID: receipt.EnvID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
+	}); err != nil {
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: "authorized Environment identity is no longer current"})
+	}
+	response, err := projectExternalDeploymentStatus(*deployment, *receipt, projectUUID, environmentUUID)
+	if err != nil {
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
+	}
+	if err := tx.Commit(); err != nil {
+		return a.writeInspectionError(c, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (a *ExternalDeploymentHTTPAdapter) verifyInspectionGET(c echo.Context, action string) (plugincontext.Claims, error) {
+	if err := a.validateConfiguration(); err != nil {
+		return plugincontext.Claims{}, c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment read is unavailable"})
+	}
+	request := c.Request()
+	if request.URL.RawQuery != "" || request.URL.Fragment != "" {
+		return plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalQueryUnsupportedMessage})
+	}
+	assertion, ok := singleHeader(request.Header, plugincontext.Header)
+	if !ok || assertion == "" {
+		return plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
+	}
+	orgID, pluginID := c.Param("orgId"), c.Param("pluginId")
+	if !validExternalPathIdentity(orgID, pluginID) {
+		return plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalInvalidPathIdentityMessage})
+	}
+	claims, err := plugincontext.Verify(a.VerificationKey, assertion, plugincontext.Request{
+		Issuer: a.Issuer, Audience: ExternalDeploymentAudience, PluginID: pluginID, OrgID: orgID,
+		Method: http.MethodGet, Path: request.URL.EscapedPath(), Body: nil, OperationID: action,
+	}, a.now())
+	if err != nil {
+		return plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
+	}
+	if _, err := uuid.Parse(claims.ActorID); err != nil {
+		return plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidActorMessage})
+	}
+	return claims, nil
+}
+
+func projectExternalDeploymentStatus(deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
+	versions := make(map[string]uuid.UUID, len(deployment.ModuleArtifacts))
+	for _, artifact := range deployment.ModuleArtifacts {
+		if artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil {
+			return externalDeploymentStatusResponse{}, errors.New("deployment lacks immutable module version identity")
+		}
+		versions[artifact.ModuleUUID.String()] = artifact.VersionUUID
+	}
+	return externalDeploymentStatusResponse{
+		DeploymentID: deployment.Id, DispatchID: receipt.RequestID, OperationRef: receipt.OperationRef, Fence: receipt.Fence,
+		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
+		Mode: string(deployment.Mode), Status: string(deployment.Status), StatusMessage: deployment.StatusMessage,
+		ModuleVersions: versions, CreatedAt: deployment.CreatedAt, CompletedAt: deployment.CompletedAt.Ref(), ReceiptCreatedAt: receipt.CreatedAt,
+	}, nil
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleReadiness(c echo.Context) error {
@@ -416,7 +557,7 @@ func (a *ExternalDeploymentHTTPAdapter) verifyInspectionRequest(c echo.Context, 
 		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 	if _, err := uuid.Parse(claims.ActorID); err != nil {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: "plugin context actor is invalid"})
+		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidActorMessage})
 	}
 	return bodyBytes, claims, nil
 }

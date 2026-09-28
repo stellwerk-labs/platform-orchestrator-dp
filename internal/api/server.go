@@ -61,6 +61,7 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		e.POST(ExternalDeploymentReadinessPath, s.ExternalDeployments.HandleReadiness)
 		e.POST(ExternalDeploymentPlanningPath, s.ExternalDeployments.HandlePlan)
 		e.GET(ExternalDeploymentReadPath, s.ExternalDeployments.HandleRead)
+		e.GET(ExternalDeploymentDispatchReadPath, s.ExternalDeployments.HandleDispatchRead)
 	}
 
 	buildInfo, _ := debug.ReadBuildInfo()

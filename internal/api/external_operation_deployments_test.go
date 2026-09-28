@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 func TestValidateExternalDeploymentAdmissionRequiresDPAudienceAndAction(t *testing.T) {
@@ -86,6 +87,8 @@ func TestExternalDeploymentReceiptMatchBindsAuthorizedResourceAndActor(t *testin
 		ActorID:           actorID.String(),
 		ProjectID:         request.ProjectID,
 		EnvID:             request.EnvID,
+		ProjectUUID:       opt.Of(request.ProjectUUID),
+		EnvironmentUUID:   opt.Of(request.EnvUUID),
 	}
 	require.True(t, externalDeploymentReceiptMatches(receipt, request, actorID, authorized))
 

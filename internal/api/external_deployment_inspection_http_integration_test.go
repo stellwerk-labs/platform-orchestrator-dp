@@ -47,6 +47,16 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.NoError(t, tx.Commit())
 	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: model.DeploymentStatusSucceeded, StatusMessage: "done"})
 	require.NoError(t, err)
+	receiptTx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = model.CreateExternalOperationDeploymentReceipt(ctx, receiptTx, model.ExternalOperationDeploymentReceipt{
+		ExternalOperationDeploymentKey: model.ExternalOperationDeploymentKey{OrgID: orgID, PluginID: pluginID, RequestID: "dispatch-1"},
+		OperationRef:                   uuid.NewString(), Fence: 7, AssertionAction: ExternalDeploymentAction, ServiceAction: ExternalDeploymentAction,
+		RequestBodySHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ActorID: deployment.CreatedBy.String(),
+		ProjectID: projectID, EnvID: envID, ProjectUUID: opt.Of(projectUUID), EnvironmentUUID: opt.Of(environmentUUID), DeploymentID: deployment.Id,
+	})
+	require.NoError(t, err)
+	require.NoError(t, receiptTx.Commit())
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -73,6 +83,7 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	server := echo.New()
 	server.POST(ExternalDeploymentReadinessPath, adapter.HandleReadiness)
 	server.GET(ExternalDeploymentReadPath, adapter.HandleRead)
+	server.GET(ExternalDeploymentDispatchReadPath, adapter.HandleDispatchRead)
 	body, err := json.Marshal(externalDeploymentReadinessBody{Environments: []externalEnvironmentRef{{
 		ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 	}}})
@@ -124,4 +135,18 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.Equal(t, http.StatusOK, readResponse.Code, readResponse.Body.String())
 	require.Contains(t, readResponse.Body.String(), deployment.Id.String())
 	require.NotContains(t, readResponse.Body.String(), "private-source")
+
+	dispatchPath := "/orgs/acme/plugins/dev.example.rollouts/projects/" + projectUUID.String() + "/envs/" + environmentUUID.String() + "/external-deployment-dispatches/dispatch-1"
+	dispatchClaims := readClaims
+	dispatchClaims.Path = dispatchPath
+	dispatchClaims.RequestID = "dispatch-read-1"
+	dispatchAssertion, err := plugincontext.Sign(privateKey, dispatchClaims, now)
+	require.NoError(t, err)
+	dispatchRequest := httptest.NewRequest(http.MethodGet, dispatchPath, nil)
+	dispatchRequest.Header.Set(plugincontext.Header, dispatchAssertion)
+	dispatchResponse := httptest.NewRecorder()
+	server.ServeHTTP(dispatchResponse, dispatchRequest)
+	require.Equal(t, http.StatusOK, dispatchResponse.Code, dispatchResponse.Body.String())
+	require.Contains(t, dispatchResponse.Body.String(), `"dispatch_id":"dispatch-1"`)
+	require.Contains(t, dispatchResponse.Body.String(), deployment.Id.String())
 }
