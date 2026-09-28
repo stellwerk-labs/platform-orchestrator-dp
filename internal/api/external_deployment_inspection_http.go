@@ -410,7 +410,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 	explicitVersions := make(map[string]string, len(body.ModuleVersions))
 	explicitTargets := make([]model.ExternalDeploymentPlanTarget, 0, len(body.ModuleVersions))
 	for moduleID, selected := range body.ModuleVersions {
-		if moduleID == "" || selected.Version == "" || selected.ModuleUUID == uuid.Nil || selected.VersionUUID == uuid.Nil || selected.ArtifactDigest == "" {
+		if moduleID == "" || selected.Version == "" || selected.ModuleUUID == uuid.Nil || selected.VersionUUID == uuid.Nil {
 			return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "module selections require immutable module and version identity"})
 		}
 		explicitVersions[moduleID] = selected.Version

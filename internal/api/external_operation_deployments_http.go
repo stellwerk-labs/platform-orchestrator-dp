@@ -55,6 +55,7 @@ type ExternalDeploymentHTTPAdapter struct {
 	Materials          ExternalOperationMaterialService
 	ControlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
 	EventPublisher     hmessaging.Publisher
+	RunnerLogsReader   RunnerLogsReader
 	Logger             *zap.Logger
 	Now                func() time.Time
 }
@@ -278,7 +279,7 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	expectedVersions := make(map[string]uuid.UUID, len(snapshot.ExplicitTargets))
 	targetsByModuleID := make(map[string]model.ExternalDeploymentPlanTarget, len(snapshot.ExplicitTargets))
 	for _, target := range snapshot.ExplicitTargets {
-		if target.ModuleID == "" || target.ModuleUUID == uuid.Nil || target.Version == "" || target.VersionUUID == uuid.Nil || target.ArtifactDigest == "" {
+		if target.ModuleID == "" || target.ModuleUUID == uuid.Nil || target.Version == "" || target.VersionUUID == uuid.Nil {
 			return nil, model.NewErrConflict("external deployment plan has incomplete target identity")
 		}
 		moduleRef := target.ModuleUUID.String()
@@ -302,6 +303,7 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
 			ExplicitModuleVersions: explicitVersions,
+			ModuleOperationID:      opt.Of(body.OperationRef),
 			AuthorizeModuleVersion: func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error {
 				if !explicitlySelected {
 					return nil

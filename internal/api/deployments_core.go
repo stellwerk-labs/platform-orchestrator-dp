@@ -82,6 +82,7 @@ func CreateDeployment(
 type DeploymentOptions struct {
 	ExplicitModuleVersions      map[string]string
 	RestrictedConfirmations     []uuid.UUID
+	ModuleOperationID           opt.Opt[uuid.UUID]
 	AuthorizeModuleVersion      func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
 	ReuseLastSuccessfulManifest bool
 	IgnoreEnvironmentPins       bool
@@ -263,6 +264,12 @@ func CreateDeploymentWithOptions(
 	if options.IgnoreEnvironmentPins {
 		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
 			request.Header.Set("X-Stellwerk-Module-Operation-Planning", "true")
+			return nil
+		})
+	}
+	if options.ModuleOperationID.IsSet() {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Id", options.ModuleOperationID.Must().String())
 			return nil
 		})
 	}

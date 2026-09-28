@@ -64,7 +64,7 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	var grantActive atomic.Bool
 	var targetDigest atomic.Value
 	grantActive.Store(true)
-	targetDigest.Store("sha256:target")
+	targetDigest.Store("")
 	callbackEntered := make(chan struct{}, 1)
 	callbackRelease := make(chan struct{})
 
@@ -113,11 +113,27 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 				"status": "active", "uuid": environmentUUID,
 			})
 		case request.Method == http.MethodPost && request.URL.Path == "/internal/orgs/acme/projects/checkout/envs/production/module-catalogue":
-			version, versionUUID, semanticVersion, digest, source := "v2", targetVersionUUID, "2.0.0", targetDigest.Load().(string), "./postgres-v2"
+			version, versionUUID, semanticVersion, digest, source := "v2", targetVersionUUID, "2.0.0", targetDigest.Load().(string), ""
+			inlineCode := `variable "in" {}`
 			if request.Header.Get("X-Stellwerk-Rollback") == "true" {
+				if !assert.Empty(t, request.Header.Get("X-Stellwerk-Module-Operation-Id"), "rollback must not consume a pending forward override") {
+					response.WriteHeader(http.StatusBadRequest)
+					return
+				}
 				version, versionUUID, semanticVersion, digest, source = "v1", baseVersionUUID, "1.0.0", "sha256:base", "./postgres-v1"
+				inlineCode = ""
+			} else if request.Header.Get("X-Stellwerk-Module-Operation-Planning") == "true" {
+				if !assert.Empty(t, request.Header.Get("X-Stellwerk-Module-Operation-Id"), "planning must not consume a pending Pin override") {
+					response.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			} else {
+				if !assert.Equal(t, operationID.String(), request.Header.Get("X-Stellwerk-Module-Operation-Id"), "forward execution must bind its exact Pin override operation") {
+					response.WriteHeader(http.StatusBadRequest)
+					return
+				}
 			}
-			_ = json.NewEncoder(response).Encode(map[string]any{"modules": []map[string]any{{
+			module := map[string]any{
 				"org_id": orgID, "id": "postgres", "version_id": version, "resource_type": "postgres",
 				"module_source": source, "module_inputs": map[string]any{}, "module_params": map[string]any{},
 				"dependencies": map[string]any{}, "coprovisioned": []any{}, "provider_mapping": map[string]string{},
@@ -125,7 +141,11 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 				"created_at": now, "updated_at": now,
 				"module_uuid": moduleUUID, "version_uuid": versionUUID, "semantic_version": semanticVersion,
 				"migration_generation": "generation", "artifact_digest": digest, "semantic_status": "active",
-			}}, "providers": []any{}})
+			}
+			if inlineCode != "" {
+				module["module_source_code"] = inlineCode
+			}
+			_ = json.NewEncoder(response).Encode(map[string]any{"modules": []map[string]any{module}, "providers": []any{}})
 		case request.Method == http.MethodGet && request.URL.Path == "/orgs/acme/runners/runner-1":
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"created_at": now, "updated_at": now, "id": runnerID, "org_id": orgID,
@@ -223,7 +243,7 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 		ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 		ModuleVersions: map[string]externalModuleSelection{"postgres": {
 			ModuleUUID: moduleUUID, Version: "v2", VersionUUID: targetVersionUUID,
-			SemanticVersion: "2.0.0", ArtifactDigest: "sha256:target",
+			SemanticVersion: "2.0.0", ArtifactDigest: "",
 		}},
 	})
 	require.NoError(t, err)
@@ -277,7 +297,7 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	targetDigest.Store("sha256:changed-after-plan")
 	changedPlan := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusConflict, changedPlan.Code, changedPlan.Body.String())
-	targetDigest.Store("sha256:target")
+	targetDigest.Store("")
 	created := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var createdBody ExternalDeploymentAdmissionResponse

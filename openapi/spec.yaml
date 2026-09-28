@@ -102,6 +102,52 @@ paths:
               schema: {$ref: "#/components/schemas/ExternalDeploymentStatusResponse"}
         "404": {$ref: "#/components/responses/404NotFound"}
 
+  /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs:
+    get:
+      operationId: getExternalDeploymentLogs
+      tags: [not-implemented]
+      summary: Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - {name: projectUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: environmentUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/deploymentIdPathParam"
+      responses:
+        "200":
+          description: Decrypted logs, limited to 16 MiB. Core proxies this response directly to the authorized user; plugins must not persist it.
+          content:
+            text/plain: {schema: {type: string}}
+        "401": {$ref: "#/components/responses/401Unauthorized"}
+        "404": {$ref: "#/components/responses/404NotFound"}
+        "409": {$ref: "#/components/responses/409Conflict"}
+        "413": {$ref: "#/components/responses/413TooLarge"}
+        "503": {$ref: "#/components/responses/503Unavailable"}
+
+  /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs:
+    get:
+      operationId: getExternalDeploymentOutputs
+      tags: [not-implemented]
+      summary: Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - {name: projectUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: environmentUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/deploymentIdPathParam"
+      responses:
+        "200":
+          description: Decrypted outputs in their original JSON representation, limited to 16 MiB. Core proxies this response directly to the authorized user; plugins must not persist it.
+          content:
+            text/plain: {schema: {type: string}}
+        "401": {$ref: "#/components/responses/401Unauthorized"}
+        "404": {$ref: "#/components/responses/404NotFound"}
+        "409": {$ref: "#/components/responses/409Conflict"}
+        "413": {$ref: "#/components/responses/413TooLarge"}
+        "503": {$ref: "#/components/responses/503Unavailable"}
+
   /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId}:
     get:
       operationId: getExternalDeploymentDispatch
@@ -794,6 +840,12 @@ components:
             $ref: "#/components/schemas/Error"
     409Conflict:
       description: The request conflicts with existing state in the system.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    413TooLarge:
+      description: Decrypted deployment material exceeds the 16 MiB response limit.
       content:
         application/json:
           schema:

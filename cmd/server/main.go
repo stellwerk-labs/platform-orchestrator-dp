@@ -314,6 +314,9 @@ func main() {
 		}
 		return reader, nil
 	}
+	if server.ExternalDeployments != nil {
+		server.ExternalDeployments.RunnerLogsReader = server.RunnerLogsReader
+	}
 
 	var oidcProvider oidc.Provider
 	if cfg.OidcIssuerUrl != "" {

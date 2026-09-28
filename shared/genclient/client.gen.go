@@ -1199,6 +1199,9 @@ type N404NotFound = Error
 // N409Conflict A standard error response
 type N409Conflict = Error
 
+// N413TooLarge A standard error response
+type N413TooLarge = Error
+
 // N503Unavailable A standard error response
 type N503Unavailable = Error
 
@@ -1678,6 +1681,16 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
 	GetExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentLogs Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+	GetExternalDeploymentLogs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentOutputs Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+	GetExternalDeploymentOutputs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetJwks Show JSON Web Keys Set (JWKS).
@@ -2271,6 +2284,36 @@ func (c *Client) GetExternalDeploymentDispatch(ctx context.Context, orgId OrgIdP
 // Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
 func (c *Client) GetExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetExternalDeploymentRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentLogs Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+func (c *Client) GetExternalDeploymentLogs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentLogsRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentOutputs Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+func (c *Client) GetExternalDeploymentOutputs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentOutputsRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
 	if err != nil {
 		return nil, err
 	}
@@ -3952,6 +3995,130 @@ func NewGetExternalDeploymentRequest(server string, orgId OrgIdPathParam, plugin
 	return req, nil
 }
 
+// NewGetExternalDeploymentLogsRequest constructs an http.Request for the GetExternalDeploymentLogs method
+func NewGetExternalDeploymentLogsRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployments/%s/logs", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentOutputsRequest constructs an http.Request for the GetExternalDeploymentOutputs method
+func NewGetExternalDeploymentOutputsRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployments/%s/outputs", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -4288,6 +4455,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
 	GetExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentResponse, error)
+
+	// GetExternalDeploymentLogsWithResponse Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+	GetExternalDeploymentLogsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentLogsResponse, error)
+
+	// GetExternalDeploymentOutputsWithResponse Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+	GetExternalDeploymentOutputsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentOutputsResponse, error)
 }
 
 type GetJwksResponse struct {
@@ -5760,6 +5941,144 @@ func (r GetExternalDeploymentResponse) ContentType() string {
 	return ""
 }
 
+type GetExternalDeploymentLogsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *N413TooLarge
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON413() *N413TooLarge {
+	return r.JSON413
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentLogsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentLogsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentLogsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentLogsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentOutputsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *N413TooLarge
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON413() *N413TooLarge {
+	return r.JSON413
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentOutputsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentOutputsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentOutputsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentOutputsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetJwksWithResponse Show JSON Web Keys Set (JWKS).
 //
 // Returns a wrapper object for the known response body format(s).
@@ -6261,6 +6580,32 @@ func (c *ClientWithResponses) GetExternalDeploymentWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseGetExternalDeploymentResponse(rsp)
+}
+
+// GetExternalDeploymentLogsWithResponse Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentLogsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentLogsResponse, error) {
+	rsp, err := c.GetExternalDeploymentLogs(ctx, orgId, pluginId, projectUUID, environmentUUID, deploymentId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentLogsResponse(rsp)
+}
+
+// GetExternalDeploymentOutputsWithResponse Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentOutputsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentOutputsResponse, error) {
+	rsp, err := c.GetExternalDeploymentOutputs(ctx, orgId, pluginId, projectUUID, environmentUUID, deploymentId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentOutputsResponse(rsp)
 }
 
 // ParseGetJwksResponse parses an HTTP response from a GetJwksWithResponse call
@@ -7322,6 +7667,114 @@ func ParseGetExternalDeploymentResponse(rsp *http.Response) (*GetExternalDeploym
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentLogsResponse parses an HTTP response from a GetExternalDeploymentLogsWithResponse call
+func ParseGetExternalDeploymentLogsResponse(rsp *http.Response) (*GetExternalDeploymentLogsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentLogsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest N413TooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentOutputsResponse parses an HTTP response from a GetExternalDeploymentOutputsWithResponse call
+func ParseGetExternalDeploymentOutputsResponse(rsp *http.Response) (*GetExternalDeploymentOutputsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentOutputsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest N413TooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
