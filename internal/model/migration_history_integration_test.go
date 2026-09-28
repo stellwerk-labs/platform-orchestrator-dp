@@ -31,7 +31,8 @@ func TestMigrationHistoryReconciliation(t *testing.T) {
 		requireColumn(t, ctx, admin, schema, "deployments", "module_version_request_digest")
 		requireTableAbsent(t, ctx, admin, schema, "rollout_encryption_material")
 		requireTableAbsent(t, ctx, admin, schema, "rollout_deployment_bases")
-		requireTableAbsent(t, ctx, admin, schema, "environment_deployment_leases")
+		requireTablePresent(t, ctx, admin, schema, "environment_deployment_leases")
+		requireTablePresent(t, ctx, admin, schema, "external_deployment_plan_snapshots")
 	})
 }
 
@@ -74,4 +75,16 @@ func requireTableAbsent(t *testing.T, ctx context.Context, db *sql.DB, schema, t
 		)
 	`, schema, table).Scan(&exists))
 	require.False(t, exists, "%s.%s must not exist", schema, table)
+}
+
+func requireTablePresent(t *testing.T, ctx context.Context, db *sql.DB, schema, table string) {
+	t.Helper()
+	var exists bool
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema=$1 AND table_name=$2
+		)
+	`, schema, table).Scan(&exists))
+	require.True(t, exists, "%s.%s must exist", schema, table)
 }

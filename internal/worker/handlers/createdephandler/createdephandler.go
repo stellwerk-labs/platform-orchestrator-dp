@@ -106,6 +106,14 @@ func (h *CreateDepHandler) Handle(ctx context.Context, logger *zap.Logger, deliv
 				logger.Info("discarding event message belonging to deployment that is not executing")
 				return nil
 			}
+			if model.RequiresEnvironmentLease(d.Mode) {
+				if err := h.db.RenewDeploymentLease(ctx, nil, d.Id, model.DefaultEnvironmentLeaseTTL); err != nil {
+					if _, conflict := model.IsErrConflict(err); conflict {
+						return h.failDeployment(ctx, logger, d, "deployment lost its exclusive Environment lease before Runner dispatch")
+					}
+					return hmessaging.NewRetryError(errors.Wrap(err, "failed to renew deployment lease"))
+				}
+			}
 
 			if err := h.handleInner(ctx, logger, d); err != nil {
 				if d.RunnerId == magicNoOpRunnerId {

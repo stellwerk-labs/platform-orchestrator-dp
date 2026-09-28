@@ -81,6 +81,14 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, de
 			zap.Duration("max_duration", MaxStatusCheckDuration))
 		return h.failDeployment(ctx, logger, deployment, "deployment timeout - runner did not complete within expected time")
 	}
+	if model.RequiresEnvironmentLease(deployment.Mode) {
+		if err := h.db.RenewDeploymentLease(ctx, nil, deployment.Id, model.DefaultEnvironmentLeaseTTL); err != nil {
+			if _, conflict := model.IsErrConflict(err); conflict {
+				return h.failDeployment(ctx, logger, deployment, "deployment lost its exclusive Environment lease while the Runner was active")
+			}
+			return hmessaging.NewRetryErrorWithDelay(errors.Wrap(err, "failed to renew deployment lease"), RetryInterval)
+		}
+	}
 
 	response, err := h.controlPlaneClient.GetInternalRunnerWithResponse(ctx, body.Data.OrgId, body.Data.RunnerId)
 	if err != nil {

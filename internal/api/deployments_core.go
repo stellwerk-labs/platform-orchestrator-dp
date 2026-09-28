@@ -80,9 +80,22 @@ func CreateDeployment(
 }
 
 type DeploymentOptions struct {
-	ExplicitModuleVersions  map[string]string
-	RestrictedConfirmations []uuid.UUID
-	AuthorizeModuleVersion  func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
+	ExplicitModuleVersions      map[string]string
+	RestrictedConfirmations     []uuid.UUID
+	AuthorizeModuleVersion      func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
+	ReuseLastSuccessfulManifest bool
+	IgnoreEnvironmentPins       bool
+	CapturePlan                 *DeploymentPlanCapture
+}
+
+// DeploymentPlanCapture keeps the exact DP-internal planning snapshot. HTTP
+// adapters must expose only a value-free projection of Manifest and Graph.
+type DeploymentPlanCapture struct {
+	BaseDeploymentID uuid.UUID
+	Manifest         json.RawMessage
+	Graph            json.RawMessage
+	Diff             json.RawMessage
+	ModuleArtifacts  []model.ModuleArtifactRequirement
 }
 
 func CreateDeploymentWithOptions(
@@ -101,6 +114,9 @@ func CreateDeploymentWithOptions(
 		return nil, nil, nil, errors.Errorf("manifest should be empty on destroy or rollback deployments")
 	}
 
+	if env.RunnerId == nil && dryRun {
+		return nil, nil, nil, model.NewErrConflict("environment has no assigned runner for planning")
+	}
 	if env.RunnerId == nil {
 		if r, err := cp.UpdateRunnerInAnEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.UpdateRunnerInAnEnvironmentParams{}); err != nil {
 			return nil, nil, nil, errors.Wrap(err, "failed to update runner in environment")
@@ -180,6 +196,15 @@ func CreateDeploymentWithOptions(
 			logger.Info("identified reference deployment", zap.String("deployment_id", d.Id.String()))
 		}
 	}
+	if options.ReuseLastSuccessfulManifest {
+		if lastGraph == nil || lastDeploymentId == uuid.Nil {
+			return nil, nil, nil, model.NewErrConflict("environment has no effective deployment base")
+		}
+		if !lastDeploymentSucceeded {
+			return nil, nil, nil, model.NewErrConflict("latest mutating deployment is not a successful planning base")
+		}
+		manifest = lastManifest
+	}
 	if mode == model.DeploymentModeDestroy && lastGraph == nil {
 		return nil, nil, nil, model.NewErrConflict("cannot destroy an environment that has never been deployed")
 	}
@@ -231,6 +256,12 @@ func CreateDeploymentWithOptions(
 	if len(activeDefinitions) > 0 {
 		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
 			request.Header.Set("X-Stellwerk-Active-Module-Versions", strings.Join(activeDefinitions, ","))
+			return nil
+		})
+	}
+	if options.IgnoreEnvironmentPins {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Planning", "true")
 			return nil
 		})
 	}
@@ -371,6 +402,17 @@ func CreateDeploymentWithOptions(
 				deploymentArtifacts[index].ConfirmedRestrictedVersionUUID = ref.Ref(artifact.VersionUUID)
 			}
 		}
+	}
+	if options.CapturePlan != nil {
+		rawDiff, err := json.Marshal(diff)
+		if err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to serialize deployment diff")
+		}
+		options.CapturePlan.BaseDeploymentID = lastDeploymentId
+		options.CapturePlan.Manifest = slices.Clone(rawManifest)
+		options.CapturePlan.Graph = slices.Clone(rawNewGraph)
+		options.CapturePlan.Diff = rawDiff
+		options.CapturePlan.ModuleArtifacts = slices.Clone(deploymentArtifacts)
 	}
 
 	if dryRun {
@@ -574,7 +616,8 @@ func moduleArtifactRequirements(graph *platformorchestratorgraph.Graph[*graphs.G
 			return nil, model.NewErrConflict(fmt.Sprintf("module %s has no immutable version metadata", key))
 		}
 		byKey[key] = model.ModuleArtifactRequirement{
-			ModuleID: configuration.DefinitionId, Version: configuration.VersionId, Source: artifact.Source,
+			ModuleID: configuration.DefinitionId, ModuleUUID: artifact.ModuleUUID,
+			Version: configuration.VersionId, VersionUUID: artifact.VersionUUID, Source: artifact.Source,
 			SemanticVersion: artifact.SemanticVersion, MigrationGeneration: artifact.MigrationGeneration,
 			ArtifactDigest: artifact.Digest, RetainedArtifactException: retainedArtifactException,
 		}

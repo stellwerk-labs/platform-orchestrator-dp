@@ -58,6 +58,9 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 	RegisterHandlers(e, apiHandler)
 	if s.ExternalDeployments != nil {
 		e.POST(ExternalDeploymentAdmissionPath, s.ExternalDeployments.Handle)
+		e.POST(ExternalDeploymentReadinessPath, s.ExternalDeployments.HandleReadiness)
+		e.POST(ExternalDeploymentPlanningPath, s.ExternalDeployments.HandlePlan)
+		e.GET(ExternalDeploymentReadPath, s.ExternalDeployments.HandleRead)
 	}
 
 	buildInfo, _ := debug.ReadBuildInfo()

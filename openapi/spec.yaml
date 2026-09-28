@@ -3,6 +3,73 @@ info:
   title: ""
   version: ""
 paths:
+  /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness:
+    post:
+      operationId: getExternalDeploymentReadiness
+      tags: [not-implemented]
+      summary: Read immutable deployment readiness and active module inventory for exact Environment references.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - $ref: "#/components/parameters/idempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExternalDeploymentReadinessBody"}
+      responses:
+        "200":
+          description: Ordered readiness for every requested Environment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExternalDeploymentReadinessResponse"}
+        "400": {$ref: "#/components/responses/400BadRequest"}
+
+  /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans:
+    post:
+      operationId: planExternalDeployment
+      tags: [not-implemented]
+      summary: Plan exact module versions through the normal deployment planner without exposing parameter values.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - $ref: "#/components/parameters/idempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExternalDeploymentPlanBody"}
+      responses:
+        "200":
+          description: Immutable base and value-free structural plan.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExternalDeploymentPlanResponse"}
+        "400": {$ref: "#/components/responses/400BadRequest"}
+        "409": {$ref: "#/components/responses/409Conflict"}
+
+  /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}:
+    get:
+      operationId: getExternalDeployment
+      tags: [not-implemented]
+      summary: Get an ordinary Deployment only within its exact authorized Environment.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - {name: projectUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: environmentUUID, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/deploymentIdPathParam"
+      responses:
+        "200":
+          description: Exact-environment Deployment summary, excluding material and runner data.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeploymentSummary"}
+        "404": {$ref: "#/components/responses/404NotFound"}
+
   /orgs/{orgId}/deployments:
     get:
       operationId: listDeployments
@@ -643,6 +710,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    pluginContext:
+      type: apiKey
+      in: header
+      name: X-Stellwerk-Plugin-Context
 
   responses:
     400BadRequest:
@@ -673,6 +744,16 @@ components:
       required: true
       schema:
         type: string
+    pluginIdPathParam:
+      name: pluginId
+      in: path
+      required: true
+      schema: {type: string}
+    idempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
     projectIdQueryParam:
       name: project_id
       in: query
@@ -761,6 +842,183 @@ components:
             - succeeded
 
   schemas:
+    ExternalEnvironmentRef:
+      type: object
+      additionalProperties: false
+      required: [project_id, env_id, project_uuid, environment_uuid]
+      properties:
+        project_id: {type: string}
+        env_id: {type: string}
+        project_uuid: {type: string, format: uuid}
+        environment_uuid: {type: string, format: uuid}
+
+    ExternalModuleInventory:
+      type: object
+      additionalProperties: false
+      required: [module_id, version]
+      properties:
+        module_id: {type: string}
+        module_uuid: {type: string, format: uuid}
+        version: {type: string}
+        version_uuid: {type: string, format: uuid}
+        semantic_version: {type: string}
+        artifact_digest: {type: string}
+
+    ExternalDeploymentReadinessBody:
+      type: object
+      additionalProperties: false
+      required: [environments]
+      properties:
+        environments:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {$ref: "#/components/schemas/ExternalEnvironmentRef"}
+
+    ExternalEnvironmentReadiness:
+      type: object
+      additionalProperties: false
+      required: [project_id, env_id, project_uuid, environment_uuid, state, active_modules]
+      properties:
+        project_id: {type: string}
+        env_id: {type: string}
+        project_uuid: {type: string, format: uuid}
+        environment_uuid: {type: string, format: uuid}
+        state:
+          type: string
+          enum: [ready, busy, unreconciled]
+          x-enum-varnames: [ExternalEnvironmentReadinessStateReady, ExternalEnvironmentReadinessStateBusy, ExternalEnvironmentReadinessStateUnreconciled]
+        latest_deployment_id: {type: string, format: uuid}
+        latest_status:
+          type: string
+          enum: [executing, failed, succeeded]
+          x-enum-varnames: [ExternalEnvironmentReadinessLatestStatusExecuting, ExternalEnvironmentReadinessLatestStatusFailed, ExternalEnvironmentReadinessLatestStatusSucceeded]
+        latest_mode:
+          type: string
+          enum: [deploy, destroy, rollback]
+          x-enum-varnames: [ExternalEnvironmentReadinessLatestModeDeploy, ExternalEnvironmentReadinessLatestModeDestroy, ExternalEnvironmentReadinessLatestModeRollback]
+        active_lease_until: {type: string, format: date-time}
+        effective_base_deployment_id: {type: string, format: uuid}
+        active_modules:
+          type: array
+          items: {$ref: "#/components/schemas/ExternalModuleInventory"}
+
+    ExternalDeploymentReadinessResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ExternalEnvironmentReadiness"}
+
+    ExternalModuleSelection:
+      type: object
+      additionalProperties: false
+      required: [module_uuid, version, version_uuid, semantic_version, artifact_digest]
+      properties:
+        module_uuid: {type: string, format: uuid}
+        version: {type: string}
+        version_uuid: {type: string, format: uuid}
+        semantic_version: {type: string}
+        artifact_digest: {type: string}
+
+    ExternalDeploymentPlanBody:
+      type: object
+      additionalProperties: false
+      required: [project_id, env_id, project_uuid, environment_uuid, module_versions]
+      properties:
+        project_id: {type: string}
+        env_id: {type: string}
+        project_uuid: {type: string, format: uuid}
+        environment_uuid: {type: string, format: uuid}
+        module_versions:
+          type: object
+          minProperties: 1
+          additionalProperties: {$ref: "#/components/schemas/ExternalModuleSelection"}
+
+    ExternalManifestResourceStructure:
+      type: object
+      additionalProperties: false
+      required: [type, param_keys]
+      properties:
+        type: {type: string}
+        class: {type: string}
+        id: {type: string}
+        param_keys: {type: array, items: {type: string}}
+
+    ExternalManifestWorkloadStructure:
+      type: object
+      additionalProperties: false
+      required: [output_keys, resources]
+      properties:
+        output_keys: {type: array, items: {type: string}}
+        resources:
+          type: object
+          additionalProperties: {$ref: "#/components/schemas/ExternalManifestResourceStructure"}
+
+    ExternalManifestStructure:
+      type: object
+      additionalProperties: false
+      required: [shared, workloads]
+      properties:
+        shared:
+          type: object
+          additionalProperties: {$ref: "#/components/schemas/ExternalManifestResourceStructure"}
+        workloads:
+          type: object
+          additionalProperties: {$ref: "#/components/schemas/ExternalManifestWorkloadStructure"}
+
+    ExternalGraphNodeStructure:
+      type: object
+      additionalProperties: false
+      required: [param_keys]
+      properties:
+        module_id: {type: string}
+        version: {type: string}
+        deleted: {type: boolean}
+        param_keys: {type: array, items: {type: string}}
+        drift: {type: string}
+
+    ExternalGraphStructure:
+      type: object
+      additionalProperties: false
+      required: [nodes, edges, workloads, shared_resources, leaf_resources]
+      properties:
+        nodes:
+          type: object
+          additionalProperties: {$ref: "#/components/schemas/ExternalGraphNodeStructure"}
+        edges:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {type: string}
+        workloads:
+          type: object
+          additionalProperties: {type: string}
+        shared_resources:
+          type: object
+          additionalProperties: {type: string}
+        leaf_resources:
+          type: array
+          items: {type: string}
+
+    ExternalDeploymentPlanResponse:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, environment_uuid, effective_base_deployment_id, fingerprint, manifest, graph, diff, module_versions]
+      properties:
+        snapshot_id: {type: string, format: uuid}
+        environment_uuid: {type: string, format: uuid}
+        effective_base_deployment_id: {type: string, format: uuid}
+        fingerprint: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+        manifest: {$ref: "#/components/schemas/ExternalManifestStructure"}
+        graph: {$ref: "#/components/schemas/ExternalGraphStructure"}
+        diff: {$ref: "#/components/schemas/DeploymentDiff"}
+        module_versions:
+          type: array
+          items: {$ref: "#/components/schemas/ExternalModuleInventory"}
+
     Error:
       description: A standard error response
       properties:

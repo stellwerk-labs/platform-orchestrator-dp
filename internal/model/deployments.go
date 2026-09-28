@@ -41,6 +41,11 @@ const (
 
 const idempotencyDigestTimeLimit = time.Hour * 24
 
+// DefaultEnvironmentLeaseTTL outlives the Runner's one-hour status-check
+// window. It fences a replacement mutation while an older Runner may still be
+// changing the same Environment.
+const DefaultEnvironmentLeaseTTL = 65 * time.Minute
+
 type DeploymentSummary struct {
 	OrgId             string
 	ProjectId         string
@@ -100,16 +105,34 @@ type CreateDeploymentParams struct {
 }
 
 type ModuleArtifactRequirement struct {
-	ModuleID                  string `json:"module_id"`
-	Version                   string `json:"version"`
-	SemanticVersion           string `json:"semantic_version,omitempty"`
-	MigrationGeneration       string `json:"migration_generation,omitempty"`
-	Source                    string `json:"source"`
-	ArtifactDigest            string `json:"artifact_digest,omitempty"`
-	RetainedArtifactException bool   `json:"retained_artifact_exception,omitempty"`
+	ModuleID                  string    `json:"module_id"`
+	ModuleUUID                uuid.UUID `json:"module_uuid,omitempty"`
+	Version                   string    `json:"version"`
+	VersionUUID               uuid.UUID `json:"version_uuid,omitempty"`
+	SemanticVersion           string    `json:"semantic_version,omitempty"`
+	MigrationGeneration       string    `json:"migration_generation,omitempty"`
+	Source                    string    `json:"source"`
+	ArtifactDigest            string    `json:"artifact_digest,omitempty"`
+	RetainedArtifactException bool      `json:"retained_artifact_exception,omitempty"`
 	// Captured only after exact-version confirmation and scoped authorization.
 	// Background bundle reconstruction must not drop this operation's authority.
 	ConfirmedRestrictedVersionUUID *uuid.UUID `json:"confirmed_restricted_version_uuid,omitempty"`
+}
+
+type EnvironmentRef struct {
+	ProjectID string
+	EnvID     string
+}
+
+type EnvironmentDeploymentReadiness struct {
+	EnvironmentRef
+	EnvironmentUUID           opt.Opt[uuid.UUID]
+	LatestDeploymentID        opt.Opt[uuid.UUID]
+	LatestStatus              opt.Opt[DeploymentStatus]
+	LatestMode                opt.Opt[DeploymentMode]
+	ActiveLeaseUntil          opt.Opt[time.Time]
+	EffectiveBaseDeploymentID opt.Opt[uuid.UUID]
+	ActiveModules             []ModuleArtifactRequirement
 }
 
 type ListDeploymentsParams struct {
@@ -186,6 +209,24 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		Revision:                   1,
 		ModuleArtifacts:            params.ModuleArtifacts,
 		ModuleVersionRequestDigest: params.ModuleVersionRequestDigest,
+	}
+
+	if RequiresEnvironmentLease(params.Mode) {
+		var holder uuid.UUID
+		if err := tx.QueryRowContext(ctx, `INSERT INTO environment_deployment_leases
+			(environment_id, org_id, project_id, env_id, holder_id, purpose, deployment_id, expires_at)
+			VALUES ($1, $2, $3, $4, $5, 'deployment', $5, now() + $6::interval)
+			ON CONFLICT (environment_id) DO UPDATE SET
+				org_id=EXCLUDED.org_id, project_id=EXCLUDED.project_id, env_id=EXCLUDED.env_id,
+				holder_id=EXCLUDED.holder_id, purpose=EXCLUDED.purpose,
+				deployment_id=EXCLUDED.deployment_id, acquired_at=now(), heartbeat_at=now(), expires_at=EXCLUDED.expires_at
+			WHERE environment_deployment_leases.expires_at <= now()
+			RETURNING holder_id`, out.DeploymentEnvUuid, orgId, projectId, envId, out.Id, DefaultEnvironmentLeaseTTL.String()).Scan(&holder); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, NewErrConflict("environment has an active deployment lease")
+			}
+			return nil, errors.Wrap(err, "failed to acquire environment deployment lease")
+		}
 	}
 
 	{
@@ -465,6 +506,66 @@ func (d *databaser) GetLastDeployment(ctx context.Context, optionalTx Tx, orgId 
 	return out, EncodedDeploymentManifest(rawManifest), rawTofu, EncodedDeploymentGraph(rawGraph), nil
 }
 
+func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optionalTx Tx, orgID string, refs []EnvironmentRef) ([]EnvironmentDeploymentReadiness, error) {
+	if len(refs) == 0 {
+		return []EnvironmentDeploymentReadiness{}, nil
+	}
+	projectIDs := make([]string, len(refs))
+	environmentIDs := make([]string, len(refs))
+	for index, ref := range refs {
+		projectIDs[index] = ref.ProjectID
+		environmentIDs[index] = ref.EnvID
+	}
+	rows, err := d.txOrDb(optionalTx).QueryContext(ctx, `
+		WITH requested AS (
+			SELECT project_id, env_id, ordinal
+			FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS request(project_id, env_id, ordinal)
+		)
+		SELECT request.project_id, request.env_id, environment.id,
+		       latest.id, latest.status, latest.mode, lease.expires_at,
+		       base.id, COALESCE(base.module_artifacts, '[]'::jsonb)
+		FROM requested request
+		LEFT JOIN deployment_environments environment
+		  ON environment.org_id=$1 AND environment.project_id=request.project_id AND environment.env_id=request.env_id
+		LEFT JOIN deployments latest ON latest.id=environment.last_state_deployment_id
+		LEFT JOIN environment_deployment_leases lease
+		  ON lease.environment_id=environment.id AND lease.deployment_id=latest.id AND lease.expires_at > now()
+		LEFT JOIN LATERAL (
+			SELECT deployment.id, deployment.module_artifacts
+			FROM deployments deployment
+			WHERE deployment.de_id=environment.id
+			  AND deployment.status='succeeded'
+			  AND deployment.mode IN ('deploy', 'rollback', 'destroy')
+			ORDER BY deployment.created_at DESC
+			LIMIT 1
+		) base ON true
+		ORDER BY request.ordinal`, orgID, pq.Array(projectIDs), pq.Array(environmentIDs))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query environment deployment readiness")
+	}
+	defer func() { _ = rows.Close() }()
+	result := make([]EnvironmentDeploymentReadiness, 0, len(refs))
+	for rows.Next() {
+		var item EnvironmentDeploymentReadiness
+		var artifacts json.RawMessage
+		if err := rows.Scan(
+			&item.ProjectID, &item.EnvID, opt.Scan(&item.EnvironmentUUID),
+			opt.Scan(&item.LatestDeploymentID), opt.Scan(&item.LatestStatus), opt.Scan(&item.LatestMode),
+			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts,
+		); err != nil {
+			return nil, errors.Wrap(err, "failed to scan environment deployment readiness")
+		}
+		if err := json.Unmarshal(artifacts, &item.ActiveModules); err != nil {
+			return nil, errors.Wrap(err, "failed to decode active module inventory")
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "failed to iterate environment deployment readiness")
+	}
+	return result, nil
+}
+
 func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, optionalTx Tx, deploymentId uuid.UUID, params UpdateDeploymentStatusAndOutputsParams) (*DeploymentSummary, error) {
 	out := &DeploymentSummary{
 		Id: deploymentId,
@@ -487,7 +588,37 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 		}
 		return nil, errors.Wrap(err, "failed to update deployment")
 	}
+	if params.Status == DeploymentStatusSucceeded || params.Status == DeploymentStatusFailed {
+		if _, err := d.txOrDb(optionalTx).ExecContext(ctx, `DELETE FROM environment_deployment_leases WHERE deployment_id = $1`, deploymentId); err != nil {
+			return nil, errors.Wrap(err, "failed to release environment deployment lease")
+		}
+	}
 	return out, nil
+}
+
+func RequiresEnvironmentLease(mode DeploymentMode) bool {
+	return mode == DeploymentModeDeploy || mode == DeploymentModeRollback || mode == DeploymentModeDestroy
+}
+
+func (d *databaser) RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error {
+	if ttl <= 0 {
+		ttl = DefaultEnvironmentLeaseTTL
+	}
+	result, err := d.txOrDb(optionalTx).ExecContext(ctx, `UPDATE environment_deployment_leases lease
+		SET heartbeat_at=now(), expires_at=now() + $1::interval
+		FROM deployments deployment
+		WHERE lease.deployment_id=$2 AND deployment.id=lease.deployment_id AND deployment.status='executing'`, ttl.String(), deploymentID)
+	if err != nil {
+		return errors.Wrap(err, "failed to renew environment deployment lease")
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to read renewed lease count")
+	}
+	if count != 1 {
+		return NewErrConflict("deployment no longer owns its environment lease")
+	}
+	return nil
 }
 
 func (d *databaser) CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error {

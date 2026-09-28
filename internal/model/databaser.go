@@ -83,12 +83,14 @@ type Databaser interface {
 	GetDeploymentEncryptedOutputs(ctx context.Context, optionalTx Tx, orgId string, deploymentId uuid.UUID) (string, error)
 	GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error)
 	GetLastDeployment(ctx context.Context, optionalTx Tx, orgId string, projectId, envId string, params GetLastDeploymentParams) (*DeploymentSummary, EncodedDeploymentManifest, RawTofu, EncodedDeploymentGraph, error)
+	GetEnvironmentDeploymentReadiness(ctx context.Context, optionalTx Tx, orgID string, refs []EnvironmentRef) ([]EnvironmentDeploymentReadiness, error)
 	DeleteDeploymentsForEnv(ctx context.Context, optionalTx Tx, orgId, projectId, envId string, force bool) error
 	UpdateDeploymentStatusAndOutputs(ctx context.Context, optionalTx Tx, deploymentId uuid.UUID, params UpdateDeploymentStatusAndOutputsParams) (*DeploymentSummary, error)
 	DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error)
 	ListLastDeploymentsByNodeProperties(ctx context.Context, optionalTx Tx, orgId string, pageToken string, perPage int, params ListLastDeploymentsByNodePropertiesParams) ([]DeploymentSummary, string, error)
 	CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error
 	TryRecordRunnerEvent(ctx context.Context, optionalTx Tx, eventID, orgID, runnerID string, deploymentID uuid.UUID, eventType string) (bool, error)
+	RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error
 
 	InitActiveResourcesFromGraph(ctx context.Context, tx Tx, deploymentEnvUuid, deploymentId uuid.UUID, graph *platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]) error
 	GetActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid uuid.UUID) ([]ResourceNode, error)

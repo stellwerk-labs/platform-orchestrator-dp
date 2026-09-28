@@ -34,6 +34,13 @@ const (
 	maxExternalDeploymentAdmissionBodyBytes = 8 * 1024 * 1024
 	externalDeploymentInvalidRequestCode    = "invalid_request"
 	externalDeploymentCoreUnavailableCode   = "core_unavailable"
+	externalDeploymentUnavailableCode       = "external_deployment_unavailable"
+	externalDeploymentFailedCode            = "external_deployment_failed"
+	externalInvalidPluginContextCode        = "invalid_plugin_context"
+	externalInvalidPluginContextMessage     = "a valid request-bound plugin context is required"
+	externalQueryUnsupportedMessage         = "query parameters are not supported"
+	externalInvalidPathIdentityMessage      = "organization or plugin identity is invalid"
+	externalEnvironmentIdentityChangedCode  = "environment_identity_changed"
 )
 
 var externalPluginIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
@@ -70,7 +77,7 @@ type externalDeploymentErrorResponse struct {
 
 func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	if err := a.validateConfiguration(); err != nil {
-		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: "external_deployment_unavailable", Message: "external deployment admission is unavailable"})
+		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment admission is unavailable"})
 	}
 	request := c.Request()
 	requestContext, cancel := context.WithTimeout(request.Context(), RequestHandlerTimeout)
@@ -78,7 +85,7 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	request = request.WithContext(requestContext)
 	c.SetRequest(request)
 	if request.URL.RawQuery != "" || request.URL.Fragment != "" {
-		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "query parameters are not supported"})
+		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalQueryUnsupportedMessage})
 	}
 	if contentType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type")); err != nil || contentType != "application/json" {
 		return c.JSON(http.StatusUnsupportedMediaType, externalDeploymentErrorResponse{Error: "invalid_content_type", Message: "Content-Type must be application/json"})
@@ -89,7 +96,7 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	}
 	assertion, ok := singleHeader(request.Header, plugincontext.Header)
 	if !ok || assertion == "" {
-		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: "invalid_plugin_context", Message: "a valid request-bound plugin context is required"})
+		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 
 	request.Body = http.MaxBytesReader(c.Response(), request.Body, maxExternalDeploymentAdmissionBodyBytes)
@@ -99,7 +106,7 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	}
 	orgID, pluginID := c.Param("orgId"), c.Param("pluginId")
 	if !validExternalPathIdentity(orgID, pluginID) {
-		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "organization or plugin identity is invalid"})
+		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalInvalidPathIdentityMessage})
 	}
 	claims, err := plugincontext.Verify(a.VerificationKey, assertion, plugincontext.Request{
 		Issuer:         a.Issuer,
@@ -113,7 +120,7 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 		IdempotencyKey: idempotencyKey,
 	}, a.now())
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: "invalid_plugin_context", Message: "a valid request-bound plugin context is required"})
+		return c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 
 	var body ExternalDeploymentAdmissionBody
@@ -222,7 +229,7 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_conflict", Message: conflict.Message})
 	}
 	a.logger().Error("external deployment admission failed", zap.Error(err))
-	return c.JSON(http.StatusInternalServerError, externalDeploymentErrorResponse{Error: "external_deployment_failed", Message: "external deployment admission failed"})
+	return c.JSON(http.StatusInternalServerError, externalDeploymentErrorResponse{Error: externalDeploymentFailedCode, Message: "external deployment admission failed"})
 }
 
 func prepareExternalDeployment(body DeploymentCreateBody) (model.DeploymentMode, string, DeploymentManifest, error) {
