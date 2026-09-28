@@ -60,6 +60,7 @@ func TestExternalOperationDeploymentReceiptSerializesAndSurvivesDeploymentRetent
 	}, 5*time.Second, 10*time.Millisecond)
 
 	actorID := uuid.New()
+	projectUUID, environmentUUID, snapshotID, baseDeploymentID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	deployment, err := store.CreateDeployment(ctx, first, key.OrgID, "receipt-project", "receipt-env", CreateDeploymentParams{
 		CreatedBy: actorID, DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy,
 		Manifest: EncodedDeploymentManifest(`{"workloads":{}}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}"),
@@ -76,6 +77,10 @@ func TestExternalOperationDeploymentReceiptSerializesAndSurvivesDeploymentRetent
 		ActorID:                        actorID.String(),
 		ProjectID:                      deployment.ProjectId,
 		EnvID:                          deployment.EnvId,
+		ProjectUUID:                    opt.Of(projectUUID),
+		EnvironmentUUID:                opt.Of(environmentUUID),
+		PlanSnapshotID:                 opt.Of(snapshotID),
+		BaseDeploymentID:               opt.Of(baseDeploymentID),
 		DeploymentID:                   deployment.Id,
 	})
 	require.NoError(t, err)
@@ -86,6 +91,8 @@ func TestExternalOperationDeploymentReceiptSerializesAndSurvivesDeploymentRetent
 		require.NoError(t, result.err)
 		require.Equal(t, expected.DeploymentID, result.receipt.DeploymentID)
 		require.Equal(t, expected.Fence, result.receipt.Fence)
+		require.Equal(t, snapshotID, result.receipt.PlanSnapshotID.Must())
+		require.Equal(t, baseDeploymentID, result.receipt.BaseDeploymentID.Must())
 	case <-ctx.Done():
 		t.Fatal("same-request waiter did not observe the committed receipt")
 	}

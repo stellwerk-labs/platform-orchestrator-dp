@@ -256,6 +256,7 @@ func main() {
 			Issuer:             cfg.PluginIssuer,
 			VerificationKey:    verificationKey,
 			Admission:          api.ExternalDeploymentAdmissionService{Database: db, Authorizer: grantClient, Logger: zap.L()},
+			Materials:          api.ExternalOperationMaterialService{Vault: vlt},
 			ControlPlaneClient: cpClient,
 			EventPublisher:     eventPublisher,
 			Logger:             zap.L(),

@@ -22,6 +22,9 @@ type VaultClientInterface interface {
 
 	ReadKey(ctx context.Context, keyName string) (*TransitKey, error)
 	CreateKey(ctx context.Context, keyName, autoRotatePeriod string) error
+	CreateEncryptionKey(ctx context.Context, keyName, autoRotatePeriod string) error
+	Encrypt(ctx context.Context, keyName string, plaintext []byte) (string, error)
+	Decrypt(ctx context.Context, keyName, ciphertext string) ([]byte, error)
 	SignData(ctx context.Context, key string, input string) (map[string]interface{}, error)
 	VerifySignature(ctx context.Context, key, input, signature string) (bool, error)
 }

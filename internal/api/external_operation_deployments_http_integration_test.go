@@ -20,16 +20,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	platformorchestratorcpv2 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 )
 
 func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesReplay(t *testing.T) {
@@ -46,6 +51,7 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	actorID := uuid.New()
 	projectUUID := uuid.New()
 	environmentUUID := uuid.New()
+	moduleUUID, baseVersionUUID, targetVersionUUID := uuid.New(), uuid.New(), uuid.New()
 	const (
 		orgID      = "acme"
 		pluginID   = "dev.example.rollouts"
@@ -56,9 +62,46 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	)
 	var checks atomic.Int64
 	var grantActive atomic.Bool
+	var targetDigest atomic.Value
 	grantActive.Store(true)
+	targetDigest.Store("sha256:target")
 	callbackEntered := make(chan struct{}, 1)
 	callbackRelease := make(chan struct{})
+
+	baseManifest := DeploymentManifest{
+		Workloads: map[string]DeploymentManifestWorkload{},
+		Shared:    map[string]DeploymentManifestResource{"database": {Type: "postgres"}},
+	}
+	rawBaseManifest, err := json.Marshal(baseManifest)
+	require.NoError(t, err)
+	coordinate := platformorchestratorgraph.ResourceCoordinate{Type: "postgres", Class: "default", Id: "shared.database"}
+	rawBaseGraph, err := graphs.ToJson(&platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]{
+		Nodes: map[platformorchestratorgraph.ResourceCoordinate]platformorchestratorgraph.ResourceNode[*graphs.GraphNodeModuleConfig]{
+			coordinate: {ModuleConfiguration: &graphs.GraphNodeModuleConfig{DefinitionId: "postgres", VersionId: "v1"}},
+		},
+		Edges:           map[platformorchestratorgraph.ResourceCoordinate]map[string]platformorchestratorgraph.ResourceCoordinate{},
+		Workloads:       map[string]platformorchestratorgraph.ResourceCoordinate{},
+		SharedResources: map[string]platformorchestratorgraph.ResourceCoordinate{"database": coordinate},
+		LeafResources:   map[platformorchestratorgraph.ResourceCoordinate]bool{coordinate: true},
+	})
+	require.NoError(t, err)
+	baseTx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	base, err := store.CreateDeployment(ctx, baseTx, orgID, projectID, envID, model.CreateDeploymentParams{
+		CreatedBy: actorID, DeploymentEnvUuid: environmentUUID, Mode: model.DeploymentModeDeploy,
+		Manifest: rawBaseManifest, Graph: rawBaseGraph, Tofu: model.RawTofu("terraform {}"),
+		RunnerId: runnerID, RunnerLogLevel: "info", IdempotencyKeyDigest: opt.Empty[string](),
+		ModuleArtifacts: []model.ModuleArtifactRequirement{{
+			ModuleID: "postgres", ModuleUUID: moduleUUID, Version: "v1", VersionUUID: baseVersionUUID,
+			SemanticVersion: "1.0.0", ArtifactDigest: "sha256:base", Source: "./postgres-v1",
+		}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, baseTx.Commit())
+	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, base.Id, model.UpdateDeploymentStatusAndOutputsParams{
+		Status: model.DeploymentStatusSucceeded, StatusMessage: "base ready",
+	})
+	require.NoError(t, err)
 
 	coreServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
@@ -70,7 +113,19 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 				"status": "active", "uuid": environmentUUID,
 			})
 		case request.Method == http.MethodPost && request.URL.Path == "/internal/orgs/acme/projects/checkout/envs/production/module-catalogue":
-			_, _ = response.Write([]byte(`{"modules":[],"providers":[]}`))
+			version, versionUUID, semanticVersion, digest, source := "v2", targetVersionUUID, "2.0.0", targetDigest.Load().(string), "./postgres-v2"
+			if request.Header.Get("X-Stellwerk-Rollback") == "true" {
+				version, versionUUID, semanticVersion, digest, source = "v1", baseVersionUUID, "1.0.0", "sha256:base", "./postgres-v1"
+			}
+			_ = json.NewEncoder(response).Encode(map[string]any{"modules": []map[string]any{{
+				"org_id": orgID, "id": "postgres", "version_id": version, "resource_type": "postgres",
+				"module_source": source, "module_inputs": map[string]any{}, "module_params": map[string]any{},
+				"dependencies": map[string]any{}, "coprovisioned": []any{}, "provider_mapping": map[string]string{},
+				"rules":      []map[string]any{{"resource_class": "default", "rule_id": uuid.New()}},
+				"created_at": now, "updated_at": now,
+				"module_uuid": moduleUUID, "version_uuid": versionUUID, "semantic_version": semanticVersion,
+				"migration_generation": "generation", "artifact_digest": digest, "semantic_status": "active",
+			}}, "providers": []any{}})
 		case request.Method == http.MethodGet && request.URL.Path == "/orgs/acme/runners/runner-1":
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"created_at": now, "updated_at": now, "id": runnerID, "org_id": orgID,
@@ -109,6 +164,44 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 		}
 	}))
 	t.Cleanup(coreServer.Close)
+	vaultServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/v1/transit/keys/"+externalOperationMaterialTransitKey:
+			response.WriteHeader(http.StatusNotFound)
+		case request.Method == http.MethodPut && request.URL.Path == "/v1/transit/keys/"+externalOperationMaterialTransitKey:
+			var createRequest map[string]any
+			if !assert.NoError(t, json.NewDecoder(request.Body).Decode(&createRequest)) {
+				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if !assert.Equal(t, map[string]any{
+				"type": vault.AES256GCM96, "auto_rotate_period": externalOperationMaterialKeyRotationPeriod,
+			}, createRequest) {
+				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = response.Write([]byte(`{"data":{}}`))
+		case request.Method == http.MethodPut && request.URL.Path == "/v1/transit/encrypt/"+externalOperationMaterialTransitKey:
+			var encryptRequest map[string]string
+			if !assert.NoError(t, json.NewDecoder(request.Body).Decode(&encryptRequest)) ||
+				!assert.NotEmpty(t, encryptRequest["plaintext"]) {
+				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = response.Write([]byte(`{"data":{"ciphertext":"vault:v1:wrapped-operation-identity"}}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(vaultServer.Close)
+	vaultConfig := vaultapi.DefaultConfig()
+	vaultConfig.Address = vaultServer.URL
+	vaultConfig.HttpClient = vaultServer.Client()
+	vaultAPIClient, err := vaultapi.NewClient(vaultConfig)
+	require.NoError(t, err)
+	vaultAPIClient.SetToken("test-token")
+	materialVault := vault.NewVaultClient(vaultAPIClient, zap.NewNop())
 	cpClient, err := platformorchestratorcp.NewClientWithResponses(coreServer.URL)
 	require.NoError(t, err)
 	coreURL, err := url.Parse(coreServer.URL)
@@ -118,17 +211,47 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	adapter := &ExternalDeploymentHTTPAdapter{
 		Issuer: "platform-orchestrator-cp", VerificationKey: publicKey,
 		Admission:          ExternalDeploymentAdmissionService{Database: store, Authorizer: grantClient, Logger: zap.NewNop()},
+		Materials:          ExternalOperationMaterialService{Vault: materialVault},
 		ControlPlaneClient: cpClient, EventPublisher: publisher, Logger: zap.NewNop(), Now: func() time.Time { return now },
 	}
 	server := echo.New()
 	server.POST(ExternalDeploymentAdmissionPath, adapter.Handle)
+	server.POST(ExternalDeploymentPlanningPath, adapter.HandlePlan)
 	server.GET(ExternalDeploymentDispatchReadPath, adapter.HandleDispatchRead)
 
+	planBodyBytes, err := json.Marshal(externalDeploymentPlanBody{
+		ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
+		ModuleVersions: map[string]externalModuleSelection{"postgres": {
+			ModuleUUID: moduleUUID, Version: "v2", VersionUUID: targetVersionUUID,
+			SemanticVersion: "2.0.0", ArtifactDigest: "sha256:target",
+		}},
+	})
+	require.NoError(t, err)
+	planPath := "/orgs/acme/plugins/dev.example.rollouts/external-deployment-plans"
+	planClaims := plugincontext.Claims{
+		Version: 1, Issuer: "platform-orchestrator-cp", Audience: ExternalDeploymentAudience,
+		PluginID: pluginID, OrgID: orgID, ActorID: actorID.String(), OperationID: ExternalDeploymentPlanningAction,
+		Method: http.MethodPost, Path: planPath, BodySHA256: plugincontext.Digest(planBodyBytes), RequestID: "plan-1",
+		IssuedAt: now.Unix(), ExpiresAt: now.Add(plugincontext.MaxLifetime).Unix(),
+	}
+	planAssertion, err := plugincontext.Sign(privateKey, planClaims, now)
+	require.NoError(t, err)
+	planRequest := httptest.NewRequest(http.MethodPost, planPath, bytes.NewReader(planBodyBytes))
+	planRequest.Header.Set("Content-Type", "application/json")
+	planRequest.Header.Set("Idempotency-Key", planClaims.RequestID)
+	planRequest.Header.Set(plugincontext.Header, planAssertion)
+	planResponse := httptest.NewRecorder()
+	server.ServeHTTP(planResponse, planRequest)
+	require.Equal(t, http.StatusOK, planResponse.Code, planResponse.Body.String())
+	var plan externalDeploymentPlanResponse
+	require.NoError(t, json.Unmarshal(planResponse.Body.Bytes(), &plan))
+
 	bodyBytes, err := json.Marshal(ExternalDeploymentAdmissionBody{
-		OperationRef: operationID.String(), Fence: 7,
-		Deployment: DeploymentCreateBody{
-			Mode: DeploymentCreateBodyModeDeploy, ProjectId: projectID, EnvId: envID,
-			Manifest: &DeploymentManifest{Workloads: map[string]DeploymentManifestWorkload{}},
+		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeDeploy,
+		Plan: &ExternalDeploymentAdmissionPlan{
+			SnapshotId: plan.SnapshotID, Fingerprint: plan.Fingerprint,
+			ExpectedModuleVersions: map[string]uuid.UUID{moduleUUID.String(): targetVersionUUID},
 		},
 	})
 	require.NoError(t, err)
@@ -151,19 +274,59 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 		return response
 	}
 
+	targetDigest.Store("sha256:changed-after-plan")
+	changedPlan := do(bodyBytes, assertion, dispatchID)
+	require.Equal(t, http.StatusConflict, changedPlan.Code, changedPlan.Body.String())
+	targetDigest.Store("sha256:target")
 	created := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var createdBody ExternalDeploymentAdmissionResponse
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
 	require.False(t, createdBody.Replayed)
-	deployment, _, _, _, err := store.GetDeployment(ctx, nil, orgID, createdBody.DeploymentID, model.GetModeDefault)
+	deployment, _, _, _, err := store.GetDeployment(ctx, nil, orgID, createdBody.DeploymentId, model.GetModeDefault)
 	require.NoError(t, err)
 	require.Equal(t, actorID, deployment.CreatedBy)
 	require.Equal(t, model.DeploymentModeDeploy, deployment.Mode)
+	require.Equal(t, targetVersionUUID, deployment.ModuleArtifacts[0].VersionUUID)
+	require.True(t, deployment.EncryptedOutputsRecipient.IsSet())
+	require.Equal(t, deployment.EncryptedOutputsRecipient.Must(), deployment.EncryptedLogsRecipient.Must())
+	materialTx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	material, err := model.GetExternalOperationMaterial(ctx, materialTx, orgID, pluginID, operationID)
+	require.NoError(t, err)
+	require.Equal(t, deployment.EncryptedOutputsRecipient.Must(), material.Recipient)
+	require.Equal(t, "vault:v1:wrapped-operation-identity", material.EncryptedIdentity)
+	require.NoError(t, materialTx.Rollback())
 
 	replayed := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
-	require.EqualValues(t, 2, checks.Load(), "replay must reauthorize before loading its receipt")
+	require.EqualValues(t, 3, checks.Load(), "replay must reauthorize before loading its receipt")
+	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{
+		Status: model.DeploymentStatusSucceeded, StatusMessage: "forward ready",
+	})
+	require.NoError(t, err)
+	rollbackBody, err := json.Marshal(ExternalDeploymentAdmissionBody{
+		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeRollback,
+		Rollback: &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: deployment.Id},
+	})
+	require.NoError(t, err)
+	rollbackClaims := claims
+	rollbackClaims.RequestID = "dispatch-rollback"
+	rollbackClaims.BodySHA256 = plugincontext.Digest(rollbackBody)
+	rollbackAssertion, err := plugincontext.Sign(privateKey, rollbackClaims, now)
+	require.NoError(t, err)
+	rollbackResponse := do(rollbackBody, rollbackAssertion, rollbackClaims.RequestID)
+	require.Equal(t, http.StatusCreated, rollbackResponse.Code, rollbackResponse.Body.String())
+	var rollbackResult ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(rollbackResponse.Body.Bytes(), &rollbackResult))
+	rollbackDeployment, _, _, _, err := store.GetDeployment(ctx, nil, orgID, rollbackResult.DeploymentId, model.GetModeDefault)
+	require.NoError(t, err)
+	require.Equal(t, model.DeploymentModeRollback, rollbackDeployment.Mode)
+	require.Equal(t, base.Id, rollbackDeployment.RollbackToId.Must(), "rollback target must be the DP-captured effective base")
+	require.Equal(t, baseVersionUUID, rollbackDeployment.ModuleArtifacts[0].VersionUUID)
+	require.Equal(t, material.Recipient, rollbackDeployment.EncryptedOutputsRecipient.Must())
+	require.EqualValues(t, 4, checks.Load())
 
 	cancelClaims := claims
 	cancelClaims.RequestID = "dispatch-cancel"
@@ -216,13 +379,13 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	grantActive.Store(false)
 	revoked := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusForbidden, revoked.Code, revoked.Body.String())
-	require.EqualValues(t, 4, checks.Load())
+	require.EqualValues(t, 6, checks.Load())
 
 	tampered := append([]byte(nil), bodyBytes...)
 	tampered = bytes.Replace(tampered, []byte(`"fence":7`), []byte(`"fence":8`), 1)
 	invalid := do(tampered, assertion, dispatchID)
 	require.Equal(t, http.StatusUnauthorized, invalid.Code, invalid.Body.String())
-	require.EqualValues(t, 4, checks.Load(), "invalid assertion must fail before Core callbacks")
+	require.EqualValues(t, 6, checks.Load(), "invalid assertion must fail before Core callbacks")
 }
 
 func externalDeploymentTestDatabase(t *testing.T, ctx context.Context, connection string) model.Databaser {

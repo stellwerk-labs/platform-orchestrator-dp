@@ -105,12 +105,17 @@ func TestExternalDeploymentPlanSnapshotIsImmutableAndRequestDeduplicated(t *test
 		Fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Manifest:    json.RawMessage(`{"workloads":{"api":{"outputs":{"password":"retained-secret"}}}}`),
 		Graph:       json.RawMessage(`{"nodes":{}}`), Diff: json.RawMessage(`{"changes":[]}`),
+		ExplicitTargets: []ExternalDeploymentPlanTarget{{
+			ModuleID: "postgres", ModuleUUID: uuid.New(), Version: "v2", VersionUUID: uuid.New(),
+			SemanticVersion: "2.0.0", ArtifactDigest: "sha256:example",
+		}},
 	}
 	created, err := CreateOrGetExternalDeploymentPlanSnapshot(ctx, tx, candidate)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 	require.NotEqual(t, uuid.Nil, created.ID)
 	require.Contains(t, string(created.Manifest), "retained-secret")
+	require.Equal(t, candidate.ExplicitTargets, created.ExplicitTargets)
 
 	replayTx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)

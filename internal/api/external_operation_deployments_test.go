@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
 	"github.com/stretchr/testify/require"
 
@@ -35,7 +34,7 @@ func TestValidateExternalDeploymentAdmissionRequiresDPAudienceAndAction(t *testi
 		EnvUUID:       envUUID,
 		ProjectID:     "project",
 		EnvID:         "env",
-		Create: func(context.Context, model.Tx, uuid.UUID) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, error) {
+		Create: func(context.Context, model.Tx, uuid.UUID) (*ExternalDeploymentCreation, error) {
 			panic("validation must not execute the deployment creator")
 		},
 	}

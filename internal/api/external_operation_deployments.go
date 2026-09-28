@@ -58,7 +58,14 @@ type ExternalDeploymentGrantAuthorizer interface {
 // ExternalDeploymentCreator must invoke the ordinary deployment path inside
 // the supplied transaction. It is intentionally not a second deployment
 // engine, and the service verifies the returned Deployment's owner fields.
-type ExternalDeploymentCreator func(context.Context, model.Tx, uuid.UUID) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, error)
+type ExternalDeploymentCreation struct {
+	Deployment       *model.DeploymentSummary
+	PendingEvents    []*hstandardoutbox.PendingEventMessage
+	PlanSnapshotID   opt.Opt[uuid.UUID]
+	BaseDeploymentID opt.Opt[uuid.UUID]
+}
+
+type ExternalDeploymentCreator func(context.Context, model.Tx, uuid.UUID) (*ExternalDeploymentCreation, error)
 
 type ExternalDeploymentAdmissionRequest struct {
 	Claims        plugincontext.Claims
@@ -157,10 +164,14 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 		return &ExternalDeploymentAdmissionResult{Deployment: deployment, Replayed: true}, nil
 	}
 
-	deployment, pendingEvents, err := request.Create(ctx, tx, actorID)
+	creation, err := request.Create(ctx, tx, actorID)
 	if err != nil {
 		return nil, err
 	}
+	if creation == nil {
+		return nil, errors.New("normal deployment creator returned no result")
+	}
+	deployment := creation.Deployment
 	if deployment == nil || deployment.OrgId != request.Claims.OrgID || deployment.ProjectId != request.ProjectID ||
 		deployment.EnvId != request.EnvID || deployment.CreatedBy != actorID {
 		return nil, errors.New("normal deployment creator returned mismatched ownership")
@@ -177,6 +188,8 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 		EnvID:                          request.EnvID,
 		ProjectUUID:                    opt.Of(request.ProjectUUID),
 		EnvironmentUUID:                opt.Of(request.EnvUUID),
+		PlanSnapshotID:                 creation.PlanSnapshotID,
+		BaseDeploymentID:               creation.BaseDeploymentID,
 		DeploymentID:                   deployment.Id,
 	}); err != nil {
 		return nil, err
@@ -186,7 +199,7 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 	}
 	return &ExternalDeploymentAdmissionResult{
 		Deployment:    deployment,
-		PendingEvents: slices.Clone(pendingEvents),
+		PendingEvents: slices.Clone(creation.PendingEvents),
 	}, nil
 }
 

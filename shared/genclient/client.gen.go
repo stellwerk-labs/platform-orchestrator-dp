@@ -106,6 +106,48 @@ func (e DeploymentResultsUpdateBodyStatus) Valid() bool {
 	}
 }
 
+// Defines values for ExternalDeploymentAdmissionBodyMode.
+const (
+	ExternalDeploymentAdmissionBodyModeDeploy   ExternalDeploymentAdmissionBodyMode = "deploy"
+	ExternalDeploymentAdmissionBodyModeRollback ExternalDeploymentAdmissionBodyMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyMode enum.
+func (e ExternalDeploymentAdmissionBodyMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyModeDeploy:
+		return true
+	case ExternalDeploymentAdmissionBodyModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentAdmissionBodyRunnerLogLevel.
+const (
+	ExternalDeploymentAdmissionBodyRunnerLogLevelDebug ExternalDeploymentAdmissionBodyRunnerLogLevel = "debug"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelError ExternalDeploymentAdmissionBodyRunnerLogLevel = "error"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelInfo  ExternalDeploymentAdmissionBodyRunnerLogLevel = "info"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelWarn  ExternalDeploymentAdmissionBodyRunnerLogLevel = "warn"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyRunnerLogLevel enum.
+func (e ExternalDeploymentAdmissionBodyRunnerLogLevel) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelDebug:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelError:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelInfo:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalDeploymentStatusResponseMode.
 const (
 	ExternalDeploymentStatusModeDeploy   ExternalDeploymentStatusResponseMode = "deploy"
@@ -749,6 +791,44 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// ExternalDeploymentAdmissionBody defines model for ExternalDeploymentAdmissionBody.
+type ExternalDeploymentAdmissionBody struct {
+	EnvId           string                                         `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID                             `json:"environment_uuid"`
+	Fence           int64                                          `json:"fence"`
+	Mode            ExternalDeploymentAdmissionBodyMode            `json:"mode"`
+	OperationRef    openapi_types.UUID                             `json:"operation_ref"`
+	Plan            *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
+	ProjectId       string                                         `json:"project_id"`
+	ProjectUuid     openapi_types.UUID                             `json:"project_uuid"`
+	Rollback        *ExternalDeploymentAdmissionRollback           `json:"rollback,omitempty"`
+	RunnerLogLevel  *ExternalDeploymentAdmissionBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+}
+
+// ExternalDeploymentAdmissionBodyMode defines model for ExternalDeploymentAdmissionBody.Mode.
+type ExternalDeploymentAdmissionBodyMode string
+
+// ExternalDeploymentAdmissionBodyRunnerLogLevel defines model for ExternalDeploymentAdmissionBody.RunnerLogLevel.
+type ExternalDeploymentAdmissionBodyRunnerLogLevel string
+
+// ExternalDeploymentAdmissionPlan defines model for ExternalDeploymentAdmissionPlan.
+type ExternalDeploymentAdmissionPlan struct {
+	ExpectedModuleVersions map[string]openapi_types.UUID `json:"expected_module_versions"`
+	Fingerprint            string                        `json:"fingerprint"`
+	SnapshotId             openapi_types.UUID            `json:"snapshot_id"`
+}
+
+// ExternalDeploymentAdmissionResponse defines model for ExternalDeploymentAdmissionResponse.
+type ExternalDeploymentAdmissionResponse struct {
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+	Replayed     bool               `json:"replayed"`
+}
+
+// ExternalDeploymentAdmissionRollback defines model for ExternalDeploymentAdmissionRollback.
+type ExternalDeploymentAdmissionRollback struct {
+	ForwardDeploymentId openapi_types.UUID `json:"forward_deployment_id"`
+}
+
 // ExternalDeploymentPlanBody defines model for ExternalDeploymentPlanBody.
 type ExternalDeploymentPlanBody struct {
 	EnvId           string                             `json:"env_id"`
@@ -783,21 +863,23 @@ type ExternalDeploymentReadinessResponse struct {
 
 // ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
 type ExternalDeploymentStatusResponse struct {
-	CompletedAt      *time.Time                             `json:"completed_at,omitempty"`
-	CreatedAt        time.Time                              `json:"created_at"`
-	DeploymentId     openapi_types.UUID                     `json:"deployment_id"`
-	DispatchId       string                                 `json:"dispatch_id"`
-	EnvId            string                                 `json:"env_id"`
-	EnvironmentUuid  openapi_types.UUID                     `json:"environment_uuid"`
-	Fence            int64                                  `json:"fence"`
-	Mode             ExternalDeploymentStatusResponseMode   `json:"mode"`
-	ModuleVersions   map[string]openapi_types.UUID          `json:"module_versions"`
-	OperationRef     openapi_types.UUID                     `json:"operation_ref"`
-	ProjectId        string                                 `json:"project_id"`
-	ProjectUuid      openapi_types.UUID                     `json:"project_uuid"`
-	ReceiptCreatedAt time.Time                              `json:"receipt_created_at"`
-	Status           ExternalDeploymentStatusResponseStatus `json:"status"`
-	StatusMessage    string                                 `json:"status_message"`
+	CompletedAt            *time.Time                             `json:"completed_at,omitempty"`
+	CreatedAt              time.Time                              `json:"created_at"`
+	DeploymentId           openapi_types.UUID                     `json:"deployment_id"`
+	DispatchId             string                                 `json:"dispatch_id"`
+	EnvId                  string                                 `json:"env_id"`
+	EnvironmentUuid        openapi_types.UUID                     `json:"environment_uuid"`
+	Fence                  int64                                  `json:"fence"`
+	Mode                   ExternalDeploymentStatusResponseMode   `json:"mode"`
+	ModuleVersions         map[string]openapi_types.UUID          `json:"module_versions"`
+	OperationRef           openapi_types.UUID                     `json:"operation_ref"`
+	ProjectId              string                                 `json:"project_id"`
+	ProjectUuid            openapi_types.UUID                     `json:"project_uuid"`
+	ReceiptCreatedAt       time.Time                              `json:"receipt_created_at"`
+	RequestDigest          string                                 `json:"request_digest"`
+	RollbackModuleVersions map[string]openapi_types.UUID          `json:"rollback_module_versions"`
+	Status                 ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage          string                                 `json:"status_message"`
 }
 
 // ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.
@@ -1105,11 +1187,20 @@ type ProjectIdQueryParam = string
 // N400BadRequest A standard error response
 type N400BadRequest = Error
 
+// N401Unauthorized A standard error response
+type N401Unauthorized = Error
+
+// N403Forbidden A standard error response
+type N403Forbidden = Error
+
 // N404NotFound A standard error response
 type N404NotFound = Error
 
 // N409Conflict A standard error response
 type N409Conflict = Error
+
+// N503Unavailable A standard error response
+type N503Unavailable = Error
 
 // InternalDeleteDeploymentsParams defines parameters for InternalDeleteDeployments.
 type InternalDeleteDeploymentsParams struct {
@@ -1237,6 +1328,11 @@ type GetExternalDeploymentReadinessParams struct {
 	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
 }
 
+// AdmitExternalDeploymentParams defines parameters for AdmitExternalDeployment.
+type AdmitExternalDeploymentParams struct {
+	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
 
@@ -1254,6 +1350,9 @@ type PlanExternalDeploymentJSONRequestBody = ExternalDeploymentPlanBody
 
 // GetExternalDeploymentReadinessJSONRequestBody defines body for GetExternalDeploymentReadiness for application/json ContentType.
 type GetExternalDeploymentReadinessJSONRequestBody = ExternalDeploymentReadinessBody
+
+// AdmitExternalDeploymentJSONRequestBody defines body for AdmitExternalDeployment for application/json ContentType.
+type AdmitExternalDeploymentJSONRequestBody = ExternalDeploymentAdmissionBody
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -1555,6 +1654,20 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 	GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AdmitExternalDeploymentWithBody Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AdmitExternalDeployment Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetExternalDeploymentDispatch Recover immutable Deployment receipt status after a lost admission response.
 	//
@@ -2094,6 +2207,40 @@ func (c *Client) GetExternalDeploymentReadinessWithBody(ctx context.Context, org
 // Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 func (c *Client) GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetExternalDeploymentReadinessRequest(c.Server, orgId, pluginId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AdmitExternalDeploymentWithBody Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *Client) AdmitExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdmitExternalDeploymentRequestWithBody(c.Server, orgId, pluginId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AdmitExternalDeployment Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *Client) AdmitExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdmitExternalDeploymentRequest(c.Server, orgId, pluginId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3614,6 +3761,73 @@ func NewGetExternalDeploymentReadinessRequestWithBody(server string, orgId OrgId
 	return req, nil
 }
 
+// NewAdmitExternalDeploymentRequest calls the generic AdmitExternalDeployment builder with application/json body
+func NewAdmitExternalDeploymentRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAdmitExternalDeploymentRequestWithBody(server, orgId, pluginId, params, "application/json", bodyReader)
+}
+
+// NewAdmitExternalDeploymentRequestWithBody constructs an http.Request for the AdmitExternalDeployment method, with any body, and a specified content type
+func NewAdmitExternalDeploymentRequestWithBody(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/external-deployments", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 // NewGetExternalDeploymentDispatchRequest constructs an http.Request for the GetExternalDeploymentDispatch method
 func NewGetExternalDeploymentDispatchRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string) (*http.Request, error) {
 	var err error
@@ -4046,6 +4260,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
 	GetExternalDeploymentReadinessWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error)
+
+	// AdmitExternalDeploymentWithBodyWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error)
+
+	// AdmitExternalDeploymentWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error)
 
 	// GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
 	//
@@ -5353,6 +5581,89 @@ func (r GetExternalDeploymentReadinessResponse) ContentType() string {
 	return ""
 }
 
+type AdmitExternalDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentAdmissionResponse
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ExternalDeploymentAdmissionResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *N403Forbidden
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON200() *ExternalDeploymentAdmissionResponse {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON201() *ExternalDeploymentAdmissionResponse {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON403() *N403Forbidden {
+	return r.JSON403
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r AdmitExternalDeploymentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r AdmitExternalDeploymentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AdmitExternalDeploymentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AdmitExternalDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetExternalDeploymentDispatchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5898,6 +6209,32 @@ func (c *ClientWithResponses) GetExternalDeploymentReadinessWithResponse(ctx con
 		return nil, err
 	}
 	return ParseGetExternalDeploymentReadinessResponse(rsp)
+}
+
+// AdmitExternalDeploymentWithBodyWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *ClientWithResponses) AdmitExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error) {
+	rsp, err := c.AdmitExternalDeploymentWithBody(ctx, orgId, pluginId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdmitExternalDeploymentResponse(rsp)
+}
+
+// AdmitExternalDeploymentWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *ClientWithResponses) AdmitExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error) {
+	rsp, err := c.AdmitExternalDeployment(ctx, orgId, pluginId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdmitExternalDeploymentResponse(rsp)
 }
 
 // GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
@@ -6851,6 +7188,74 @@ func ParseGetExternalDeploymentReadinessResponse(rsp *http.Response) (*GetExtern
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAdmitExternalDeploymentResponse parses an HTTP response from a AdmitExternalDeploymentWithResponse call
+func ParseAdmitExternalDeploymentResponse(rsp *http.Response) (*AdmitExternalDeploymentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AdmitExternalDeploymentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentAdmissionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ExternalDeploymentAdmissionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest N403Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

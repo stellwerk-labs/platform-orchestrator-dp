@@ -54,6 +54,7 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 		OperationRef:                   uuid.NewString(), Fence: 7, AssertionAction: ExternalDeploymentAction, ServiceAction: ExternalDeploymentAction,
 		RequestBodySHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ActorID: deployment.CreatedBy.String(),
 		ProjectID: projectID, EnvID: envID, ProjectUUID: opt.Of(projectUUID), EnvironmentUUID: opt.Of(environmentUUID), DeploymentID: deployment.Id,
+		BaseDeploymentID: opt.Of(deployment.Id),
 	})
 	require.NoError(t, err)
 	require.NoError(t, receiptTx.Commit())
@@ -149,4 +150,6 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.Equal(t, http.StatusOK, dispatchResponse.Code, dispatchResponse.Body.String())
 	require.Contains(t, dispatchResponse.Body.String(), `"dispatch_id":"dispatch-1"`)
 	require.Contains(t, dispatchResponse.Body.String(), deployment.Id.String())
+	require.Contains(t, dispatchResponse.Body.String(), `"request_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`)
+	require.Contains(t, dispatchResponse.Body.String(), `"rollback_module_versions"`)
 }

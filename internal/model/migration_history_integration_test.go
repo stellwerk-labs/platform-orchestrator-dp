@@ -33,6 +33,10 @@ func TestMigrationHistoryReconciliation(t *testing.T) {
 		requireTableAbsent(t, ctx, admin, schema, "rollout_deployment_bases")
 		requireTablePresent(t, ctx, admin, schema, "environment_deployment_leases")
 		requireTablePresent(t, ctx, admin, schema, "external_deployment_plan_snapshots")
+		requireColumn(t, ctx, admin, schema, "external_deployment_plan_snapshots", "explicit_targets")
+		requireTablePresent(t, ctx, admin, schema, "external_operation_material")
+		requireColumn(t, ctx, admin, schema, "external_operation_deployments", "plan_snapshot_id")
+		requireColumn(t, ctx, admin, schema, "external_operation_deployments", "base_deployment_id")
 	})
 }
 

@@ -86,6 +86,7 @@ type DeploymentOptions struct {
 	ReuseLastSuccessfulManifest bool
 	IgnoreEnvironmentPins       bool
 	CapturePlan                 *DeploymentPlanCapture
+	ValidatePlan                func(DeploymentPlanCapture) error
 }
 
 // DeploymentPlanCapture keeps the exact DP-internal planning snapshot. HTTP
@@ -403,16 +404,26 @@ func CreateDeploymentWithOptions(
 			}
 		}
 	}
-	if options.CapturePlan != nil {
+	if options.CapturePlan != nil || options.ValidatePlan != nil {
 		rawDiff, err := json.Marshal(diff)
 		if err != nil {
 			return nil, nil, nil, errors.Wrap(err, "failed to serialize deployment diff")
 		}
-		options.CapturePlan.BaseDeploymentID = lastDeploymentId
-		options.CapturePlan.Manifest = slices.Clone(rawManifest)
-		options.CapturePlan.Graph = slices.Clone(rawNewGraph)
-		options.CapturePlan.Diff = rawDiff
-		options.CapturePlan.ModuleArtifacts = slices.Clone(deploymentArtifacts)
+		captured := DeploymentPlanCapture{
+			BaseDeploymentID: lastDeploymentId,
+			Manifest:         slices.Clone(rawManifest),
+			Graph:            slices.Clone(rawNewGraph),
+			Diff:             rawDiff,
+			ModuleArtifacts:  slices.Clone(deploymentArtifacts),
+		}
+		if options.CapturePlan != nil {
+			*options.CapturePlan = captured
+		}
+		if options.ValidatePlan != nil {
+			if err := options.ValidatePlan(captured); err != nil {
+				return nil, nil, nil, err
+			}
+		}
 	}
 
 	if dryRun {

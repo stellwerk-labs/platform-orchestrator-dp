@@ -3,6 +3,38 @@ info:
   title: ""
   version: ""
 paths:
+  /orgs/{orgId}/plugins/{pluginId}/external-deployments:
+    post:
+      operationId: admitExternalDeployment
+      tags: [not-implemented]
+      summary: Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+      security: [{pluginContext: []}]
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/pluginIdPathParam"
+        - $ref: "#/components/parameters/idempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ExternalDeploymentAdmissionBody"}
+      responses:
+        "200":
+          description: An exact previously authorized dispatch was replayed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExternalDeploymentAdmissionResponse"}
+        "201":
+          description: An ordinary Deployment and durable dispatch receipt were created atomically.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExternalDeploymentAdmissionResponse"}
+        "400": {$ref: "#/components/responses/400BadRequest"}
+        "401": {$ref: "#/components/responses/401Unauthorized"}
+        "403": {$ref: "#/components/responses/403Forbidden"}
+        "409": {$ref: "#/components/responses/409Conflict"}
+        "503": {$ref: "#/components/responses/503Unavailable"}
+
   /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness:
     post:
       operationId: getExternalDeploymentReadiness
@@ -742,6 +774,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    401Unauthorized:
+      description: The request-bound plugin context is absent or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    403Forbidden:
+      description: Core no longer authorizes the exact operation, fence, dispatch, actor, scope and request digest.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     404NotFound:
       description: Either the resource or a related resource could not be found. More detail can be found in the error body.
       content:
@@ -750,6 +794,12 @@ components:
             $ref: "#/components/schemas/Error"
     409Conflict:
       description: The request conflicts with existing state in the system.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    503Unavailable:
+      description: Authoritative Core authorization or DP-owned encryption material is unavailable.
       content:
         application/json:
           schema:
@@ -1039,15 +1089,60 @@ components:
           type: array
           items: {$ref: "#/components/schemas/ExternalModuleInventory"}
 
+    ExternalDeploymentAdmissionPlan:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, fingerprint, expected_module_versions]
+      properties:
+        snapshot_id: {type: string, format: uuid}
+        fingerprint: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+        expected_module_versions:
+          type: object
+          minProperties: 1
+          maxProperties: 1000
+          additionalProperties: {type: string, format: uuid}
+
+    ExternalDeploymentAdmissionRollback:
+      type: object
+      additionalProperties: false
+      required: [forward_deployment_id]
+      properties:
+        forward_deployment_id: {type: string, format: uuid}
+
+    ExternalDeploymentAdmissionBody:
+      type: object
+      additionalProperties: false
+      required: [operation_ref, fence, project_id, env_id, project_uuid, environment_uuid, mode]
+      properties:
+        operation_ref: {type: string, format: uuid}
+        fence: {type: integer, format: int64, minimum: 1}
+        project_id: {type: string, minLength: 1}
+        env_id: {type: string, minLength: 1}
+        project_uuid: {type: string, format: uuid}
+        environment_uuid: {type: string, format: uuid}
+        mode: {type: string, enum: [deploy, rollback]}
+        plan: {$ref: "#/components/schemas/ExternalDeploymentAdmissionPlan"}
+        rollback: {$ref: "#/components/schemas/ExternalDeploymentAdmissionRollback"}
+        runner_log_level: {type: string, enum: [debug, info, warn, error]}
+
+    ExternalDeploymentAdmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [deployment_id, replayed]
+      properties:
+        deployment_id: {type: string, format: uuid}
+        replayed: {type: boolean}
+
     ExternalDeploymentStatusResponse:
       type: object
       additionalProperties: false
-      required: [deployment_id, dispatch_id, operation_ref, fence, project_id, env_id, project_uuid, environment_uuid, mode, status, status_message, module_versions, created_at, receipt_created_at]
+      required: [deployment_id, dispatch_id, operation_ref, fence, request_digest, project_id, env_id, project_uuid, environment_uuid, mode, status, status_message, module_versions, rollback_module_versions, created_at, receipt_created_at]
       properties:
         deployment_id: {type: string, format: uuid}
         dispatch_id: {type: string}
         operation_ref: {type: string, format: uuid}
         fence: {type: integer, format: int64, minimum: 1}
+        request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
         project_id: {type: string}
         env_id: {type: string}
         project_uuid: {type: string, format: uuid}
@@ -1062,6 +1157,9 @@ components:
           x-enum-varnames: [ExternalDeploymentStatusExecuting, ExternalDeploymentStatusFailed, ExternalDeploymentStatusSucceeded]
         status_message: {type: string}
         module_versions:
+          type: object
+          additionalProperties: {type: string, format: uuid}
+        rollback_module_versions:
           type: object
           additionalProperties: {type: string, format: uuid}
         created_at: {type: string, format: date-time}

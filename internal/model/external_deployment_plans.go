@@ -30,7 +30,20 @@ type ExternalDeploymentPlanSnapshot struct {
 	Graph             json.RawMessage
 	Diff              json.RawMessage
 	ModuleArtifacts   []ModuleArtifactRequirement
+	ExplicitTargets   []ExternalDeploymentPlanTarget
 	CreatedAt         time.Time
+}
+
+// ExternalDeploymentPlanTarget records one explicitly requested Module
+// override. It is distinct from ModuleArtifacts, which also includes unchanged
+// dependencies present in the complete planned graph.
+type ExternalDeploymentPlanTarget struct {
+	ModuleID        string    `json:"module_id"`
+	ModuleUUID      uuid.UUID `json:"module_uuid"`
+	Version         string    `json:"version"`
+	VersionUUID     uuid.UUID `json:"version_uuid"`
+	SemanticVersion string    `json:"semantic_version"`
+	ArtifactDigest  string    `json:"artifact_digest"`
 }
 
 func CreateOrGetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, candidate ExternalDeploymentPlanSnapshot) (*ExternalDeploymentPlanSnapshot, error) {
@@ -42,12 +55,12 @@ func CreateOrGetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, candi
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO external_deployment_plan_snapshots
 		(id, org_id, plugin_id, request_id, actor_id, request_body_sha256, project_id, project_uuid, env_id, environment_uuid,
-		 base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		 base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT (org_id, plugin_id, request_id) DO NOTHING`,
 		candidate.ID, candidate.OrgID, candidate.PluginID, candidate.RequestID, candidate.ActorID, candidate.RequestBodySHA256,
 		candidate.ProjectID, candidate.ProjectUUID, candidate.EnvID, candidate.EnvironmentUUID, candidate.BaseDeploymentID, candidate.Fingerprint,
-		candidate.Manifest, candidate.Graph, candidate.Diff, asJson(&candidate.ModuleArtifacts))
+		candidate.Manifest, candidate.Graph, candidate.Diff, asJson(&candidate.ModuleArtifacts), asJson(&candidate.ExplicitTargets))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store external deployment plan snapshot")
 	}
@@ -68,13 +81,13 @@ func GetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, orgID, plugin
 		return nil, errors.New("transaction is required")
 	}
 	stored := &ExternalDeploymentPlanSnapshot{OrgID: orgID, PluginID: pluginID, RequestID: requestID}
-	var artifacts json.RawMessage
+	var artifacts, targets json.RawMessage
 	err := tx.QueryRowContext(ctx, `SELECT id, actor_id, request_body_sha256, project_id, project_uuid, env_id, environment_uuid,
-		base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, created_at
+		base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets, created_at
 		FROM external_deployment_plan_snapshots WHERE org_id=$1 AND plugin_id=$2 AND request_id=$3`,
 		orgID, pluginID, requestID,
 	).Scan(&stored.ID, &stored.ActorID, &stored.RequestBodySHA256, &stored.ProjectID, &stored.ProjectUUID, &stored.EnvID, &stored.EnvironmentUUID,
-		&stored.BaseDeploymentID, &stored.Fingerprint, &stored.Manifest, &stored.Graph, &stored.Diff, &artifacts, &stored.CreatedAt)
+		&stored.BaseDeploymentID, &stored.Fingerprint, &stored.Manifest, &stored.Graph, &stored.Diff, &artifacts, &targets, &stored.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NewErrNotFound("external deployment plan snapshot not found")
 	}
@@ -84,5 +97,23 @@ func GetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, orgID, plugin
 	if err := json.Unmarshal(artifacts, &stored.ModuleArtifacts); err != nil {
 		return nil, errors.Wrap(err, "failed to decode external deployment plan module inventory")
 	}
+	if err := json.Unmarshal(targets, &stored.ExplicitTargets); err != nil {
+		return nil, errors.Wrap(err, "failed to decode external deployment plan explicit targets")
+	}
 	return stored, nil
+}
+
+func GetExternalDeploymentPlanSnapshotByID(ctx context.Context, tx Tx, orgID, pluginID string, snapshotID uuid.UUID) (*ExternalDeploymentPlanSnapshot, error) {
+	if tx == nil {
+		return nil, errors.New("transaction is required")
+	}
+	var requestID string
+	if err := tx.QueryRowContext(ctx, `SELECT request_id FROM external_deployment_plan_snapshots
+		WHERE id=$1 AND org_id=$2 AND plugin_id=$3`, snapshotID, orgID, pluginID).Scan(&requestID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, NewErrNotFound("external deployment plan snapshot not found")
+		}
+		return nil, errors.Wrap(err, "failed to find external deployment plan snapshot")
+	}
+	return GetExternalDeploymentPlanSnapshot(ctx, tx, orgID, pluginID, requestID)
 }

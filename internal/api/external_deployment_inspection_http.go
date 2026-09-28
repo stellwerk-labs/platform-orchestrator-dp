@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -136,21 +138,23 @@ type externalDeploymentPlanResponse struct {
 }
 
 type externalDeploymentStatusResponse struct {
-	DeploymentID     uuid.UUID            `json:"deployment_id"`
-	DispatchID       string               `json:"dispatch_id"`
-	OperationRef     string               `json:"operation_ref"`
-	Fence            int64                `json:"fence"`
-	ProjectID        string               `json:"project_id"`
-	EnvID            string               `json:"env_id"`
-	ProjectUUID      uuid.UUID            `json:"project_uuid"`
-	EnvironmentUUID  uuid.UUID            `json:"environment_uuid"`
-	Mode             string               `json:"mode"`
-	Status           string               `json:"status"`
-	StatusMessage    string               `json:"status_message"`
-	ModuleVersions   map[string]uuid.UUID `json:"module_versions"`
-	CreatedAt        time.Time            `json:"created_at"`
-	CompletedAt      *time.Time           `json:"completed_at,omitempty"`
-	ReceiptCreatedAt time.Time            `json:"receipt_created_at"`
+	DeploymentID           uuid.UUID            `json:"deployment_id"`
+	DispatchID             string               `json:"dispatch_id"`
+	OperationRef           string               `json:"operation_ref"`
+	Fence                  int64                `json:"fence"`
+	RequestDigest          string               `json:"request_digest"`
+	ProjectID              string               `json:"project_id"`
+	EnvID                  string               `json:"env_id"`
+	ProjectUUID            uuid.UUID            `json:"project_uuid"`
+	EnvironmentUUID        uuid.UUID            `json:"environment_uuid"`
+	Mode                   string               `json:"mode"`
+	Status                 string               `json:"status"`
+	StatusMessage          string               `json:"status_message"`
+	ModuleVersions         map[string]uuid.UUID `json:"module_versions"`
+	RollbackModuleVersions map[string]uuid.UUID `json:"rollback_module_versions"`
+	CreatedAt              time.Time            `json:"created_at"`
+	CompletedAt            *time.Time           `json:"completed_at,omitempty"`
+	ReceiptCreatedAt       time.Time            `json:"receipt_created_at"`
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
@@ -219,9 +223,9 @@ func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 	})
 	if exactErr != nil || resolved == nil {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: "authorized Environment identity is no longer current"})
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: externalEnvironmentIdentityChangedMessage})
 	}
-	response, err := projectExternalDeploymentStatus(*deployment, *receipt, projectUUID, environmentUUID)
+	response, err := a.projectExternalDeploymentStatus(request.Context(), tx, *deployment, *receipt, projectUUID, environmentUUID)
 	if err != nil {
 		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
 	}
@@ -273,9 +277,9 @@ func (a *ExternalDeploymentHTTPAdapter) HandleDispatchRead(c echo.Context) error
 	if _, err := a.resolveExactEnvironment(c.Request().Context(), c.Param("orgId"), externalEnvironmentRef{
 		ProjectID: receipt.ProjectID, EnvID: receipt.EnvID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 	}); err != nil {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: "authorized Environment identity is no longer current"})
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: externalEnvironmentIdentityChangedMessage})
 	}
-	response, err := projectExternalDeploymentStatus(*deployment, *receipt, projectUUID, environmentUUID)
+	response, err := a.projectExternalDeploymentStatus(c.Request().Context(), tx, *deployment, *receipt, projectUUID, environmentUUID)
 	if err != nil {
 		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
 	}
@@ -314,19 +318,29 @@ func (a *ExternalDeploymentHTTPAdapter) verifyInspectionGET(c echo.Context, acti
 	return claims, nil
 }
 
-func projectExternalDeploymentStatus(deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
-	versions := make(map[string]uuid.UUID, len(deployment.ModuleArtifacts))
-	for _, artifact := range deployment.ModuleArtifacts {
-		if artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil {
-			return externalDeploymentStatusResponse{}, errors.New("deployment lacks immutable module version identity")
-		}
-		versions[artifact.ModuleUUID.String()] = artifact.VersionUUID
+func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx context.Context, tx model.Tx, deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
+	versions, err := immutableModuleVersions(deployment.ModuleArtifacts)
+	if err != nil {
+		return externalDeploymentStatusResponse{}, err
+	}
+	if !receipt.BaseDeploymentID.IsSet() {
+		return externalDeploymentStatusResponse{}, errors.New("external deployment receipt lacks a captured effective base")
+	}
+	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, receipt.OrgID, receipt.BaseDeploymentID.Must(), model.GetModeDefault)
+	if err != nil || base.DeploymentEnvUuid != environmentUUID || base.ProjectId != deployment.ProjectId || base.EnvId != deployment.EnvId {
+		return externalDeploymentStatusResponse{}, errors.New("captured effective base is not retained with verifiable ownership")
+	}
+	rollbackVersions, err := immutableModuleVersions(base.ModuleArtifacts)
+	if err != nil {
+		return externalDeploymentStatusResponse{}, err
 	}
 	return externalDeploymentStatusResponse{
 		DeploymentID: deployment.Id, DispatchID: receipt.RequestID, OperationRef: receipt.OperationRef, Fence: receipt.Fence,
-		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
+		RequestDigest: receipt.RequestBodySHA256,
+		ProjectID:     deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 		Mode: string(deployment.Mode), Status: string(deployment.Status), StatusMessage: deployment.StatusMessage,
-		ModuleVersions: versions, CreatedAt: deployment.CreatedAt, CompletedAt: deployment.CompletedAt.Ref(), ReceiptCreatedAt: receipt.CreatedAt,
+		ModuleVersions: versions, RollbackModuleVersions: rollbackVersions,
+		CreatedAt: deployment.CreatedAt, CompletedAt: deployment.CompletedAt.Ref(), ReceiptCreatedAt: receipt.CreatedAt,
 	}, nil
 }
 
@@ -394,12 +408,20 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "project and Environment identity and module_versions are required"})
 	}
 	explicitVersions := make(map[string]string, len(body.ModuleVersions))
+	explicitTargets := make([]model.ExternalDeploymentPlanTarget, 0, len(body.ModuleVersions))
 	for moduleID, selected := range body.ModuleVersions {
 		if moduleID == "" || selected.Version == "" || selected.ModuleUUID == uuid.Nil || selected.VersionUUID == uuid.Nil || selected.ArtifactDigest == "" {
 			return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "module selections require immutable module and version identity"})
 		}
 		explicitVersions[moduleID] = selected.Version
+		explicitTargets = append(explicitTargets, model.ExternalDeploymentPlanTarget{
+			ModuleID: moduleID, ModuleUUID: selected.ModuleUUID, Version: selected.Version,
+			VersionUUID: selected.VersionUUID, SemanticVersion: selected.SemanticVersion, ArtifactDigest: selected.ArtifactDigest,
+		})
 	}
+	slices.SortFunc(explicitTargets, func(left, right model.ExternalDeploymentPlanTarget) int {
+		return strings.Compare(left.ModuleID, right.ModuleID)
+	})
 	actorID := uuid.MustParse(claims.ActorID)
 	tx, err := a.Admission.Database.BeginTx(c.Request().Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
@@ -478,7 +500,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 		OrgID: c.Param("orgId"), PluginID: c.Param("pluginId"), RequestID: claims.RequestID, ActorID: actorID,
 		RequestBodySHA256: claims.BodySHA256, ProjectID: body.ProjectID, ProjectUUID: body.ProjectUUID, EnvID: body.EnvID, EnvironmentUUID: environment.Uuid,
 		BaseDeploymentID: capture.BaseDeploymentID, Fingerprint: fingerprint, Manifest: capture.Manifest, Graph: capture.Graph,
-		Diff: capture.Diff, ModuleArtifacts: capture.ModuleArtifacts,
+		Diff: capture.Diff, ModuleArtifacts: capture.ModuleArtifacts, ExplicitTargets: explicitTargets,
 	})
 	if err != nil {
 		return a.writeInspectionError(c, err)
@@ -704,9 +726,31 @@ func sortedMapKeys[M ~map[string]V, V any](values M) []string {
 
 func deploymentPlanFingerprint(capture DeploymentPlanCapture) string {
 	hash := sha256.New()
-	_, _ = hash.Write([]byte(capture.BaseDeploymentID.String()))
-	_, _ = hash.Write(capture.Manifest)
-	_, _ = hash.Write(capture.Graph)
-	_, _ = hash.Write(capture.Diff)
+	writeFingerprintChunk := func(value []byte) {
+		var length [8]byte
+		binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write(value)
+	}
+	writeFingerprintChunk([]byte(capture.BaseDeploymentID.String()))
+	writeFingerprintChunk(canonicalFingerprintJSON(capture.Manifest))
+	writeFingerprintChunk(canonicalFingerprintJSON(capture.Graph))
+	writeFingerprintChunk(canonicalFingerprintJSON(capture.Diff))
+	artifacts, _ := json.Marshal(capture.ModuleArtifacts)
+	writeFingerprintChunk(artifacts)
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
+}
+
+func canonicalFingerprintJSON(raw []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return raw
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return canonical
 }

@@ -6,21 +6,18 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"math"
 	"mime"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
 
-	"filippo.io/age"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
-	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
 	"go.uber.org/zap"
@@ -30,46 +27,36 @@ import (
 )
 
 const (
-	ExternalDeploymentAdmissionPath         = "/orgs/:orgId/plugins/:pluginId/external-deployments"
-	maxExternalDeploymentAdmissionBodyBytes = 8 * 1024 * 1024
-	externalDeploymentInvalidRequestCode    = "invalid_request"
-	externalDeploymentCoreUnavailableCode   = "core_unavailable"
-	externalDeploymentUnavailableCode       = "external_deployment_unavailable"
-	externalDeploymentFailedCode            = "external_deployment_failed"
-	externalInvalidPluginContextCode        = "invalid_plugin_context"
-	externalInvalidPluginContextMessage     = "a valid request-bound plugin context is required"
-	externalInvalidActorMessage             = "plugin context actor is invalid"
-	externalDeploymentNotFoundCode          = "deployment_not_found"
-	externalQueryUnsupportedMessage         = "query parameters are not supported"
-	externalInvalidPathIdentityMessage      = "organization or plugin identity is invalid"
-	externalEnvironmentIdentityChangedCode  = "environment_identity_changed"
+	ExternalDeploymentAdmissionPath           = "/orgs/:orgId/plugins/:pluginId/external-deployments"
+	maxExternalDeploymentAdmissionBodyBytes   = 1 << 20
+	externalDeploymentInvalidRequestCode      = "invalid_request"
+	externalDeploymentCoreUnavailableCode     = "core_unavailable"
+	externalDeploymentUnavailableCode         = "external_deployment_unavailable"
+	externalDeploymentFailedCode              = "external_deployment_failed"
+	externalInvalidPluginContextCode          = "invalid_plugin_context"
+	externalInvalidPluginContextMessage       = "a valid request-bound plugin context is required"
+	externalInvalidActorMessage               = "plugin context actor is invalid"
+	externalDeploymentNotFoundCode            = "deployment_not_found"
+	externalQueryUnsupportedMessage           = "query parameters are not supported"
+	externalInvalidPathIdentityMessage        = "organization or plugin identity is invalid"
+	externalEnvironmentIdentityChangedCode    = "environment_identity_changed"
+	externalEnvironmentIdentityChangedMessage = "authorized Environment identity is no longer current"
 )
 
-var externalPluginIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+var (
+	externalPluginIDPattern        = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+	externalPlanFingerprintPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+)
 
 type ExternalDeploymentHTTPAdapter struct {
 	Issuer             string
 	VerificationKey    ed25519.PublicKey
 	Admission          ExternalDeploymentAdmissionService
+	Materials          ExternalOperationMaterialService
 	ControlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
 	EventPublisher     hmessaging.Publisher
 	Logger             *zap.Logger
 	Now                func() time.Time
-}
-
-// ExternalDeploymentAdmissionBody binds a normal Deployment request to one
-// Core-owned business operation and fencing generation.
-type ExternalDeploymentAdmissionBody struct {
-	OperationRef string               `json:"operation_ref"`
-	Fence        uint64               `json:"fence"`
-	Deployment   DeploymentCreateBody `json:"deployment"`
-}
-
-// ExternalDeploymentAdmissionResponse returns the ordinary Deployment identity
-// and whether the durable external-operation receipt was replayed.
-type ExternalDeploymentAdmissionResponse struct {
-	DeploymentID uuid.UUID `json:"deployment_id"`
-	Replayed     bool      `json:"replayed"`
 }
 
 type externalDeploymentErrorResponse struct {
@@ -78,7 +65,7 @@ type externalDeploymentErrorResponse struct {
 }
 
 func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
-	if err := a.validateConfiguration(); err != nil {
+	if err := a.validateAdmissionConfiguration(); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment admission is unavailable"})
 	}
 	request := c.Request()
@@ -131,17 +118,16 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	if err := decoder.Decode(&body); err != nil || requireJSONEOF(decoder) != nil {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "request body must be one strict JSON object"})
 	}
-	operationID, err := uuid.Parse(body.OperationRef)
-	if err != nil || operationID == uuid.Nil || body.Fence == 0 || body.Fence > math.MaxInt64 {
+	if body.OperationRef == uuid.Nil || body.Fence <= 0 {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "operation_ref must be a UUID and fence must be a positive signed 64-bit generation"})
 	}
-	mode, serviceAction, manifest, err := prepareExternalDeployment(body.Deployment)
+	mode, serviceAction, err := validateExternalDeploymentBody(body)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_deployment", Message: err.Error()})
 	}
 
 	environmentResponse, err := a.ControlPlaneClient.GetEnvironmentWithResponse(
-		request.Context(), orgID, body.Deployment.ProjectId, body.Deployment.EnvId,
+		request.Context(), orgID, body.ProjectId, body.EnvId,
 	)
 	if err != nil {
 		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core environment lookup is unavailable"})
@@ -153,32 +139,29 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core environment lookup did not return an authoritative target"})
 	}
 	environment := *environmentResponse.JSON200
-	if environment.ProjectId != body.Deployment.ProjectId || environment.Id != body.Deployment.EnvId {
-		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core environment lookup returned mismatched ownership"})
+	if environment.ProjectId != body.ProjectId || environment.Id != body.EnvId ||
+		*environment.ProjectUuid != body.ProjectUuid || environment.Uuid != body.EnvironmentUuid {
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: externalEnvironmentIdentityChangedMessage})
 	}
 
 	admissionRequest := ExternalDeploymentAdmissionRequest{
 		Claims:        claims,
-		OperationRef:  operationID.String(),
-		Fence:         int64(body.Fence),
+		OperationRef:  body.OperationRef.String(),
+		Fence:         body.Fence,
 		ServiceAction: serviceAction,
-		ProjectUUID:   *environment.ProjectUuid,
-		EnvUUID:       environment.Uuid,
-		ProjectID:     body.Deployment.ProjectId,
-		EnvID:         body.Deployment.EnvId,
-		Create: func(ctx context.Context, tx model.Tx, actorID uuid.UUID) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, error) {
-			deployment, pending, _, err := CreateDeploymentWithOptions(
-				ctx, a.logger(), actorID, orgID, body.Deployment.ProjectId, body.Deployment.EnvId,
-				environment, mode, opt.OfRef(body.Deployment.RollbackToDeploymentId), manifest,
-				body.Deployment.EncryptedOutputsRecipient, body.Deployment.EncryptedLogsRecipient, nil,
-				false, body.Deployment.RunnerLogLevel, a.ControlPlaneClient, a.Admission.Database, tx,
-				DeploymentOptions{
-					ExplicitModuleVersions:  body.Deployment.ModuleVersions,
-					RestrictedConfirmations: body.Deployment.ConfirmRestrictedModuleVersionUuids,
-					AuthorizeModuleVersion:  func(string, bool, catalogueArtifact) error { return nil },
-				},
-			)
-			return deployment, pending, err
+		ProjectUUID:   body.ProjectUuid,
+		EnvUUID:       body.EnvironmentUuid,
+		ProjectID:     body.ProjectId,
+		EnvID:         body.EnvId,
+		Create: func(ctx context.Context, tx model.Tx, actorID uuid.UUID) (*ExternalDeploymentCreation, error) {
+			material, err := a.Materials.GetOrCreate(ctx, tx, orgID, pluginID, body.OperationRef)
+			if err != nil {
+				return nil, errors.Join(ErrExternalDeploymentUnavailable, err)
+			}
+			if mode == model.DeploymentModeDeploy {
+				return a.createExternalDeploymentFromSnapshot(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient)
+			}
+			return a.createExternalRollback(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient)
 		},
 	}
 	result, err := a.Admission.Admit(request.Context(), admissionRequest)
@@ -192,13 +175,23 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 	if result.Replayed {
 		status = http.StatusOK
 	}
-	return c.JSON(status, ExternalDeploymentAdmissionResponse{DeploymentID: result.Deployment.Id, Replayed: result.Replayed})
+	return c.JSON(status, ExternalDeploymentAdmissionResponse{DeploymentId: result.Deployment.Id, Replayed: result.Replayed})
 }
 
 func (a *ExternalDeploymentHTTPAdapter) validateConfiguration() error {
 	if a == nil || a.Issuer == "" || len(a.VerificationKey) != ed25519.PublicKeySize ||
 		a.Admission.Database == nil || a.Admission.Authorizer == nil || a.ControlPlaneClient == nil || a.EventPublisher == nil {
 		return errors.New("external deployment HTTP adapter is not configured")
+	}
+	return nil
+}
+
+func (a *ExternalDeploymentHTTPAdapter) validateAdmissionConfiguration() error {
+	if err := a.validateConfiguration(); err != nil {
+		return err
+	}
+	if a.Materials.Vault == nil {
+		return errors.New("external deployment material service is not configured")
 	}
 	return nil
 }
@@ -222,7 +215,7 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 		return c.JSON(http.StatusForbidden, externalDeploymentErrorResponse{Error: "external_operation_not_authorized", Message: "Core did not authorize this deployment dispatch"})
 	}
 	if errors.Is(err, ErrExternalDeploymentUnavailable) {
-		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core operation authorization is unavailable"})
+		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "an authoritative external deployment dependency is unavailable"})
 	}
 	if badRequest, ok := model.IsErrBadRequest(err); ok {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_deployment", Message: badRequest.Message})
@@ -234,73 +227,186 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 	return c.JSON(http.StatusInternalServerError, externalDeploymentErrorResponse{Error: externalDeploymentFailedCode, Message: "external deployment admission failed"})
 }
 
-func prepareExternalDeployment(body DeploymentCreateBody) (model.DeploymentMode, string, DeploymentManifest, error) {
-	if body.IsDryRun || (body.PlanOnly != nil && *body.PlanOnly) || body.Mode == DeploymentCreateBodyModePlanOnly {
-		return "", "", DeploymentManifest{}, errors.New("dry-run and plan-only requests use the separate planning contract")
+func validateExternalDeploymentBody(body ExternalDeploymentAdmissionBody) (model.DeploymentMode, string, error) {
+	if body.ProjectId == "" || body.EnvId == "" || body.ProjectUuid == uuid.Nil || body.EnvironmentUuid == uuid.Nil {
+		return "", "", errors.New("project and Environment identities are required")
 	}
-	if body.ProjectId == "" || body.EnvId == "" {
-		return "", "", DeploymentManifest{}, errors.New("project_id and env_id are required")
+	if body.RunnerLogLevel != nil && !body.RunnerLogLevel.Valid() {
+		return "", "", errors.New("runner_log_level is invalid")
 	}
-	if body.EncryptedOutputsRecipient != nil {
-		if _, err := age.ParseX25519Recipient(*body.EncryptedOutputsRecipient); err != nil {
-			return "", "", DeploymentManifest{}, errors.New("encrypted_outputs_recipient is not a valid age X25519 recipient")
-		}
-	}
-	if body.EncryptedLogsRecipient != nil {
-		if _, err := age.ParseX25519Recipient(*body.EncryptedLogsRecipient); err != nil {
-			return "", "", DeploymentManifest{}, errors.New("encrypted_logs_recipient is not a valid age X25519 recipient")
-		}
-	}
-
 	switch body.Mode {
-	case DeploymentCreateBodyModeDeploy:
-		if body.Manifest == nil {
-			return "", "", DeploymentManifest{}, errors.New("manifest is required for a deploy request")
+	case ExternalDeploymentAdmissionBodyModeDeploy:
+		if body.Plan == nil || body.Rollback != nil || body.Plan.SnapshotId == uuid.Nil ||
+			!externalPlanFingerprintPattern.MatchString(body.Plan.Fingerprint) ||
+			len(body.Plan.ExpectedModuleVersions) == 0 || len(body.Plan.ExpectedModuleVersions) > 1000 {
+			return "", "", errors.New("deploy requires one valid immutable plan and no rollback reference")
 		}
-		if body.RollbackToDeploymentId != nil {
-			return "", "", DeploymentManifest{}, errors.New("rollback_to_deployment_id is not valid for a deploy request")
+		for moduleRef, version := range body.Plan.ExpectedModuleVersions {
+			moduleID, err := uuid.Parse(moduleRef)
+			if err != nil || moduleID == uuid.Nil || version == uuid.Nil {
+				return "", "", errors.New("expected_module_versions must map Module UUIDs to Version UUIDs")
+			}
 		}
-		manifest := *body.Manifest
-		if err := normalizeExternalDeploymentManifest(&manifest); err != nil {
-			return "", "", DeploymentManifest{}, err
+		return model.DeploymentModeDeploy, ExternalDeploymentAction, nil
+	case ExternalDeploymentAdmissionBodyModeRollback:
+		if body.Rollback == nil || body.Plan != nil || body.Rollback.ForwardDeploymentId == uuid.Nil {
+			return "", "", errors.New("rollback requires one forward deployment reference and no plan")
 		}
-		return model.DeploymentModeDeploy, ExternalDeploymentAction, manifest, nil
-	case DeploymentCreateBodyModeRollback:
-		if body.Manifest != nil {
-			return "", "", DeploymentManifest{}, errors.New("manifest is not valid for a rollback request")
-		}
-		if body.RollbackToDeploymentId == nil || *body.RollbackToDeploymentId == uuid.Nil {
-			return "", "", DeploymentManifest{}, errors.New("rollback_to_deployment_id is required for a rollback request")
-		}
-		if len(body.ModuleVersions) != 0 {
-			return "", "", DeploymentManifest{}, errors.New("module_versions are not valid for a rollback request")
-		}
-		return model.DeploymentModeRollback, ExternalDeploymentRollbackAction, DeploymentManifest{}, nil
+		return model.DeploymentModeRollback, ExternalDeploymentRollbackAction, nil
 	default:
-		return "", "", DeploymentManifest{}, errors.New("mode must be deploy or rollback")
+		return "", "", errors.New("mode must be deploy or rollback")
 	}
 }
 
-func normalizeExternalDeploymentManifest(manifest *DeploymentManifest) error {
-	for name, workload := range manifest.Workloads {
-		if !validWorkloadNamePattern.MatchString(name) {
-			return fmt.Errorf("workload name %q is invalid", name)
-		}
-		if workload.Variables != nil {
-			if workload.Outputs != nil {
-				return errors.New("variables and outputs cannot be used together, use outputs")
-			}
-			workload.Outputs = workload.Variables
-			workload.Variables = nil
-			manifest.Workloads[name] = workload
-		}
+func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
+	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
+	environment platformorchestratorcp.Environment, recipient string,
+) (*ExternalDeploymentCreation, error) {
+	snapshot, err := model.GetExternalDeploymentPlanSnapshotByID(ctx, tx, orgID, pluginID, body.Plan.SnapshotId)
+	if err != nil {
+		return nil, err
 	}
-	for alias := range manifest.Shared {
-		if !validSharedAliasPattern.MatchString(alias) {
-			return fmt.Errorf("shared resource alias %q is invalid", alias)
-		}
+	if snapshot.ActorID != actorID || snapshot.ProjectID != body.ProjectId || snapshot.ProjectUUID != body.ProjectUuid ||
+		snapshot.EnvID != body.EnvId || snapshot.EnvironmentUUID != body.EnvironmentUuid || snapshot.Fingerprint != body.Plan.Fingerprint ||
+		deploymentPlanFingerprint(DeploymentPlanCapture{
+			BaseDeploymentID: snapshot.BaseDeploymentID, Manifest: snapshot.Manifest, Graph: snapshot.Graph,
+			Diff: snapshot.Diff, ModuleArtifacts: snapshot.ModuleArtifacts,
+		}) != snapshot.Fingerprint {
+		return nil, model.NewErrConflict("external deployment plan snapshot identity or content changed")
 	}
-	return nil
+	explicitVersions := make(map[string]string, len(snapshot.ExplicitTargets))
+	expectedVersions := make(map[string]uuid.UUID, len(snapshot.ExplicitTargets))
+	targetsByModuleID := make(map[string]model.ExternalDeploymentPlanTarget, len(snapshot.ExplicitTargets))
+	for _, target := range snapshot.ExplicitTargets {
+		if target.ModuleID == "" || target.ModuleUUID == uuid.Nil || target.Version == "" || target.VersionUUID == uuid.Nil || target.ArtifactDigest == "" {
+			return nil, model.NewErrConflict("external deployment plan has incomplete target identity")
+		}
+		moduleRef := target.ModuleUUID.String()
+		if _, duplicate := expectedVersions[moduleRef]; duplicate {
+			return nil, model.NewErrConflict("external deployment plan repeats a Module identity")
+		}
+		explicitVersions[target.ModuleID] = target.Version
+		expectedVersions[moduleRef] = target.VersionUUID
+		targetsByModuleID[target.ModuleID] = target
+	}
+	if !reflect.DeepEqual(expectedVersions, body.Plan.ExpectedModuleVersions) {
+		return nil, model.NewErrConflict("external deployment target versions differ from the immutable plan")
+	}
+	var manifest DeploymentManifest
+	if err := json.Unmarshal(snapshot.Manifest, &manifest); err != nil {
+		return nil, errors.New("external deployment plan manifest is invalid")
+	}
+	deployment, pending, _, err := CreateDeploymentWithOptions(
+		ctx, a.logger(), actorID, orgID, body.ProjectId, body.EnvId, environment,
+		model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), manifest, &recipient, &recipient, nil, false,
+		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
+		DeploymentOptions{
+			ExplicitModuleVersions: explicitVersions,
+			AuthorizeModuleVersion: func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error {
+				if !explicitlySelected {
+					return nil
+				}
+				target, expected := targetsByModuleID[moduleID]
+				if !expected {
+					return model.NewErrConflict("resolved Module target was not present in the immutable plan")
+				}
+				if artifact.ModuleUUID != target.ModuleUUID || artifact.VersionUUID != target.VersionUUID ||
+					artifact.SemanticVersion != target.SemanticVersion || artifact.Digest != target.ArtifactDigest {
+					return model.NewErrConflict("resolved Module target differs from the immutable plan")
+				}
+				return nil
+			},
+			ValidatePlan: func(captured DeploymentPlanCapture) error {
+				if captured.BaseDeploymentID != snapshot.BaseDeploymentID || deploymentPlanFingerprint(captured) != snapshot.Fingerprint ||
+					!reflect.DeepEqual(captured.ModuleArtifacts, snapshot.ModuleArtifacts) {
+					return model.NewErrConflict("current deployment plan differs from the immutable snapshot")
+				}
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ExternalDeploymentCreation{
+		Deployment: deployment, PendingEvents: pending, PlanSnapshotID: opt.Of(snapshot.ID), BaseDeploymentID: opt.Of(snapshot.BaseDeploymentID),
+	}, nil
+}
+
+func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
+	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
+	environment platformorchestratorcp.Environment, recipient string,
+) (*ExternalDeploymentCreation, error) {
+	forwardReceipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, body.Rollback.ForwardDeploymentId)
+	if err != nil {
+		return nil, model.NewErrConflict("forward external deployment receipt was not found")
+	}
+	if forwardReceipt.OperationRef != body.OperationRef.String() || forwardReceipt.ServiceAction != ExternalDeploymentAction ||
+		forwardReceipt.ProjectID != body.ProjectId || forwardReceipt.EnvID != body.EnvId ||
+		!forwardReceipt.ProjectUUID.IsSet() || forwardReceipt.ProjectUUID.Must() != body.ProjectUuid ||
+		!forwardReceipt.EnvironmentUUID.IsSet() || forwardReceipt.EnvironmentUUID.Must() != body.EnvironmentUuid ||
+		!forwardReceipt.BaseDeploymentID.IsSet() {
+		return nil, model.NewErrConflict("forward deployment is outside this external operation or lacks a captured base")
+	}
+	forward, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, body.Rollback.ForwardDeploymentId, model.GetModeDefault)
+	if err != nil || forward.Mode != model.DeploymentModeDeploy || forward.Status != model.DeploymentStatusSucceeded || forward.DeploymentEnvUuid != body.EnvironmentUuid {
+		return nil, model.NewErrConflict("forward deployment is not a succeeded Deployment in this Environment")
+	}
+	baseID := forwardReceipt.BaseDeploymentID.Must()
+	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, baseID, model.GetModeDefault)
+	if err != nil || base.Status != model.DeploymentStatusSucceeded || base.DeploymentEnvUuid != body.EnvironmentUuid || base.ProjectId != body.ProjectId || base.EnvId != body.EnvId {
+		return nil, model.NewErrConflict("captured rollback base is not retained as a succeeded Deployment")
+	}
+	expectedVersions, err := immutableModuleVersions(base.ModuleArtifacts)
+	if err != nil {
+		return nil, err
+	}
+	confirmations := make([]uuid.UUID, 0, len(base.ModuleArtifacts))
+	for _, artifact := range base.ModuleArtifacts {
+		confirmations = append(confirmations, artifact.VersionUUID)
+	}
+	deployment, pending, _, err := CreateDeploymentWithOptions(
+		ctx, a.logger(), actorID, orgID, body.ProjectId, body.EnvId, environment,
+		model.DeploymentModeRollback, opt.Of(baseID), DeploymentManifest{}, &recipient, &recipient, nil, false,
+		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
+		DeploymentOptions{
+			RestrictedConfirmations: confirmations,
+			ValidatePlan: func(captured DeploymentPlanCapture) error {
+				versions, versionErr := immutableModuleVersions(captured.ModuleArtifacts)
+				if versionErr != nil || captured.BaseDeploymentID != baseID || !reflect.DeepEqual(versions, expectedVersions) {
+					return model.NewErrConflict("rollback resolution differs from the captured effective base")
+				}
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ExternalDeploymentCreation{Deployment: deployment, PendingEvents: pending, BaseDeploymentID: opt.Of(baseID)}, nil
+}
+
+func externalRunnerLogLevel(level *ExternalDeploymentAdmissionBodyRunnerLogLevel) *DeploymentCreateBodyRunnerLogLevel {
+	if level == nil {
+		return nil
+	}
+	converted := DeploymentCreateBodyRunnerLogLevel(*level)
+	return &converted
+}
+
+func immutableModuleVersions(artifacts []model.ModuleArtifactRequirement) (map[string]uuid.UUID, error) {
+	versions := make(map[string]uuid.UUID, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil {
+			return nil, model.NewErrConflict("Deployment lacks immutable Module Version identity")
+		}
+		key := artifact.ModuleUUID.String()
+		if prior, duplicate := versions[key]; duplicate && prior != artifact.VersionUUID {
+			return nil, model.NewErrConflict("Deployment contains conflicting Module Version identities")
+		}
+		versions[key] = artifact.VersionUUID
+	}
+	return versions, nil
 }
 
 func validExternalPathIdentity(orgID, pluginID string) bool {
