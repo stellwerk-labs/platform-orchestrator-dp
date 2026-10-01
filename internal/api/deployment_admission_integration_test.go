@@ -191,7 +191,7 @@ func TestOrdinaryDeploymentAdmissionUsesExactCoreGuardAndRecoversUnknownOutcome(
 	require.Equal(t, deployment.Id, unchanged.DeploymentID.UUID)
 	require.NoError(t, unchangedTx.Commit())
 
-	unknown := service.NewAttempt(orgID, projectUUID, environmentUUID, actorID, model.DeploymentModeRollback, "unknown-response")
+	unknown := service.NewAttempt(orgID, projectUUID, environmentUUID, actorID, model.DeploymentModeRollback, "")
 	unknownTx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	err = unknown.Authorize(ctx, unknownTx, artifacts, compiled)
@@ -223,14 +223,16 @@ func TestOrdinaryDeploymentAdmissionUsesExactCoreGuardAndRecoversUnknownOutcome(
 	require.NoError(t, permissionLost.SealAbsent(ctx))
 	assertSealedAdmission(t, ctx, store, orgID, permissionLost.AdmissionID, 22)
 
-	crashed := service.NewAttempt(orgID, projectUUID, environmentUUID, actorID, model.DeploymentModeDeploy, "crashed-request")
+	crashed := service.NewAttempt(orgID, projectUUID, environmentUUID, actorID, model.DeploymentModeDeploy, "")
 	crashedTx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	err = crashed.Authorize(ctx, crashedTx, artifacts, compiled)
 	require.ErrorIs(t, err, ErrDeploymentAdmissionUnavailable)
 	require.NoError(t, crashedTx.Rollback())
 	backdateAdmissionReceipt(t, ctx, store, orgID, crashed.AdmissionID)
-	require.NoError(t, service.ReconcileUnsettled(ctx, 100))
+	restarted, err := NewOrdinaryDeploymentAdmissionService(store, core.URL, tokenFile, core.Client())
+	require.NoError(t, err)
+	require.NoError(t, restarted.ReconcileUnsettled(ctx, 100))
 	assertSealedAdmission(t, ctx, store, orgID, crashed.AdmissionID, 22)
 }
 
