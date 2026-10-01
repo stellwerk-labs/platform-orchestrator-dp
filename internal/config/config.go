@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Configuration ...
 type Configuration struct {
@@ -39,6 +42,9 @@ type Configuration struct {
 	PluginCoreURL       string `env:"EXTERNAL_DEPLOYMENT_CORE_GATEWAY_URL"`
 	PluginCoreTokenFile string `env:"EXTERNAL_DEPLOYMENT_CORE_BEARER_TOKEN_FILE"`
 
+	DeploymentAdmissionCoreURL       string `env:"DEPLOYMENT_ADMISSION_CORE_GATEWAY_URL"`
+	DeploymentAdmissionCoreTokenFile string `env:"DEPLOYMENT_ADMISSION_CORE_BEARER_TOKEN_FILE"`
+
 	// IamUrl is the internal url for the platform-orchestrator-iam service
 	IamUrl string `env:"IAM_URL" validate:"required,url"`
 
@@ -60,4 +66,13 @@ type Configuration struct {
 	OidcIssuerUrl string `env:"OIDC_ISSUER_URL" validate:"omitempty,url"`
 
 	MetadataOutputKey string `env:"METADATA_KEY, default=platform_orchestrator_metadata"`
+}
+
+func (c Configuration) DeploymentAdmissionConfigured() (bool, error) {
+	hasURL := c.DeploymentAdmissionCoreURL != ""
+	hasToken := c.DeploymentAdmissionCoreTokenFile != ""
+	if hasURL != hasToken {
+		return false, errors.New("deployment admission requires both Core gateway URL and service bearer token file")
+	}
+	return hasURL, nil
 }

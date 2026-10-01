@@ -863,23 +863,26 @@ type ExternalDeploymentReadinessResponse struct {
 
 // ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
 type ExternalDeploymentStatusResponse struct {
-	CompletedAt            *time.Time                             `json:"completed_at,omitempty"`
-	CreatedAt              time.Time                              `json:"created_at"`
-	DeploymentId           openapi_types.UUID                     `json:"deployment_id"`
-	DispatchId             string                                 `json:"dispatch_id"`
-	EnvId                  string                                 `json:"env_id"`
-	EnvironmentUuid        openapi_types.UUID                     `json:"environment_uuid"`
-	Fence                  int64                                  `json:"fence"`
-	Mode                   ExternalDeploymentStatusResponseMode   `json:"mode"`
-	ModuleVersions         map[string]openapi_types.UUID          `json:"module_versions"`
-	OperationRef           openapi_types.UUID                     `json:"operation_ref"`
-	ProjectId              string                                 `json:"project_id"`
-	ProjectUuid            openapi_types.UUID                     `json:"project_uuid"`
-	ReceiptCreatedAt       time.Time                              `json:"receipt_created_at"`
-	RequestDigest          string                                 `json:"request_digest"`
-	RollbackModuleVersions map[string]openapi_types.UUID          `json:"rollback_module_versions"`
-	Status                 ExternalDeploymentStatusResponseStatus `json:"status"`
-	StatusMessage          string                                 `json:"status_message"`
+	CompletedAt            *time.Time                           `json:"completed_at,omitempty"`
+	CreatedAt              time.Time                            `json:"created_at"`
+	DeploymentId           openapi_types.UUID                   `json:"deployment_id"`
+	DispatchId             string                               `json:"dispatch_id"`
+	EnvId                  string                               `json:"env_id"`
+	EnvironmentUuid        openapi_types.UUID                   `json:"environment_uuid"`
+	Fence                  int64                                `json:"fence"`
+	Mode                   ExternalDeploymentStatusResponseMode `json:"mode"`
+	ModuleVersions         map[string]openapi_types.UUID        `json:"module_versions"`
+	OperationRef           openapi_types.UUID                   `json:"operation_ref"`
+	ProjectId              string                               `json:"project_id"`
+	ProjectUuid            openapi_types.UUID                   `json:"project_uuid"`
+	ReceiptCreatedAt       time.Time                            `json:"receipt_created_at"`
+	RequestDigest          string                               `json:"request_digest"`
+	RollbackModuleVersions map[string]openapi_types.UUID        `json:"rollback_module_versions"`
+
+	// RollbackModules Immutable metadata projected from the retained effective-base Deployment.
+	RollbackModules *[]ExternalModuleInventory             `json:"rollback_modules,omitempty"`
+	Status          ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage   string                                 `json:"status_message"`
 }
 
 // ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.

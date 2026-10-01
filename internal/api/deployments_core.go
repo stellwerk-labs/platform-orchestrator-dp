@@ -86,6 +86,8 @@ type DeploymentOptions struct {
 	AuthorizeModuleVersion      func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
 	ReuseLastSuccessfulManifest bool
 	IgnoreEnvironmentPins       bool
+	RequireExistingRunner       bool
+	Admission                   *OrdinaryDeploymentAdmissionAttempt
 	CapturePlan                 *DeploymentPlanCapture
 	ValidatePlan                func(DeploymentPlanCapture) error
 }
@@ -116,7 +118,7 @@ func CreateDeploymentWithOptions(
 		return nil, nil, nil, errors.Errorf("manifest should be empty on destroy or rollback deployments")
 	}
 
-	if env.RunnerId == nil && dryRun {
+	if env.RunnerId == nil && options.RequireExistingRunner {
 		return nil, nil, nil, model.NewErrConflict("environment has no assigned runner for planning")
 	}
 	if env.RunnerId == nil {
@@ -411,6 +413,21 @@ func CreateDeploymentWithOptions(
 			}
 		}
 	}
+	carryForwardVersions, confirmedRestrictedVersions := deploymentAdmissionLifecycleEvidence(mode, activeDefinitions, deploymentArtifacts)
+	if options.Admission != nil {
+		if err := options.Admission.Authorize(ctx, tx, deploymentArtifacts, ordinaryDeploymentCompiledIntent{
+			ProjectID: projectId, EnvironmentID: envId, RunnerID: runner.Id,
+			EffectiveBaseDeploymentID: lastDeploymentId,
+			RollbackToDeploymentID:    uuid.NullUUID{UUID: rollbackTo.Or(uuid.Nil), Valid: rollbackTo.IsSet()},
+			Manifest:                  rawManifest, Graph: rawNewGraph, Tofu: rawTofu,
+			EncryptedOutputsRecipient:  ref.DerefOr(encryptedOutputsRecipient, ""),
+			EncryptedLogsRecipient:     ref.DerefOr(encryptedLogsRecipient, ""),
+			RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+			CarryForwardModuleVersions: carryForwardVersions, ConfirmedRestrictedVersionUUIDs: confirmedRestrictedVersions,
+		}); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	if options.CapturePlan != nil || options.ValidatePlan != nil {
 		rawDiff, err := json.Marshal(diff)
 		if err != nil {
@@ -472,6 +489,9 @@ func CreateDeploymentWithOptions(
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
 	}
+	if err := options.Admission.Bind(ctx, tx, d.Id); err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to bind Deployment admission receipt")
+	}
 	diff.ToDeploymentId = ref.Ref(d.Id)
 
 	if d.Mode != model.DeploymentModeDeployPlan {
@@ -505,6 +525,30 @@ func CreateDeploymentWithOptions(
 	)
 
 	return d, messages, &diff, nil
+}
+
+func deploymentAdmissionLifecycleEvidence(mode model.DeploymentMode, activeDefinitions []string, artifacts []model.ModuleArtifactRequirement) (map[string]uuid.UUID, []uuid.UUID) {
+	carryForwardVersions := make(map[string]uuid.UUID)
+	confirmedRestrictedVersions := make([]uuid.UUID, 0)
+	if mode == model.DeploymentModeDestroy {
+		return carryForwardVersions, confirmedRestrictedVersions
+	}
+	activeCoordinates := make(map[string]struct{}, len(activeDefinitions))
+	for _, coordinate := range activeDefinitions {
+		activeCoordinates[coordinate] = struct{}{}
+	}
+	for _, artifact := range artifacts {
+		if _, carriedForward := activeCoordinates[artifact.ModuleID+"@"+artifact.Version]; carriedForward {
+			carryForwardVersions[artifact.ModuleUUID.String()] = artifact.VersionUUID
+		}
+		if artifact.ConfirmedRestrictedVersionUUID != nil {
+			confirmedRestrictedVersions = append(confirmedRestrictedVersions, *artifact.ConfirmedRestrictedVersionUUID)
+		}
+	}
+	slices.SortFunc(confirmedRestrictedVersions, func(a, b uuid.UUID) int {
+		return strings.Compare(a.String(), b.String())
+	})
+	return carryForwardVersions, confirmedRestrictedVersions
 }
 
 func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid.UUID) string {

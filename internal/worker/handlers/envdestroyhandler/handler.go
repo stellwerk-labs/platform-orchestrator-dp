@@ -39,19 +39,21 @@ var BranchPattern = regexp.MustCompile(regexp.QuoteMeta(string(cpevents.IoPlatfo
 // If the env is deleting, we want to check if the env has state, if it does, then we destroy it, if it doesn't, we force delete
 // the env from the CP. If the destroy fails, we update the CP env to destroy_failed so the user can retrigger it later.
 type EnvDestroyHandler struct {
-	cpClient platformorchestratorcp.ClientWithResponsesInterface
-	db       model.Databaser
-	pub      hmessaging.Publisher
-	logDel   runners.RunnerLogsDeleter
+	cpClient   platformorchestratorcp.ClientWithResponsesInterface
+	db         model.Databaser
+	pub        hmessaging.Publisher
+	logDel     runners.RunnerLogsDeleter
+	admissions *api.OrdinaryDeploymentAdmissionService
 }
 
 // New is the constructor so that we don't miss new arguments.
-func New(cpClient platformorchestratorcp.ClientWithResponsesInterface, db model.Databaser, pub hmessaging.Publisher, logDel runners.RunnerLogsDeleter) *EnvDestroyHandler {
+func New(cpClient platformorchestratorcp.ClientWithResponsesInterface, db model.Databaser, pub hmessaging.Publisher, logDel runners.RunnerLogsDeleter, admissions *api.OrdinaryDeploymentAdmissionService) *EnvDestroyHandler {
 	return &EnvDestroyHandler{
-		cpClient: cpClient,
-		db:       db,
-		pub:      pub,
-		logDel:   logDel,
+		cpClient:   cpClient,
+		db:         db,
+		pub:        pub,
+		logDel:     logDel,
+		admissions: admissions,
 	}
 }
 
@@ -178,12 +180,20 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 
 	logger.Info("launching destroy deployment")
 	// TODO: implement encrypted logs logic also on destroy
-	newDep, messages, _, err := api.CreateDeployment(
+	attempt := h.admissions.NewAttempt(
+		orgId, ref.DerefOr(env.ProjectUuid, uuid.Nil), env.Uuid, userid.InternalSystemUuid, model.DeploymentModeDestroy,
+		dep.Id.String(),
+	)
+	newDep, messages, _, err := api.CreateDeploymentWithOptions(
 		ctx, logger, userid.InternalSystemUuid, orgId, projectId, envId, env, model.DeploymentModeDestroy, opt.Empty[uuid.UUID](),
 		api.DeploymentManifest{Workloads: map[string]api.DeploymentManifestWorkload{}}, nil, nil, nil, false, nil,
-		h.cpClient, h.db, tx,
+		h.cpClient, h.db, tx, api.DeploymentOptions{Admission: attempt},
 	)
 	if err != nil {
+		_ = tx.Rollback()
+		if sealErr := attempt.SealAbsent(ctx); sealErr != nil {
+			return errors.Wrap(sealErr, "failed to seal absent destroy admission")
+		}
 		if me, ok := model.IsErrBadRequest(err); ok {
 			return h.updateEnvStatus(ctx, logger, orgId, projectId, envId, platformorchestratorcp.InternalUpdateEnvironmentJSONRequestBody{
 				Status:        ref.Ref(platformorchestratorcp.EnvironmentStatusDeleteFailed),
@@ -198,6 +208,10 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 		return errors.Wrap(err, "failed to create deployment")
 	}
 	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		if sealErr := attempt.SealAbsent(ctx); sealErr != nil {
+			return errors.Wrap(sealErr, "failed to seal absent destroy admission after commit failure")
+		}
 		return errors.Wrap(err, "failed to commit transaction")
 	}
 	logger = logger.With(logging.ZapDeploymentId(newDep.Id.String()))

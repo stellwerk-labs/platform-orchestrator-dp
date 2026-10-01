@@ -23,6 +23,7 @@ func MockServer(t *testing.T) (*echo.Echo, *Server, func()) {
 		AppName:          "test",
 		Logger:           zaptest.NewLogger(t),
 		OpenAPIRawSchema: MustDecodeOpenApiSpec(),
+		OpenAPISkipperFn: SkipGeneratedOpenAPIValidation,
 	})
 	db := mockmodel.NewMockDatabaser(ctrl)
 	tx := mockmodel.NewMockTxWithCommit(ctrl)

@@ -45,6 +45,27 @@ type Server struct {
 	IamClient                platformorchestratoriam.ClientWithResponsesInterface
 	RunnerLogsReader         RunnerLogsReader
 	ExternalDeployments      *ExternalDeploymentHTTPAdapter
+	DeploymentAdmissions     *OrdinaryDeploymentAdmissionService
+}
+
+// SkipGeneratedOpenAPIValidation excludes only the manually registered generic
+// external-deployment adapters. Their generated operations are intentionally
+// omitted from StrictServerInterface because authentication verifies the exact
+// request bytes before decoding. Each adapter performs its own strict decode.
+func SkipGeneratedOpenAPIValidation(c echo.Context) bool {
+	switch c.Path() {
+	case "/alive", "/health", "/internal/actions/flush-pending-messages",
+		ExternalDeploymentAdmissionPath,
+		ExternalDeploymentReadinessPath,
+		ExternalDeploymentPlanningPath,
+		ExternalDeploymentReadPath,
+		ExternalDeploymentDispatchReadPath,
+		ExternalDeploymentLogsPath,
+		ExternalDeploymentOutputsPath:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) MapRoutes(e *echo.Echo) {

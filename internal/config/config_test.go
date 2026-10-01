@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -54,4 +55,30 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 		RunnerCommandTTL:                   24 * time.Hour,
 		MetadataOutputKey:                  "platform_orchestrator_metadata",
 	}, cfg)
+}
+
+func TestDeploymentAdmissionConfigurationIsPaired(t *testing.T) {
+	credentialFile := filepath.Join(t.TempDir(), "service-credential")
+	tests := []struct {
+		name    string
+		config  Configuration
+		enabled bool
+		wantErr bool
+	}{
+		{name: "disabled"},
+		{name: "enabled", config: Configuration{DeploymentAdmissionCoreURL: "https://gateway.example.test", DeploymentAdmissionCoreTokenFile: credentialFile}, enabled: true},
+		{name: "URL only", config: Configuration{DeploymentAdmissionCoreURL: "https://gateway.example.test"}, wantErr: true},
+		{name: "token only", config: Configuration{DeploymentAdmissionCoreTokenFile: credentialFile}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			enabled, err := test.config.DeploymentAdmissionConfigured()
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.enabled, enabled)
+		})
+	}
 }

@@ -2188,6 +2188,7 @@
           },
           "module_versions": {
             "type": "object",
+            "maxProperties": 1000,
             "additionalProperties": {
               "type": "string",
               "format": "uuid"
@@ -2195,9 +2196,18 @@
           },
           "rollback_module_versions": {
             "type": "object",
+            "maxProperties": 1000,
             "additionalProperties": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          "rollback_modules": {
+            "type": "array",
+            "maxItems": 1000,
+            "description": "Immutable metadata projected from the retained effective-base Deployment.",
+            "items": {
+              "$ref": "#/components/schemas/ExternalModuleInventory"
             }
           },
           "created_at": {

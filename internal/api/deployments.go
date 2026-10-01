@@ -18,6 +18,7 @@ import (
 	"filippo.io/age"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/stellwerk-labs/golib/herrors"
 	"github.com/stellwerk-labs/golib/hlogger"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
@@ -290,6 +291,12 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 			ExplicitModuleVersions:  request.Body.ModuleVersions,
 			RestrictedConfirmations: request.Body.ConfirmRestrictedModuleVersionUuids,
 		}
+		if !request.Body.IsDryRun && model.RequiresEnvironmentLease(modelMode) {
+			options.Admission = s.DeploymentAdmissions.NewAttempt(
+				request.OrgId, ref.DerefOr(env.ProjectUuid, uuid.Nil), env.Uuid, uid, modelMode,
+				ref.DerefOr(request.Params.IdempotencyKey, ""),
+			)
+		}
 		needsModuleVersionAuthorization := len(request.Body.ModuleVersions) > 0 || len(request.Body.ConfirmRestrictedModuleVersionUuids) > 0
 		if needsModuleVersionAuthorization {
 			options.AuthorizeModuleVersion = func(_ string, explicitlySelected bool, artifact catalogueArtifact) error {
@@ -319,6 +326,14 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 			request.Body.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx, options,
 		)
 		if err != nil {
+			_ = tx.Rollback()
+			if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
+				return nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission")
+			}
+			var denied *deploymentAdmissionDeniedError
+			if errors.As(err, &denied) {
+				return deploymentAdmissionDeniedResponse(denied.statusCode)
+			}
 			if e, ok := model.IsErrBadRequest(err); ok {
 				return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400FromModelErr(e)}, nil
 			} else if e, ok := model.IsErrConflict(err); ok {
@@ -334,6 +349,10 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		}
 
 		if err := tx.Commit(); err != nil {
+			_ = tx.Rollback()
+			if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
+				return nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission after commit failure")
+			}
 			return nil, errors.Wrap(err, "failed to commit transaction")
 		}
 		ids.DeployId = dep.Id.String()
@@ -342,6 +361,18 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		rawManifest, _ := json.Marshal(request.Body.Manifest)
 		reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
 		return CreateDeployment201JSONResponse(apiDepFromModel(*dep, rawManifest)), nil
+	}
+}
+
+func deploymentAdmissionDeniedResponse(statusCode int) (CreateDeploymentResponseObject, error) {
+	switch statusCode {
+	case http.StatusBadRequest:
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("Core rejected the Deployment admission request")}, nil
+	case http.StatusForbidden:
+		return nil, &herrors.PlatformOrchestratorError{StatusCode: http.StatusForbidden, Code: "HTTP-403", Message: "Core denied Deployment admission"}
+	default:
+		// This operation's existing contract presents scoped absence and state races as conflicts.
+		return CreateDeployment409JSONResponse{N409ConflictJSONResponse: Generate409Response("Deployment admission conflicts with the current Environment state")}, nil
 	}
 }
 

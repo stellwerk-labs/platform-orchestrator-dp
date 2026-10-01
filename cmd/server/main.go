@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pkg/errors"
@@ -53,11 +52,13 @@ import (
 )
 
 const (
-	concurrentLogDeletes   = 20
-	natsConnectTimeout     = 5 * time.Second
-	runnerLogsObjectStore  = "PO_RUNNER_LOGS"
-	runtimeMetricsInterval = 5 * time.Second
-	samplingRatio          = 1
+	concurrentLogDeletes                     = 20
+	natsConnectTimeout                       = 5 * time.Second
+	runnerLogsObjectStore                    = "PO_RUNNER_LOGS"
+	runtimeMetricsInterval                   = 5 * time.Second
+	samplingRatio                            = 1
+	deploymentAdmissionReconciliationTimeout = 30 * time.Second
+	deploymentAdmissionReconciliationBatch   = 100
 )
 
 var buildInfo *debug.BuildInfo
@@ -228,6 +229,18 @@ func main() {
 		OidcIssuerUrl:            cfg.OidcIssuerUrl,
 		IamClient:                iamClient,
 	}
+	deploymentAdmissionConfigured, err := cfg.DeploymentAdmissionConfigured()
+	if err != nil {
+		zap.L().Fatal("invalid Deployment admission configuration", zap.Error(err))
+	}
+	if deploymentAdmissionConfigured {
+		server.DeploymentAdmissions, err = api.NewOrdinaryDeploymentAdmissionService(
+			db, cfg.DeploymentAdmissionCoreURL, cfg.DeploymentAdmissionCoreTokenFile, http.DefaultClient,
+		)
+		if err != nil {
+			zap.L().Fatal("failed to initialize Deployment admission service", zap.Error(err))
+		}
+	}
 	if cfg.PluginDeployEnabled {
 		if cfg.PluginIssuer == "" || cfg.PluginCoreURL == "" {
 			zap.L().Fatal("external deployment admission requires an issuer and Core gateway URL")
@@ -267,10 +280,7 @@ func main() {
 		Logger:           server.Logger,
 		OpenAPIRawSchema: api.MustDecodeOpenApiSpec(),
 		Tracing:          hecho.TracingOTel,
-		OpenAPISkipperFn: func(c echo.Context) bool {
-			return c.Path() == "/alive" || c.Path() == "/health" || c.Path() == "/internal/actions/flush-pending-messages" ||
-				c.Path() == api.ExternalDeploymentAdmissionPath
-		},
+		OpenAPISkipperFn: api.SkipGeneratedOpenAPIValidation,
 	})
 	if err != nil {
 		zap.L().Fatal("Failed to setup server with schema validation", zap.Error(err))
@@ -281,6 +291,28 @@ func main() {
 
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	defer bgCancel()
+	if server.DeploymentAdmissions != nil {
+		go func() {
+			reconcile := func() {
+				reconcileCtx, cancel := context.WithTimeout(bgCtx, deploymentAdmissionReconciliationTimeout)
+				defer cancel()
+				if err := server.DeploymentAdmissions.ReconcileUnsettled(reconcileCtx, deploymentAdmissionReconciliationBatch); err != nil && !errors.Is(err, context.Canceled) {
+					zap.L().Error("failed to reconcile unsettled Deployment admissions", zap.Error(err))
+				}
+			}
+			reconcile()
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-bgCtx.Done():
+					return
+				case <-ticker.C:
+					reconcile()
+				}
+			}
+		}()
+	}
 	go func() {
 		zap.L().Info("Starting scheduled flush of pending messages")
 		reliableoutbox.ScheduledFlushPendingMessages(bgCtx, server.Database.AsReliableOutboxStore(), eventPublisher, reliableoutbox.DefaultScheduledFlushPeriodFunc)
@@ -359,6 +391,7 @@ func main() {
 		},
 		KubernetesRunnerPodSchedulingDelay: cfg.KubernetesRunnerPodSchedulingDelay,
 		MetadataOutputKey:                  cfg.MetadataOutputKey,
+		DeploymentAdmissions:               server.DeploymentAdmissions,
 	}
 	wrkc, err := wrk.BuildMainConsumer(bgCtx)
 	if err != nil {

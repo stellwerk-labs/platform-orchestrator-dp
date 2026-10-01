@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/google/uuid"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
 func TestProjectPlanCaptureDropsAllManifestAndGraphValues(t *testing.T) {
@@ -36,6 +38,25 @@ func TestProjectPlanCaptureDropsAllManifestAndGraphValues(t *testing.T) {
 	require.NotContains(t, string(encoded), secret)
 	require.Contains(t, string(encoded), "credential")
 	require.Contains(t, string(encoded), "password")
+}
+
+func TestProjectModuleInventoryIsBoundedAndOmitsPrivateMaterial(t *testing.T) {
+	moduleID, versionID := uuid.New(), uuid.New()
+	artifacts := []model.ModuleArtifactRequirement{{
+		ModuleID: "postgres", ModuleUUID: moduleID, Version: "legacy-release", VersionUUID: versionID,
+		Source: "private-source", ConfirmedRestrictedVersionUUID: &versionID,
+	}}
+	require.NoError(t, validateExternalStatusModuleArtifacts(artifacts))
+	projected := projectModuleInventory(artifacts)
+	encoded, err := json.Marshal(projected)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "private-source")
+	require.NotContains(t, string(encoded), "confirmed")
+	require.Equal(t, "legacy-release", projected[0].Version)
+	require.Equal(t, moduleID, *projected[0].ModuleUUID)
+	require.Equal(t, versionID, *projected[0].VersionUUID)
+
+	require.ErrorContains(t, validateExternalStatusModuleArtifacts(make([]model.ModuleArtifactRequirement, maxExternalStatusModules+1)), "external status limit")
 }
 
 func graphWithSecretParam(t *testing.T, secret string) *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig] {

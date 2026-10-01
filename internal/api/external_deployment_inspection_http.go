@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -37,6 +38,7 @@ const (
 	ExternalDeploymentReadAction       = "external-deployment.read"
 	maxExternalInspectionBodyBytes     = 1 << 20
 	maxExternalReadinessEnvironments   = 1000
+	maxExternalStatusModules           = 1000
 )
 
 type externalEnvironmentRef struct {
@@ -138,23 +140,24 @@ type externalDeploymentPlanResponse struct {
 }
 
 type externalDeploymentStatusResponse struct {
-	DeploymentID           uuid.UUID            `json:"deployment_id"`
-	DispatchID             string               `json:"dispatch_id"`
-	OperationRef           string               `json:"operation_ref"`
-	Fence                  int64                `json:"fence"`
-	RequestDigest          string               `json:"request_digest"`
-	ProjectID              string               `json:"project_id"`
-	EnvID                  string               `json:"env_id"`
-	ProjectUUID            uuid.UUID            `json:"project_uuid"`
-	EnvironmentUUID        uuid.UUID            `json:"environment_uuid"`
-	Mode                   string               `json:"mode"`
-	Status                 string               `json:"status"`
-	StatusMessage          string               `json:"status_message"`
-	ModuleVersions         map[string]uuid.UUID `json:"module_versions"`
-	RollbackModuleVersions map[string]uuid.UUID `json:"rollback_module_versions"`
-	CreatedAt              time.Time            `json:"created_at"`
-	CompletedAt            *time.Time           `json:"completed_at,omitempty"`
-	ReceiptCreatedAt       time.Time            `json:"receipt_created_at"`
+	DeploymentID           uuid.UUID                 `json:"deployment_id"`
+	DispatchID             string                    `json:"dispatch_id"`
+	OperationRef           string                    `json:"operation_ref"`
+	Fence                  int64                     `json:"fence"`
+	RequestDigest          string                    `json:"request_digest"`
+	ProjectID              string                    `json:"project_id"`
+	EnvID                  string                    `json:"env_id"`
+	ProjectUUID            uuid.UUID                 `json:"project_uuid"`
+	EnvironmentUUID        uuid.UUID                 `json:"environment_uuid"`
+	Mode                   string                    `json:"mode"`
+	Status                 string                    `json:"status"`
+	StatusMessage          string                    `json:"status_message"`
+	ModuleVersions         map[string]uuid.UUID      `json:"module_versions"`
+	RollbackModuleVersions map[string]uuid.UUID      `json:"rollback_module_versions"`
+	RollbackModules        []externalModuleInventory `json:"rollback_modules,omitempty"`
+	CreatedAt              time.Time                 `json:"created_at"`
+	CompletedAt            *time.Time                `json:"completed_at,omitempty"`
+	ReceiptCreatedAt       time.Time                 `json:"receipt_created_at"`
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
@@ -319,6 +322,9 @@ func (a *ExternalDeploymentHTTPAdapter) verifyInspectionGET(c echo.Context, acti
 }
 
 func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx context.Context, tx model.Tx, deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
+	if err := validateExternalStatusModuleArtifacts(deployment.ModuleArtifacts); err != nil {
+		return externalDeploymentStatusResponse{}, err
+	}
 	versions, err := immutableModuleVersions(deployment.ModuleArtifacts)
 	if err != nil {
 		return externalDeploymentStatusResponse{}, err
@@ -330,6 +336,9 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 	if err != nil || base.DeploymentEnvUuid != environmentUUID || base.ProjectId != deployment.ProjectId || base.EnvId != deployment.EnvId {
 		return externalDeploymentStatusResponse{}, errors.New("captured effective base is not retained with verifiable ownership")
 	}
+	if err := validateExternalStatusModuleArtifacts(base.ModuleArtifacts); err != nil {
+		return externalDeploymentStatusResponse{}, err
+	}
 	rollbackVersions, err := immutableModuleVersions(base.ModuleArtifacts)
 	if err != nil {
 		return externalDeploymentStatusResponse{}, err
@@ -339,9 +348,16 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 		RequestDigest: receipt.RequestBodySHA256,
 		ProjectID:     deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 		Mode: string(deployment.Mode), Status: string(deployment.Status), StatusMessage: deployment.StatusMessage,
-		ModuleVersions: versions, RollbackModuleVersions: rollbackVersions,
+		ModuleVersions: versions, RollbackModuleVersions: rollbackVersions, RollbackModules: projectModuleInventory(base.ModuleArtifacts),
 		CreatedAt: deployment.CreatedAt, CompletedAt: deployment.CompletedAt.Ref(), ReceiptCreatedAt: receipt.CreatedAt,
 	}, nil
+}
+
+func validateExternalStatusModuleArtifacts(artifacts []model.ModuleArtifactRequirement) error {
+	if len(artifacts) > maxExternalStatusModules {
+		return fmt.Errorf("deployment exceeds the external status limit of %d Modules", maxExternalStatusModules)
+	}
+	return nil
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleReadiness(c echo.Context) error {
@@ -463,7 +479,8 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 		c.Request().Context(), a.logger(), actorID, c.Param("orgId"), body.ProjectID, body.EnvID,
 		*environment, model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), DeploymentManifest{}, nil, nil, nil, true, nil,
 		a.ControlPlaneClient, a.Admission.Database, tx, DeploymentOptions{
-			ExplicitModuleVersions: explicitVersions, ReuseLastSuccessfulManifest: true, IgnoreEnvironmentPins: true, CapturePlan: capture,
+			ExplicitModuleVersions: explicitVersions, ReuseLastSuccessfulManifest: true, IgnoreEnvironmentPins: true,
+			RequireExistingRunner: true, CapturePlan: capture,
 			AuthorizeModuleVersion: func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error {
 				if !explicitlySelected {
 					return nil

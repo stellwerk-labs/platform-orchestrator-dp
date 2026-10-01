@@ -49,7 +49,7 @@ func mockHandler(t *testing.T, logDel runners.RunnerLogsDeleter) (*EnvDestroyHan
 		logDel = func(ctx context.Context, envUuid string) error { return nil }
 	}
 
-	return New(mockplatformorchestratorcp.NewMockClientWithResponsesInterface(ctrl), db, pub, logDel), func() {
+	return New(mockplatformorchestratorcp.NewMockClientWithResponsesInterface(ctrl), db, pub, logDel, nil), func() {
 		ctrl.Finish()
 	}
 }

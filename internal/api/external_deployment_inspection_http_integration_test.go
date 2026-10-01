@@ -34,7 +34,20 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	store := externalDeploymentTestDatabase(t, ctx, connection)
 
 	const orgID, pluginID, projectID, envID = "acme", "dev.example.rollouts", "checkout", "production"
-	projectUUID, environmentUUID, moduleUUID, versionUUID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	projectUUID, environmentUUID, moduleUUID, baseVersionUUID, versionUUID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	baseTx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	baseDeployment, err := store.CreateDeployment(ctx, baseTx, orgID, projectID, envID, model.CreateDeploymentParams{
+		CreatedBy: uuid.New(), DeploymentEnvUuid: environmentUUID, Mode: model.DeploymentModeDeploy,
+		Manifest: model.EncodedDeploymentManifest(`{"workloads":{}}`), Graph: model.EncodedDeploymentGraph(`{"nodes":{},"edges":{},"workloads":{},"shared_resources":{},"leaf_resources":{}}`),
+		Tofu: model.RawTofu("terraform {}"), RunnerId: "runner", RunnerLogLevel: "info", IdempotencyKeyDigest: opt.Empty[string](),
+		ModuleArtifacts: []model.ModuleArtifactRequirement{{ModuleID: "postgres", ModuleUUID: moduleUUID, Version: "legacy-release", VersionUUID: baseVersionUUID, Source: "private-base-source"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, baseTx.Commit())
+	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, baseDeployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: model.DeploymentStatusSucceeded, StatusMessage: "base done"})
+	require.NoError(t, err)
+
 	tx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	deployment, err := store.CreateDeployment(ctx, tx, orgID, projectID, envID, model.CreateDeploymentParams{
@@ -54,7 +67,7 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 		OperationRef:                   uuid.NewString(), Fence: 7, AssertionAction: ExternalDeploymentAction, ServiceAction: ExternalDeploymentAction,
 		RequestBodySHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ActorID: deployment.CreatedBy.String(),
 		ProjectID: projectID, EnvID: envID, ProjectUUID: opt.Of(projectUUID), EnvironmentUUID: opt.Of(environmentUUID), DeploymentID: deployment.Id,
-		BaseDeploymentID: opt.Of(deployment.Id),
+		BaseDeploymentID: opt.Of(baseDeployment.Id),
 	})
 	require.NoError(t, err)
 	require.NoError(t, receiptTx.Commit())
@@ -152,4 +165,14 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.Contains(t, dispatchResponse.Body.String(), deployment.Id.String())
 	require.Contains(t, dispatchResponse.Body.String(), `"request_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`)
 	require.Contains(t, dispatchResponse.Body.String(), `"rollback_module_versions"`)
+	require.NotContains(t, dispatchResponse.Body.String(), "private-base-source")
+	var dispatch externalDeploymentStatusResponse
+	require.NoError(t, json.Unmarshal(dispatchResponse.Body.Bytes(), &dispatch))
+	require.Equal(t, map[string]uuid.UUID{moduleUUID.String(): baseVersionUUID}, dispatch.RollbackModuleVersions)
+	require.Len(t, dispatch.RollbackModules, 1)
+	require.Equal(t, "postgres", dispatch.RollbackModules[0].ModuleID)
+	require.Equal(t, "legacy-release", dispatch.RollbackModules[0].Version)
+	require.Empty(t, dispatch.RollbackModules[0].SemanticVersion)
+	require.Equal(t, moduleUUID, *dispatch.RollbackModules[0].ModuleUUID)
+	require.Equal(t, baseVersionUUID, *dispatch.RollbackModules[0].VersionUUID)
 }

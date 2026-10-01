@@ -32,15 +32,23 @@ func LoadExternalDeploymentCredentials(publicKeyPath, bearerTokenPath string) (e
 		return nil, "", errors.New("external deployment verification key must use Ed25519")
 	}
 
+	token, err := LoadServiceBearerToken(bearerTokenPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return publicKey, token, nil
+}
+
+func LoadServiceBearerToken(bearerTokenPath string) (string, error) {
 	tokenData, err := readBoundedOperatorFile(bearerTokenPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("read DP Core service bearer token: %w", err)
+		return "", fmt.Errorf("read DP Core service bearer token: %w", err)
 	}
 	token := strings.TrimSpace(string(tokenData))
 	if token == "" || strings.ContainsAny(token, " \t\r\n") {
-		return nil, "", errors.New("DP Core service bearer token must be one non-empty token")
+		return "", errors.New("DP Core service bearer token must be one non-empty token")
 	}
-	return publicKey, token, nil
+	return token, nil
 }
 
 func readBoundedOperatorFile(name string) ([]byte, error) {

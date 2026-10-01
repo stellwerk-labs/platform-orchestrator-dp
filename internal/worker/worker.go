@@ -16,6 +16,7 @@ import (
 	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genevents"
 	"go.uber.org/zap"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/clients/aws"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/credentials/cloud"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/credentials/oidc"
@@ -27,6 +28,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/branchhandler"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/createdephandler"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/deploymentadmissionhandler"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/envdestroyhandler"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/runnerresulthandler"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/runnerstatushandler"
@@ -61,6 +63,7 @@ type Worker struct {
 	RunnerGatewayConfiguration         runners.RunnerGatewayConfiguration
 	RunnerBundleStore                  createdephandler.RunnerBundleStore
 	MetadataOutputKey                  string
+	DeploymentAdmissions               *api.OrdinaryDeploymentAdmissionService
 }
 
 func (w *Worker) BuildRunnerStatusConsumer(ctx context.Context) (*hnats.Consumer, error) {
@@ -122,14 +125,15 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 		return nil, errors.Wrap(err, "failed to setup handler for deployment creation")
 	}
 
-	inner := handlers.Handler(&branchhandler.Handler{
-		{PrefixPattern: envdestroyhandler.BranchPattern, Handler: envdestroyhandler.New(w.ControlPlaneClient, w.DB, w.EventPublisher, w.RunnerLogsDeleter)},
+	branches := handlers.Handler(&branchhandler.Handler{
+		{PrefixPattern: envdestroyhandler.BranchPattern, Handler: envdestroyhandler.New(w.ControlPlaneClient, w.DB, w.EventPublisher, w.RunnerLogsDeleter, w.DeploymentAdmissions)},
 		{PrefixPattern: regexp.MustCompile(string(genevents.IoPlatformOrchestratorDeploymentCreated)), Handler: createDepHandler},
 		{PrefixPattern: regexp.MustCompile(""), Handler: handlers.HandlerFunc(func(_ context.Context, logger *zap.Logger, _ hmessaging.Delivery) error {
 			logger.Info("dropping unsupported message")
 			return nil
 		})},
 	})
+	inner := handlers.Handler(deploymentadmissionhandler.Handler{Admissions: w.DeploymentAdmissions, Next: branches})
 	observed := middleware.WrapWithObserver(inner, "main-consumer")
 	consumer, err := hnats.EnsureDurableConsumer(ctx, w.JetStream, hnats.DurableConsumerConfig{
 		Stream:  hmessaging.EventsStreamName,
