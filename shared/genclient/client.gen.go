@@ -793,16 +793,17 @@ type Error struct {
 
 // ExternalDeploymentAdmissionBody defines model for ExternalDeploymentAdmissionBody.
 type ExternalDeploymentAdmissionBody struct {
-	EnvId           string                                         `json:"env_id"`
-	EnvironmentUuid openapi_types.UUID                             `json:"environment_uuid"`
-	Fence           int64                                          `json:"fence"`
-	Mode            ExternalDeploymentAdmissionBodyMode            `json:"mode"`
-	OperationRef    openapi_types.UUID                             `json:"operation_ref"`
-	Plan            *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
-	ProjectId       string                                         `json:"project_id"`
-	ProjectUuid     openapi_types.UUID                             `json:"project_uuid"`
-	Rollback        *ExternalDeploymentAdmissionRollback           `json:"rollback,omitempty"`
-	RunnerLogLevel  *ExternalDeploymentAdmissionBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+	EnvId                    string                                         `json:"env_id"`
+	EnvironmentUuid          openapi_types.UUID                             `json:"environment_uuid"`
+	Fence                    int64                                          `json:"fence"`
+	FirstForwardDeploymentId *openapi_types.UUID                            `json:"first_forward_deployment_id,omitempty"`
+	Mode                     ExternalDeploymentAdmissionBodyMode            `json:"mode"`
+	OperationRef             openapi_types.UUID                             `json:"operation_ref"`
+	Plan                     *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
+	ProjectId                string                                         `json:"project_id"`
+	ProjectUuid              openapi_types.UUID                             `json:"project_uuid"`
+	Rollback                 *ExternalDeploymentAdmissionRollback           `json:"rollback,omitempty"`
+	RunnerLogLevel           *ExternalDeploymentAdmissionBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
 }
 
 // ExternalDeploymentAdmissionBodyMode defines model for ExternalDeploymentAdmissionBody.Mode.
@@ -826,7 +827,8 @@ type ExternalDeploymentAdmissionResponse struct {
 
 // ExternalDeploymentAdmissionRollback defines model for ExternalDeploymentAdmissionRollback.
 type ExternalDeploymentAdmissionRollback struct {
-	ForwardDeploymentId openapi_types.UUID `json:"forward_deployment_id"`
+	ForwardDeploymentId         openapi_types.UUID  `json:"forward_deployment_id"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID `json:"retry_of_rollback_deployment_id,omitempty"`
 }
 
 // ExternalDeploymentPlanBody defines model for ExternalDeploymentPlanBody.
@@ -863,26 +865,34 @@ type ExternalDeploymentReadinessResponse struct {
 
 // ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
 type ExternalDeploymentStatusResponse struct {
-	CompletedAt            *time.Time                           `json:"completed_at,omitempty"`
-	CreatedAt              time.Time                            `json:"created_at"`
-	DeploymentId           openapi_types.UUID                   `json:"deployment_id"`
-	DispatchId             string                               `json:"dispatch_id"`
-	EnvId                  string                               `json:"env_id"`
-	EnvironmentUuid        openapi_types.UUID                   `json:"environment_uuid"`
-	Fence                  int64                                `json:"fence"`
-	Mode                   ExternalDeploymentStatusResponseMode `json:"mode"`
-	ModuleVersions         map[string]openapi_types.UUID        `json:"module_versions"`
-	OperationRef           openapi_types.UUID                   `json:"operation_ref"`
-	ProjectId              string                               `json:"project_id"`
-	ProjectUuid            openapi_types.UUID                   `json:"project_uuid"`
-	ReceiptCreatedAt       time.Time                            `json:"receipt_created_at"`
-	RequestDigest          string                               `json:"request_digest"`
-	RollbackModuleVersions map[string]openapi_types.UUID        `json:"rollback_module_versions"`
+	AdmissionBaseDeploymentId   *openapi_types.UUID                  `json:"admission_base_deployment_id,omitempty"`
+	CompletedAt                 *time.Time                           `json:"completed_at,omitempty"`
+	CreatedAt                   time.Time                            `json:"created_at"`
+	DeploymentId                openapi_types.UUID                   `json:"deployment_id"`
+	DispatchId                  string                               `json:"dispatch_id"`
+	EnvId                       string                               `json:"env_id"`
+	EnvironmentUuid             openapi_types.UUID                   `json:"environment_uuid"`
+	Fence                       int64                                `json:"fence"`
+	FirstForwardDeploymentId    *openapi_types.UUID                  `json:"first_forward_deployment_id,omitempty"`
+	ForwardDeploymentId         *openapi_types.UUID                  `json:"forward_deployment_id,omitempty"`
+	Mode                        ExternalDeploymentStatusResponseMode `json:"mode"`
+	ModuleVersions              map[string]openapi_types.UUID        `json:"module_versions"`
+	OperationRef                openapi_types.UUID                   `json:"operation_ref"`
+	ProjectId                   string                               `json:"project_id"`
+	ProjectUuid                 openapi_types.UUID                   `json:"project_uuid"`
+	ReceiptCreatedAt            time.Time                            `json:"receipt_created_at"`
+	RequestDigest               string                               `json:"request_digest"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID                  `json:"retry_of_rollback_deployment_id,omitempty"`
+	RollbackBaseDeploymentId    *openapi_types.UUID                  `json:"rollback_base_deployment_id,omitempty"`
+	RollbackModuleVersions      map[string]openapi_types.UUID        `json:"rollback_module_versions"`
 
 	// RollbackModules Immutable metadata projected from the retained effective-base Deployment.
-	RollbackModules *[]ExternalModuleInventory             `json:"rollback_modules,omitempty"`
-	Status          ExternalDeploymentStatusResponseStatus `json:"status"`
-	StatusMessage   string                                 `json:"status_message"`
+	RollbackModules *[]ExternalModuleInventory `json:"rollback_modules,omitempty"`
+
+	// RollbackRetryProvenanceRecorded Present on rollback status. True only when the retained receipt records validated predecessor provenance. False for read-only legacy lineage projection; terminal outcome and current-head eligibility remain separate admission checks.
+	RollbackRetryProvenanceRecorded *bool                                  `json:"rollback_retry_provenance_recorded,omitempty"`
+	Status                          ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage                   string                                 `json:"status_message"`
 }
 
 // ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.

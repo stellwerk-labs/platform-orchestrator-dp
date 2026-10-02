@@ -1,11 +1,33 @@
 package api
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExternalDeploymentRecoveryFieldsPreserveLegacySignedBytes(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	body := ExternalDeploymentAdmissionBody{OperationRef: id, Fence: 1, ProjectId: "project", EnvId: "env", ProjectUuid: id, EnvironmentUuid: id,
+		Mode: ExternalDeploymentAdmissionBodyModeRollback, Rollback: &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: id}}
+	encoded, err := json.Marshal(body)
+	require.NoError(t, err)
+	expected := `{"env_id":"env","environment_uuid":"11111111-1111-4111-8111-111111111111",` +
+		`"fence":1,"mode":"rollback","operation_ref":"11111111-1111-4111-8111-111111111111",` +
+		`"project_id":"project","project_uuid":"11111111-1111-4111-8111-111111111111",` +
+		`"rollback":{"forward_deployment_id":"11111111-1111-4111-8111-111111111111"}}`
+	require.Equal(t, expected, string(encoded))
+	zero := uuid.Nil
+	body.FirstForwardDeploymentId = &zero
+	_, _, err = validateExternalDeploymentBody(body)
+	require.ErrorContains(t, err, "first_forward_deployment_id")
+	body.FirstForwardDeploymentId = nil
+	body.Rollback.RetryOfRollbackDeploymentId = &zero
+	_, _, err = validateExternalDeploymentBody(body)
+	require.ErrorContains(t, err, "retry_of_rollback_deployment_id")
+}
 
 func TestValidateExternalDeploymentBodyDerivesServiceActionFromMode(t *testing.T) {
 	projectUUID, environmentUUID := uuid.New(), uuid.New()

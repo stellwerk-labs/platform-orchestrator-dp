@@ -140,24 +140,30 @@ type externalDeploymentPlanResponse struct {
 }
 
 type externalDeploymentStatusResponse struct {
-	DeploymentID           uuid.UUID                 `json:"deployment_id"`
-	DispatchID             string                    `json:"dispatch_id"`
-	OperationRef           string                    `json:"operation_ref"`
-	Fence                  int64                     `json:"fence"`
-	RequestDigest          string                    `json:"request_digest"`
-	ProjectID              string                    `json:"project_id"`
-	EnvID                  string                    `json:"env_id"`
-	ProjectUUID            uuid.UUID                 `json:"project_uuid"`
-	EnvironmentUUID        uuid.UUID                 `json:"environment_uuid"`
-	Mode                   string                    `json:"mode"`
-	Status                 string                    `json:"status"`
-	StatusMessage          string                    `json:"status_message"`
-	ModuleVersions         map[string]uuid.UUID      `json:"module_versions"`
-	RollbackModuleVersions map[string]uuid.UUID      `json:"rollback_module_versions"`
-	RollbackModules        []externalModuleInventory `json:"rollback_modules,omitempty"`
-	CreatedAt              time.Time                 `json:"created_at"`
-	CompletedAt            *time.Time                `json:"completed_at,omitempty"`
-	ReceiptCreatedAt       time.Time                 `json:"receipt_created_at"`
+	RollbackRetryProvenanceRecorded *bool                     `json:"rollback_retry_provenance_recorded,omitempty"`
+	FirstForwardDeploymentID        *uuid.UUID                `json:"first_forward_deployment_id,omitempty"`
+	RollbackBaseDeploymentID        *uuid.UUID                `json:"rollback_base_deployment_id,omitempty"`
+	AdmissionBaseDeploymentID       *uuid.UUID                `json:"admission_base_deployment_id,omitempty"`
+	ForwardDeploymentID             *uuid.UUID                `json:"forward_deployment_id,omitempty"`
+	RetryOfRollbackDeploymentID     *uuid.UUID                `json:"retry_of_rollback_deployment_id,omitempty"`
+	DeploymentID                    uuid.UUID                 `json:"deployment_id"`
+	DispatchID                      string                    `json:"dispatch_id"`
+	OperationRef                    string                    `json:"operation_ref"`
+	Fence                           int64                     `json:"fence"`
+	RequestDigest                   string                    `json:"request_digest"`
+	ProjectID                       string                    `json:"project_id"`
+	EnvID                           string                    `json:"env_id"`
+	ProjectUUID                     uuid.UUID                 `json:"project_uuid"`
+	EnvironmentUUID                 uuid.UUID                 `json:"environment_uuid"`
+	Mode                            string                    `json:"mode"`
+	Status                          string                    `json:"status"`
+	StatusMessage                   string                    `json:"status_message"`
+	ModuleVersions                  map[string]uuid.UUID      `json:"module_versions"`
+	RollbackModuleVersions          map[string]uuid.UUID      `json:"rollback_module_versions"`
+	RollbackModules                 []externalModuleInventory `json:"rollback_modules,omitempty"`
+	CreatedAt                       time.Time                 `json:"created_at"`
+	CompletedAt                     *time.Time                `json:"completed_at,omitempty"`
+	ReceiptCreatedAt                time.Time                 `json:"receipt_created_at"`
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
@@ -332,7 +338,46 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 	if !receipt.BaseDeploymentID.IsSet() {
 		return externalDeploymentStatusResponse{}, errors.New("external deployment receipt lacks a captured effective base")
 	}
-	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, receipt.OrgID, receipt.BaseDeploymentID.Must(), model.GetModeDefault)
+	anchor, err := a.operationRollbackAnchor(ctx, tx, model.ExternalOperationRollbackAnchor{
+		OrgID: receipt.OrgID, PluginID: receipt.PluginID, OperationRef: receipt.OperationRef,
+		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
+	}, false)
+	if err != nil {
+		return externalDeploymentStatusResponse{}, err
+	}
+	baseID := receipt.BaseDeploymentID.Must()
+	var firstForwardID, rollbackBaseID *uuid.UUID
+	if anchor != nil {
+		baseID = anchor.RollbackBaseDeploymentID
+		firstForwardID, rollbackBaseID = &anchor.FirstForwardDeploymentID, &anchor.RollbackBaseDeploymentID
+	}
+	admissionBaseID := receipt.BaseDeploymentID.Ref()
+	forwardID := receipt.ForwardDeploymentID.Ref()
+	var retryProvenance *bool
+	if deployment.Mode == model.DeploymentModeDeploy {
+		forwardID = &deployment.Id
+	}
+	if deployment.Mode == model.DeploymentModeRollback {
+		recorded := false
+		if anchor != nil {
+			recorded, err = a.rollbackRetryProvenanceRecorded(ctx, tx, deployment, receipt, *anchor)
+			if err != nil {
+				return externalDeploymentStatusResponse{}, err
+			}
+		}
+		retryProvenance = &recorded
+		if forwardID == nil && anchor != nil {
+			forwardID, err = a.projectLegacyRollbackForward(ctx, tx, deployment, receipt, *anchor)
+			if err != nil {
+				return externalDeploymentStatusResponse{}, err
+			}
+		}
+		admissionBaseID = forwardID
+		if receipt.RetryOfRollbackDeploymentID.IsSet() {
+			admissionBaseID = receipt.RetryOfRollbackDeploymentID.Ref()
+		}
+	}
+	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, receipt.OrgID, baseID, model.GetModeDefault)
 	if err != nil || base.DeploymentEnvUuid != environmentUUID || base.ProjectId != deployment.ProjectId || base.EnvId != deployment.EnvId {
 		return externalDeploymentStatusResponse{}, errors.New("captured effective base is not retained with verifiable ownership")
 	}
@@ -344,6 +389,9 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 		return externalDeploymentStatusResponse{}, err
 	}
 	return externalDeploymentStatusResponse{
+		RollbackRetryProvenanceRecorded: retryProvenance,
+		FirstForwardDeploymentID:        firstForwardID, RollbackBaseDeploymentID: rollbackBaseID, AdmissionBaseDeploymentID: admissionBaseID,
+		ForwardDeploymentID: forwardID, RetryOfRollbackDeploymentID: receipt.RetryOfRollbackDeploymentID.Ref(),
 		DeploymentID: deployment.Id, DispatchID: receipt.RequestID, OperationRef: receipt.OperationRef, Fence: receipt.Fence,
 		RequestDigest: receipt.RequestBodySHA256,
 		ProjectID:     deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,

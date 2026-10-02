@@ -104,6 +104,7 @@ type CreateDeploymentParams struct {
 	ModuleVersionRequestDigest string
 	// Optional captured-base recovery CAS, checked after the normal lease is held.
 	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
 }
 
 type ModuleArtifactRequirement struct {
@@ -194,6 +195,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	if params.ExpectedCurrentDeploymentID.IsSet() && (params.ExpectedCurrentDeploymentID.Must() == uuid.Nil || params.Mode != DeploymentModeRollback || !params.RollbackToId.IsSet()) {
 		return nil, NewErrBadRequest("expected current Deployment requires captured-base rollback")
 	}
+	if params.RetryOfRollbackDeploymentID.IsSet() && (!params.ExpectedCurrentDeploymentID.IsSet() || params.RetryOfRollbackDeploymentID.Must() == uuid.Nil || params.RetryOfRollbackDeploymentID.Must() != params.ExpectedCurrentDeploymentID.Must()) {
+		return nil, NewErrBadRequest("explicit rollback retry must identify the expected current head")
+	}
 
 	out := &DeploymentSummary{
 		OrgId:                      orgId,
@@ -257,9 +261,14 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 				return nil, NewErrConflict("captured-base recovery forward Deployment is no longer the current head")
 			}
 			forward, _, _, _, err := d.GetDeployment(ctx, tx, orgId, lastStateDeploymentID, GetModeForUpdate)
-			if err != nil || forward.DeploymentEnvUuid != params.DeploymentEnvUuid || forward.Mode != DeploymentModeDeploy || !forward.CompletedAt.IsSet() ||
+			modeMatches := err == nil && forward.Mode == DeploymentModeDeploy
+			if err == nil && params.RetryOfRollbackDeploymentID.IsSet() {
+				modeMatches = forward.Mode == DeploymentModeRollback && forward.Status == DeploymentStatusFailed &&
+					forward.RollbackToId.IsSet() && forward.RollbackToId.Must() == params.RollbackToId.Must()
+			}
+			if err != nil || forward.DeploymentEnvUuid != params.DeploymentEnvUuid || !modeMatches || !forward.CompletedAt.IsSet() ||
 				(forward.Status != DeploymentStatusSucceeded && forward.Status != DeploymentStatusFailed) {
-				return nil, NewErrConflict("captured-base recovery requires a stopped terminal forward Deployment")
+				return nil, NewErrConflict("captured-base recovery requires a stopped terminal forward or explicitly retried failed rollback Deployment")
 			}
 			if forward.Status == DeploymentStatusFailed {
 				// Watchdog/status-check failures also set CompletedAt. Only the
@@ -276,7 +285,7 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 			}
 			base, manifest, tofu, graph, err := d.GetDeployment(ctx, tx, orgId, params.RollbackToId.Must(), GetModeForUpdate)
 			if err != nil || base.Status != DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != params.DeploymentEnvUuid ||
-				base.ProjectId != projectId || base.EnvId != envId || !completeDeploymentSnapshot(manifest, tofu, graph) {
+				base.ProjectId != projectId || base.EnvId != envId || !CompleteDeploymentSnapshot(manifest, tofu, graph) {
 				return nil, NewErrConflict("captured rollback base is not a complete retained successful Deployment")
 			}
 		}
@@ -633,7 +642,7 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 	return out, nil
 }
 
-func completeDeploymentSnapshot(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph) bool {
+func CompleteDeploymentSnapshot(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph) bool {
 	return len(tofu) > 0 && json.Valid(manifest) && json.Valid(graph) && strings.HasPrefix(strings.TrimSpace(string(manifest)), "{") && strings.HasPrefix(strings.TrimSpace(string(graph)), "{")
 }
 

@@ -41,12 +41,41 @@ import (
 func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesReplay(t *testing.T) {
 	for _, status := range []model.DeploymentStatus{model.DeploymentStatusSucceeded, model.DeploymentStatusFailed} {
 		t.Run(string(status), func(t *testing.T) {
-			testExternalDeploymentHTTPAdapterRollback(t, status)
+			testExternalDeploymentHTTPAdapterRollback(t, status, externalRollbackOriginal)
 		})
 	}
 }
 
-func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model.DeploymentStatus) {
+func TestExternalRollbackPreservesFirstBaseAcrossExplicitForwardRetry(t *testing.T) {
+	for _, status := range []model.DeploymentStatus{model.DeploymentStatusSucceeded, model.DeploymentStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			testExternalDeploymentHTTPAdapterRollback(t, status, externalRollbackForwardRetry)
+		})
+	}
+}
+
+func TestExternalRollbackExplicitlyRetriesOwnTerminalFailedRollback(t *testing.T) {
+	for _, status := range []model.DeploymentStatus{model.DeploymentStatusSucceeded, model.DeploymentStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			testExternalDeploymentHTTPAdapterRollback(t, status, externalRollbackFailedRetry)
+		})
+	}
+}
+
+func TestExternalRollbackLegacyReplayAndUnambiguousAdoption(t *testing.T) {
+	testExternalDeploymentHTTPAdapterRollback(t, model.DeploymentStatusFailed, externalRollbackLegacy)
+}
+
+type externalRollbackScenario uint8
+
+const (
+	externalRollbackOriginal externalRollbackScenario = iota
+	externalRollbackForwardRetry
+	externalRollbackFailedRetry
+	externalRollbackLegacy
+)
+
+func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model.DeploymentStatus, scenario externalRollbackScenario) {
 	t.Helper()
 	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
 	require.NotEmpty(t, connection, "MODEL_TEST_DB_CONNECTION_STRING must name an isolated local PostgreSQL test database")
@@ -433,18 +462,59 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	require.True(t, replayedRollback.Replayed)
 	require.Equal(t, rollbackResult.DeploymentId, replayedRollback.DeploymentId)
 	require.EqualValues(t, 5, checks.Load(), "rollback replay must reauthorize and retain one normal Deployment even after its head changes")
-	t.Run("own failed rollback head requires explicit retry design", func(t *testing.T) {
-		tx, err := store.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, tx.Rollback()) }()
-		_, err = store.UpdateDeploymentStatusAndOutputs(ctx, tx, rollbackDeployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: model.DeploymentStatusFailed})
-		require.NoError(t, err)
-		_, err = adapter.createExternalRollback(ctx, tx, actorID, orgID, pluginID, rollbackRequest, platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: projectID, ProjectUuid: &projectUUID, Id: envID, RunnerId: ref.Ref(runnerID)}, material.Recipient)
-		require.ErrorContains(t, err, "no longer the current head", "this narrow forward recovery must not silently authorize retry through another Deployment head")
-		var count int
-		require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&count))
-		require.Equal(t, 1, count)
-	})
+	fixture := externalRollbackFixture{
+		grantActive:        &grantActive,
+		checks:             &checks,
+		bodyBytes:          bodyBytes,
+		assertion:          assertion,
+		server:             server,
+		ctx:                ctx,
+		store:              store,
+		adapter:            adapter,
+		publisher:          publisher,
+		orgID:              orgID,
+		pluginID:           pluginID,
+		runnerID:           runnerID,
+		projectID:          projectID,
+		envID:              envID,
+		actorID:            actorID,
+		operationID:        operationID,
+		deployment:         deployment,
+		rollbackDeployment: rollbackDeployment,
+		base:               base,
+		projectUUID:        projectUUID,
+		environmentUUID:    environmentUUID,
+		rollbackRequest:    rollbackRequest,
+		rollbackBody:       rollbackBody,
+		rollbackAssertion:  rollbackAssertion,
+		rollbackClaims:     rollbackClaims,
+		claims:             claims,
+		privateKey:         privateKey,
+		now:                now,
+		material:           material,
+		planClaims:         planClaims,
+		planPath:           planPath,
+		planBodyBytes:      planBodyBytes,
+		plan:               plan,
+		moduleUUID:         moduleUUID,
+		targetVersionUUID:  targetVersionUUID,
+		baseVersionUUID:    baseVersionUUID,
+		do:                 do,
+	}
+	if scenario != externalRollbackOriginal {
+		switch scenario {
+		case externalRollbackLegacy:
+			verifyExternalRollbackLegacy(t, fixture)
+		case externalRollbackFailedRetry:
+			verifyExternalFailedRollbackRetry(t, fixture)
+		case externalRollbackForwardRetry:
+			verifyExternalForwardRetryBase(t, fixture)
+		default:
+			t.Fatal("unknown rollback fixture scenario")
+		}
+		return
+	}
+	verifyExternalRollbackCannotImplicitlyRetry(t, fixture)
 
 	cancelClaims := claims
 	cancelClaims.RequestID = "dispatch-cancel"
@@ -494,6 +564,471 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 		t.Fatal("receipt read did not observe authoritative absence")
 	}
 
+	verifyExternalAdmissionRevocationAndAssertionBinding(t, fixture)
+}
+
+type externalRollbackFixture struct {
+	grantActive        *atomic.Bool
+	checks             *atomic.Int64
+	bodyBytes          []byte
+	assertion          string
+	server             *echo.Echo
+	ctx                context.Context
+	store              model.Databaser
+	adapter            *ExternalDeploymentHTTPAdapter
+	publisher          *hmessaging.RecordingPublisher
+	orgID              string
+	pluginID           string
+	runnerID           string
+	projectID          string
+	envID              string
+	actorID            uuid.UUID
+	operationID        uuid.UUID
+	deployment         *model.DeploymentSummary
+	rollbackDeployment *model.DeploymentSummary
+	base               *model.DeploymentSummary
+	projectUUID        uuid.UUID
+	environmentUUID    uuid.UUID
+	rollbackRequest    ExternalDeploymentAdmissionBody
+	rollbackBody       []byte
+	rollbackAssertion  string
+	rollbackClaims     plugincontext.Claims
+	claims             plugincontext.Claims
+	privateKey         ed25519.PrivateKey
+	now                time.Time
+	material           *model.ExternalOperationMaterial
+	planClaims         plugincontext.Claims
+	planPath           string
+	planBodyBytes      []byte
+	plan               externalDeploymentPlanResponse
+	moduleUUID         uuid.UUID
+	targetVersionUUID  uuid.UUID
+	baseVersionUUID    uuid.UUID
+	do                 func([]byte, string, string) *httptest.ResponseRecorder
+}
+
+func verifyExternalRollbackLegacy(t *testing.T, fixture externalRollbackFixture) {
+	t.Helper()
+	ctx := fixture.ctx
+	store := fixture.store
+	adapter := fixture.adapter
+	orgID := fixture.orgID
+	pluginID := fixture.pluginID
+	deployment := fixture.deployment
+	rollbackDeployment := fixture.rollbackDeployment
+	base := fixture.base
+	projectUUID := fixture.projectUUID
+	environmentUUID := fixture.environmentUUID
+	rollbackRequest := fixture.rollbackRequest
+	rollbackBody := fixture.rollbackBody
+	rollbackAssertion := fixture.rollbackAssertion
+	rollbackClaims := fixture.rollbackClaims
+	do := fixture.do
+	tx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, "DELETE FROM external_operation_rollback_anchors")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, "UPDATE external_operation_deployments SET forward_deployment_id=NULL,retry_of_rollback_deployment_id=NULL WHERE deployment_id=$1", rollbackDeployment.Id)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	legacyReplay := do(rollbackBody, rollbackAssertion, rollbackClaims.RequestID)
+	require.Equal(t, http.StatusOK, legacyReplay.Code, legacyReplay.Body.String(), "unknown legacy predecessor must not invalidate old exact-key replay")
+	var replay ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(legacyReplay.Body.Bytes(), &replay))
+	require.Equal(t, rollbackDeployment.Id, replay.DeploymentId)
+	tx, err = store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	anchor, err := adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
+	require.NoError(t, err)
+	require.Equal(t, deployment.Id, anchor.FirstForwardDeploymentID)
+	require.Equal(t, base.Id, anchor.RollbackBaseDeploymentID)
+	receipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, rollbackDeployment.Id)
+	require.NoError(t, err)
+	status, err := adapter.projectExternalDeploymentStatus(ctx, tx, *rollbackDeployment, *receipt, projectUUID, environmentUUID)
+	require.NoError(t, err)
+	require.Equal(t, deployment.Id, *status.ForwardDeploymentID)
+	require.Equal(t, deployment.Id, *status.AdmissionBaseDeploymentID)
+	require.Equal(t, base.Id, *status.RollbackBaseDeploymentID)
+	require.False(t, receipt.ForwardDeploymentID.IsSet(), "read projection must not persist guessed retry authority")
+	require.NotNil(t, status.RollbackRetryProvenanceRecorded)
+	require.False(t, *status.RollbackRetryProvenanceRecorded)
+	encoded, err := json.Marshal(status)
+	require.NoError(t, err)
+	t.Logf("LegacyR1Status=%s", encoded)
+	forward, _, _, _, err := store.GetDeployment(ctx, tx, orgID, deployment.Id, model.GetModeDefault)
+	require.NoError(t, err)
+	forwardReceipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, forward.Id)
+	require.NoError(t, err)
+	forwardStatus, err := adapter.projectExternalDeploymentStatus(ctx, tx, *forward, *forwardReceipt, projectUUID, environmentUUID)
+	require.NoError(t, err)
+	require.Equal(t, deployment.Id, *forwardStatus.ForwardDeploymentID)
+	require.Equal(t, base.Id, *forwardStatus.AdmissionBaseDeploymentID)
+	require.Nil(t, forwardStatus.RollbackRetryProvenanceRecorded)
+	encoded, err = json.Marshal(forwardStatus)
+	require.NoError(t, err)
+	t.Logf("LegacyF1Status=%s", encoded)
+	require.NoError(t, tx.Commit())
+	for _, test := range []struct {
+		name, edit string
+		args       []any
+	}{
+		{name: "second legacy rollback is not guessed", edit: `INSERT INTO external_operation_deployments
+			(org_id,plugin_id,operation_ref,fence,request_id,assertion_action,service_action,request_body_sha256,actor_id,project_id,env_id,deployment_id,created_at,project_uuid,environment_uuid,plan_snapshot_id,base_deployment_id,forward_deployment_id,retry_of_rollback_deployment_id)
+			SELECT org_id,plugin_id,operation_ref,fence,request_id||'-other',assertion_action,service_action,request_body_sha256,actor_id,project_id,env_id,$2,created_at,project_uuid,environment_uuid,plan_snapshot_id,base_deployment_id,forward_deployment_id,retry_of_rollback_deployment_id
+			FROM external_operation_deployments WHERE deployment_id=$1`, args: []any{rollbackDeployment.Id, uuid.New()}},
+		{name: "failed forward outcome proof missing", edit: "DELETE FROM runner_event_inbox WHERE deployment_id=$1", args: []any{deployment.Id}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tx.Rollback()) }()
+			_, err = tx.ExecContext(ctx, test.edit, test.args...)
+			require.NoError(t, err)
+			projected, err := adapter.projectExternalDeploymentStatus(ctx, tx, *rollbackDeployment, *receipt, projectUUID, environmentUUID)
+			require.NoError(t, err)
+			require.Nil(t, projected.ForwardDeploymentID)
+			require.Nil(t, projected.AdmissionBaseDeploymentID)
+		})
+	}
+	resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: fixture.publisher}
+	require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, fixture.runnerID, rollbackDeployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{Status: Failure}))
+	tx, err = store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tx.Rollback()) }()
+	candidate := rollbackRequest
+	candidate.FirstForwardDeploymentId = &deployment.Id
+	candidate.Rollback = &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: deployment.Id, RetryOfRollbackDeploymentId: &rollbackDeployment.Id}
+	_, err = adapter.createExternalRollback(ctx, tx, fixture.actorID, orgID, pluginID, candidate,
+		platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: fixture.projectID, ProjectUuid: &projectUUID, Id: fixture.envID, RunnerId: ref.Ref(fixture.runnerID)}, fixture.material.Recipient)
+	require.ErrorContains(t, err, "predecessor", "projected legacy completion evidence must not authorize a new retry without durable provenance")
+	var rollbacks int
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&rollbacks))
+	require.Equal(t, 1, rollbacks)
+}
+
+func verifyExternalFailedRollbackRetry(t *testing.T, fixture externalRollbackFixture) {
+	t.Helper()
+	ctx := fixture.ctx
+	store := fixture.store
+	adapter := fixture.adapter
+	publisher := fixture.publisher
+	orgID := fixture.orgID
+	pluginID := fixture.pluginID
+	runnerID := fixture.runnerID
+	projectID := fixture.projectID
+	envID := fixture.envID
+	actorID := fixture.actorID
+	deployment := fixture.deployment
+	rollbackDeployment := fixture.rollbackDeployment
+	base := fixture.base
+	projectUUID := fixture.projectUUID
+	environmentUUID := fixture.environmentUUID
+	rollbackRequest := fixture.rollbackRequest
+	claims := fixture.claims
+	privateKey := fixture.privateKey
+	now := fixture.now
+	material := fixture.material
+	do := fixture.do
+	resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: publisher}
+	require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, runnerID, rollbackDeployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{
+		Status: Failure, Error: &Error{Error: "controlled_failure", Message: "rollback worker stopped after partial effect"},
+	}))
+	retryRequest := rollbackRequest
+	retryRequest.FirstForwardDeploymentId = &deployment.Id
+	retryRequest.Rollback = &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: deployment.Id, RetryOfRollbackDeploymentId: &rollbackDeployment.Id}
+	for _, test := range []struct {
+		name, edit string
+		args       []any
+		change     func(*ExternalDeploymentAdmissionBody)
+	}{
+		{name: "no explicit predecessor", change: func(body *ExternalDeploymentAdmissionBody) { body.Rollback.RetryOfRollbackDeploymentId = nil }},
+		{name: "foreign predecessor", change: func(body *ExternalDeploymentAdmissionBody) {
+			body.Rollback.RetryOfRollbackDeploymentId = ref.Ref(uuid.New())
+		}},
+		{name: "later anchor cannot reset base", change: func(body *ExternalDeploymentAdmissionBody) { body.FirstForwardDeploymentId = &rollbackDeployment.Id }},
+		{name: "wrong operation", change: func(body *ExternalDeploymentAdmissionBody) { body.OperationRef = uuid.New() }},
+		{name: "wrong Environment", change: func(body *ExternalDeploymentAdmissionBody) { body.EnvironmentUuid = uuid.New() }},
+		{name: "missing result", edit: "DELETE FROM runner_event_inbox WHERE deployment_id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "wrong Runner result", edit: "UPDATE runner_event_inbox SET runner_id='other-runner' WHERE deployment_id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "wrong org result", edit: "UPDATE runner_event_inbox SET org_id='other-org' WHERE deployment_id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "unknown outcome", edit: "UPDATE deployments SET status='executing' WHERE id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "uncompleted predecessor", edit: "UPDATE deployments SET completed_at=NULL WHERE id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "unknown legacy provenance", edit: "UPDATE external_operation_deployments SET forward_deployment_id=NULL WHERE deployment_id=$1", args: []any{rollbackDeployment.Id}},
+		{name: "different original forward", edit: "UPDATE external_operation_deployments SET forward_deployment_id=$2 WHERE deployment_id=$1", args: []any{rollbackDeployment.Id, uuid.New()}},
+		{name: "different base", edit: "UPDATE deployments SET rollback_to_id=$2 WHERE id=$1", args: []any{rollbackDeployment.Id, base.Id}},
+		{name: "foreign newer head", edit: "UPDATE deployment_environments SET last_state_deployment_id=$2 WHERE id=$1", args: []any{environmentUUID, deployment.Id}},
+		{name: "active lease", edit: "INSERT INTO environment_deployment_leases (environment_id,org_id,project_id,env_id,holder_id,purpose,expires_at) VALUES ($1,'acme','checkout','production',$2,'deployment',now()+interval '1 minute')", args: []any{environmentUUID, uuid.New()}},
+	} {
+		if test.name == "different base" {
+			test.args[1] = uuid.New()
+		}
+		t.Run(test.name, func(t *testing.T) {
+			tx, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tx.Rollback()) }()
+			if test.edit != "" {
+				_, err = tx.ExecContext(ctx, test.edit, test.args...)
+				require.NoError(t, err)
+			}
+			candidate := retryRequest
+			rollback := *retryRequest.Rollback
+			candidate.Rollback = &rollback
+			if test.change != nil {
+				test.change(&candidate)
+			}
+			_, err = adapter.createExternalRollback(ctx, tx, actorID, orgID, pluginID, candidate, platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: projectID, ProjectUuid: &projectUUID, Id: envID, RunnerId: ref.Ref(runnerID)}, material.Recipient)
+			require.Error(t, err)
+			var count int
+			require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&count))
+			require.Equal(t, 1, count, "rejected retry must create no Deployment")
+		})
+	}
+	retryBody, err := json.Marshal(retryRequest)
+	require.NoError(t, err)
+	retryClaims := claims
+	retryClaims.RequestID, retryClaims.BodySHA256 = "dispatch-explicit-rollback-retry", plugincontext.Digest(retryBody)
+	retryAssertion, err := plugincontext.Sign(privateKey, retryClaims, now)
+	require.NoError(t, err)
+	created := do(retryBody, retryAssertion, retryClaims.RequestID)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var retryResult ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &retryResult))
+	retryDeployment, _, _, _, err := store.GetDeployment(ctx, nil, orgID, retryResult.DeploymentId, model.GetModeDefault)
+	require.NoError(t, err)
+	require.Equal(t, base.Id, retryDeployment.RollbackToId.Must())
+	tx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	receipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, retryDeployment.Id)
+	require.NoError(t, err)
+	require.Equal(t, deployment.Id, receipt.ForwardDeploymentID.Must())
+	require.Equal(t, rollbackDeployment.Id, receipt.RetryOfRollbackDeploymentID.Must())
+	status, err := adapter.projectExternalDeploymentStatus(ctx, tx, *retryDeployment, *receipt, projectUUID, environmentUUID)
+	require.NoError(t, err)
+	require.Equal(t, deployment.Id, *status.FirstForwardDeploymentID)
+	require.Equal(t, base.Id, *status.RollbackBaseDeploymentID)
+	require.Equal(t, rollbackDeployment.Id, *status.AdmissionBaseDeploymentID)
+	require.NotNil(t, status.RollbackRetryProvenanceRecorded)
+	require.True(t, *status.RollbackRetryProvenanceRecorded)
+	require.NoError(t, tx.Rollback())
+	verifyExternalRollbackProvenanceMarker(t, fixture, *retryDeployment)
+	replayed := do(retryBody, retryAssertion, retryClaims.RequestID)
+	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
+	var replay ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(replayed.Body.Bytes(), &replay))
+	require.True(t, replay.Replayed)
+	require.Equal(t, retryDeployment.Id, replay.DeploymentId)
+}
+
+func verifyExternalRollbackProvenanceMarker(t *testing.T, fixture externalRollbackFixture, retry model.DeploymentSummary) {
+	t.Helper()
+	for _, test := range []struct {
+		name, edit string
+		id         uuid.UUID
+		args       []any
+	}{
+		{name: "recorded original", id: fixture.rollbackDeployment.Id},
+		{name: "recorded retry", id: retry.Id},
+		{name: "missing forward", id: retry.Id, edit: "UPDATE external_operation_deployments SET forward_deployment_id=NULL WHERE deployment_id=$1", args: []any{retry.Id}},
+		{name: "unknown forward", id: retry.Id, edit: "UPDATE external_operation_deployments SET forward_deployment_id=$2 WHERE deployment_id=$1", args: []any{retry.Id, uuid.New()}},
+		{name: "unknown predecessor", id: retry.Id, edit: "UPDATE external_operation_deployments SET retry_of_rollback_deployment_id=$2 WHERE deployment_id=$1", args: []any{retry.Id, uuid.New()}},
+		{name: "predecessor without recorded forward", id: retry.Id, edit: "UPDATE external_operation_deployments SET forward_deployment_id=NULL WHERE deployment_id=$1", args: []any{fixture.rollbackDeployment.Id}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx, err := fixture.store.BeginTx(fixture.ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tx.Rollback()) }()
+			if test.edit != "" {
+				_, err = tx.ExecContext(fixture.ctx, test.edit, test.args...)
+				require.NoError(t, err)
+			}
+			deployment, _, _, _, err := fixture.store.GetDeployment(fixture.ctx, tx, fixture.orgID, test.id, model.GetModeDefault)
+			require.NoError(t, err)
+			receipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(fixture.ctx, tx, fixture.orgID, fixture.pluginID, test.id)
+			require.NoError(t, err)
+			status, err := fixture.adapter.projectExternalDeploymentStatus(fixture.ctx, tx, *deployment, *receipt, fixture.projectUUID, fixture.environmentUUID)
+			require.NoError(t, err)
+			require.NotNil(t, status.RollbackRetryProvenanceRecorded)
+			require.Equal(t, test.edit == "", *status.RollbackRetryProvenanceRecorded)
+			if test.name == "recorded retry" {
+				encoded, err := json.Marshal(status)
+				require.NoError(t, err)
+				t.Logf("RecordedR2Status=%s", encoded)
+			}
+		})
+	}
+}
+
+func verifyExternalForwardRetryBase(t *testing.T, fixture externalRollbackFixture) {
+	t.Helper()
+	server := fixture.server
+	ctx := fixture.ctx
+	store := fixture.store
+	adapter := fixture.adapter
+	publisher := fixture.publisher
+	orgID := fixture.orgID
+	pluginID := fixture.pluginID
+	runnerID := fixture.runnerID
+	projectID := fixture.projectID
+	envID := fixture.envID
+	operationID := fixture.operationID
+	deployment := fixture.deployment
+	rollbackDeployment := fixture.rollbackDeployment
+	base := fixture.base
+	projectUUID := fixture.projectUUID
+	environmentUUID := fixture.environmentUUID
+	rollbackRequest := fixture.rollbackRequest
+	claims := fixture.claims
+	privateKey := fixture.privateKey
+	now := fixture.now
+	planClaims := fixture.planClaims
+	planPath := fixture.planPath
+	planBodyBytes := fixture.planBodyBytes
+	plan := fixture.plan
+	moduleUUID := fixture.moduleUUID
+	targetVersionUUID := fixture.targetVersionUUID
+	baseVersionUUID := fixture.baseVersionUUID
+	do := fixture.do
+	resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: publisher}
+	require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, runnerID, rollbackDeployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{Status: Success}))
+
+	// A forward retry needs a fresh admission snapshot of R1, not B0.
+	retryPlanClaims := planClaims
+	retryPlanClaims.RequestID = "plan-forward-retry"
+	retryPlanAssertion, signErr := plugincontext.Sign(privateKey, retryPlanClaims, now)
+	require.NoError(t, signErr)
+	retryPlanRequest := httptest.NewRequest(http.MethodPost, planPath, bytes.NewReader(planBodyBytes))
+	retryPlanRequest.Header.Set("Content-Type", "application/json")
+	retryPlanRequest.Header.Set("Idempotency-Key", retryPlanClaims.RequestID)
+	retryPlanRequest.Header.Set(plugincontext.Header, retryPlanAssertion)
+	retryPlanResponse := httptest.NewRecorder()
+	server.ServeHTTP(retryPlanResponse, retryPlanRequest)
+	require.Equal(t, http.StatusOK, retryPlanResponse.Code, retryPlanResponse.Body.String())
+	var retryPlan externalDeploymentPlanResponse
+	require.NoError(t, json.Unmarshal(retryPlanResponse.Body.Bytes(), &retryPlan))
+	require.NotEqual(t, plan.SnapshotID, retryPlan.SnapshotID)
+
+	retryBody, marshalErr := json.Marshal(ExternalDeploymentAdmissionBody{
+		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeDeploy,
+		Plan: &ExternalDeploymentAdmissionPlan{
+			SnapshotId: retryPlan.SnapshotID, Fingerprint: retryPlan.Fingerprint,
+			ExpectedModuleVersions: map[string]uuid.UUID{moduleUUID.String(): targetVersionUUID},
+		},
+	})
+	require.NoError(t, marshalErr)
+	var invalidRetry ExternalDeploymentAdmissionBody
+	require.NoError(t, json.Unmarshal(retryBody, &invalidRetry))
+	invalidRetry.FirstForwardDeploymentId = &rollbackDeployment.Id
+	invalidBody, marshalErr := json.Marshal(invalidRetry)
+	require.NoError(t, marshalErr)
+	invalidClaims := claims
+	invalidClaims.RequestID, invalidClaims.BodySHA256 = "dispatch-reset-anchor", plugincontext.Digest(invalidBody)
+	invalidAssertion, signErr := plugincontext.Sign(privateKey, invalidClaims, now)
+	require.NoError(t, signErr)
+	require.Equal(t, http.StatusConflict, do(invalidBody, invalidAssertion, invalidClaims.RequestID).Code, "later same-operation forward cannot reset its original base")
+	retryClaims := claims
+	retryClaims.RequestID = "dispatch-forward-retry"
+	retryClaims.BodySHA256 = plugincontext.Digest(retryBody)
+	retryAssertion, signErr := plugincontext.Sign(privateKey, retryClaims, now)
+	require.NoError(t, signErr)
+	retryResponse := do(retryBody, retryAssertion, retryClaims.RequestID)
+	require.Equal(t, http.StatusCreated, retryResponse.Code, retryResponse.Body.String())
+	var retriedForward ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(retryResponse.Body.Bytes(), &retriedForward))
+	require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, runnerID, retriedForward.DeploymentId, uuid.NewString(), DeploymentResultsUpdateBody{Status: Success}))
+	receiptTx, beginErr := store.BeginTx(ctx, nil)
+	require.NoError(t, beginErr)
+	forwardRetryReceipt, receiptErr := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, receiptTx, orgID, pluginID, retriedForward.DeploymentId)
+	require.NoError(t, receiptErr)
+	removed, deleteErr := receiptTx.ExecContext(ctx, "DELETE FROM external_deployment_plan_snapshots WHERE org_id=$1 AND plugin_id=$2 AND environment_uuid=$3", orgID, pluginID, environmentUUID)
+	require.NoError(t, deleteErr)
+	removedCount, countErr := removed.RowsAffected()
+	require.NoError(t, countErr)
+	require.EqualValues(t, 2, removedCount)
+	settledForward, _, _, _, readErr := store.GetDeployment(ctx, receiptTx, orgID, retriedForward.DeploymentId, model.GetModeDefault)
+	require.NoError(t, readErr)
+	status, statusErr := adapter.projectExternalDeploymentStatus(ctx, receiptTx, *settledForward, *forwardRetryReceipt, projectUUID, environmentUUID)
+	require.NoError(t, statusErr)
+	require.Equal(t, deployment.Id, *status.FirstForwardDeploymentID)
+	require.Equal(t, base.Id, *status.RollbackBaseDeploymentID)
+	require.Equal(t, rollbackDeployment.Id, *status.AdmissionBaseDeploymentID)
+	require.NoError(t, receiptTx.Commit())
+	forwardReplay := do(retryBody, retryAssertion, retryClaims.RequestID)
+	require.Equal(t, http.StatusOK, forwardReplay.Code, forwardReplay.Body.String(), "exact-key replay remains valid after candidate plan snapshots are superseded")
+	var forwardReplayResult ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(forwardReplay.Body.Bytes(), &forwardReplayResult))
+	require.Equal(t, retriedForward.DeploymentId, forwardReplayResult.DeploymentId)
+	require.Equal(t, rollbackDeployment.Id, forwardRetryReceipt.BaseDeploymentID.Must(), "F2 must admit against the fresh current head R1")
+	require.Equal(t, operationID.String(), forwardRetryReceipt.OperationRef)
+	require.Equal(t, environmentUUID, forwardRetryReceipt.EnvironmentUUID.Must())
+	t.Run("ambiguous legacy history cannot reset anchor", func(t *testing.T) {
+		tx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, tx.Rollback()) }()
+		_, err = tx.ExecContext(ctx, "DELETE FROM external_operation_rollback_anchors")
+		require.NoError(t, err)
+		_, err = adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
+		require.ErrorContains(t, err, "ambiguous")
+	})
+
+	retryRollbackBody, marshalErr := json.Marshal(ExternalDeploymentAdmissionBody{
+		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeRollback,
+		Rollback: &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: retriedForward.DeploymentId},
+	})
+	require.NoError(t, marshalErr)
+	retryRollbackClaims := claims
+	retryRollbackClaims.RequestID = "dispatch-rollback-after-forward-retry"
+	retryRollbackClaims.BodySHA256 = plugincontext.Digest(retryRollbackBody)
+	retryRollbackAssertion, signErr := plugincontext.Sign(privateKey, retryRollbackClaims, now)
+	require.NoError(t, signErr)
+	retryRollbackResponse := do(retryRollbackBody, retryRollbackAssertion, retryRollbackClaims.RequestID)
+	require.Equal(t, http.StatusCreated, retryRollbackResponse.Code, retryRollbackResponse.Body.String())
+	var retriedRollback ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(retryRollbackResponse.Body.Bytes(), &retriedRollback))
+	secondRollback, _, _, _, readErr := store.GetDeployment(ctx, nil, orgID, retriedRollback.DeploymentId, model.GetModeDefault)
+	require.NoError(t, readErr)
+	require.Equal(t, model.DeploymentModeRollback, secondRollback.Mode)
+	require.Equal(t, baseVersionUUID, secondRollback.ModuleArtifacts[0].VersionUUID, "equivalent Module Versions are insufficient to establish snapshot identity")
+	t.Logf("B0=%s F1=%s R1=%s F2=%s R2=%s actualRollbackTarget=%s", base.Id, deployment.Id, rollbackDeployment.Id, retriedForward.DeploymentId, secondRollback.Id, secondRollback.RollbackToId.Must())
+	require.Equal(t, base.Id, secondRollback.RollbackToId.Must(), "R2 must restore the exact base B0 captured before this operation's FIRST forward, not equivalent R1")
+}
+
+func verifyExternalRollbackCannotImplicitlyRetry(t *testing.T, fixture externalRollbackFixture) {
+	t.Helper()
+	ctx := fixture.ctx
+	store := fixture.store
+	rollbackDeployment := fixture.rollbackDeployment
+	adapter := fixture.adapter
+	actorID := fixture.actorID
+	orgID := fixture.orgID
+	pluginID := fixture.pluginID
+	rollbackRequest := fixture.rollbackRequest
+	environmentUUID := fixture.environmentUUID
+	projectID := fixture.projectID
+	projectUUID := fixture.projectUUID
+	envID := fixture.envID
+	runnerID := fixture.runnerID
+	material := fixture.material
+	t.Run("own failed rollback head requires explicit retry design", func(t *testing.T) {
+		tx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, tx.Rollback()) }()
+		_, err = store.UpdateDeploymentStatusAndOutputs(ctx, tx, rollbackDeployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: model.DeploymentStatusFailed})
+		require.NoError(t, err)
+		_, err = adapter.createExternalRollback(ctx, tx, actorID, orgID, pluginID, rollbackRequest, platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: projectID, ProjectUuid: &projectUUID, Id: envID, RunnerId: ref.Ref(runnerID)}, material.Recipient)
+		require.ErrorContains(t, err, "no longer the current head", "this narrow forward recovery must not silently authorize retry through another Deployment head")
+		var count int
+		require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&count))
+		require.Equal(t, 1, count)
+	})
+}
+
+func verifyExternalAdmissionRevocationAndAssertionBinding(t *testing.T, fixture externalRollbackFixture) {
+	t.Helper()
+	grantActive, checks := fixture.grantActive, fixture.checks
+	do, bodyBytes, assertion := fixture.do, fixture.bodyBytes, fixture.assertion
+	dispatchID := fixture.claims.RequestID
 	grantActive.Store(false)
 	revoked := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusForbidden, revoked.Code, revoked.Body.String())

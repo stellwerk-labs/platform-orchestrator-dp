@@ -1160,6 +1160,7 @@ components:
       required: [forward_deployment_id]
       properties:
         forward_deployment_id: {type: string, format: uuid}
+        retry_of_rollback_deployment_id: {type: string, format: uuid}
 
     ExternalDeploymentAdmissionBody:
       type: object
@@ -1167,6 +1168,7 @@ components:
       required: [operation_ref, fence, project_id, env_id, project_uuid, environment_uuid, mode]
       properties:
         operation_ref: {type: string, format: uuid}
+        first_forward_deployment_id: {type: string, format: uuid}
         fence: {type: integer, format: int64, minimum: 1}
         project_id: {type: string, minLength: 1}
         env_id: {type: string, minLength: 1}
@@ -1191,6 +1193,14 @@ components:
       required: [deployment_id, dispatch_id, operation_ref, fence, request_digest, project_id, env_id, project_uuid, environment_uuid, mode, status, status_message, module_versions, rollback_module_versions, created_at, receipt_created_at]
       properties:
         deployment_id: {type: string, format: uuid}
+        first_forward_deployment_id: {type: string, format: uuid}
+        rollback_base_deployment_id: {type: string, format: uuid}
+        admission_base_deployment_id: {type: string, format: uuid}
+        forward_deployment_id: {type: string, format: uuid}
+        retry_of_rollback_deployment_id: {type: string, format: uuid}
+        rollback_retry_provenance_recorded:
+          type: boolean
+          description: Present on rollback status. True only when the retained receipt records validated predecessor provenance. False for read-only legacy lineage projection; terminal outcome and current-head eligibility remain separate admission checks.
         dispatch_id: {type: string}
         operation_ref: {type: string, format: uuid}
         fence: {type: integer, format: int64, minimum: 1}

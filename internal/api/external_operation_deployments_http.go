@@ -229,6 +229,9 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 }
 
 func validateExternalDeploymentBody(body ExternalDeploymentAdmissionBody) (model.DeploymentMode, string, error) {
+	if body.FirstForwardDeploymentId != nil && *body.FirstForwardDeploymentId == uuid.Nil {
+		return "", "", errors.New("first_forward_deployment_id must be a nonzero UUID")
+	}
 	if body.ProjectId == "" || body.EnvId == "" || body.ProjectUuid == uuid.Nil || body.EnvironmentUuid == uuid.Nil {
 		return "", "", errors.New("project and Environment identities are required")
 	}
@@ -253,6 +256,9 @@ func validateExternalDeploymentBody(body ExternalDeploymentAdmissionBody) (model
 		if body.Rollback == nil || body.Plan != nil || body.Rollback.ForwardDeploymentId == uuid.Nil {
 			return "", "", errors.New("rollback requires one forward deployment reference and no plan")
 		}
+		if body.Rollback.RetryOfRollbackDeploymentId != nil && *body.Rollback.RetryOfRollbackDeploymentId == uuid.Nil {
+			return "", "", errors.New("retry_of_rollback_deployment_id must be a nonzero UUID")
+		}
 		return model.DeploymentModeRollback, ExternalDeploymentRollbackAction, nil
 	default:
 		return "", "", errors.New("mode must be deploy or rollback")
@@ -263,6 +269,14 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
 	environment platformorchestratorcp.Environment, recipient string,
 ) (*ExternalDeploymentCreation, error) {
+	scope := externalRollbackScope(orgID, pluginID, body)
+	anchor, err := a.operationRollbackAnchor(ctx, tx, scope, true)
+	if err != nil {
+		return nil, err
+	}
+	if body.FirstForwardDeploymentId != nil && (anchor == nil || *body.FirstForwardDeploymentId != anchor.FirstForwardDeploymentID) {
+		return nil, model.NewErrConflict("first forward assertion differs from immutable operation lineage")
+	}
 	snapshot, err := model.GetExternalDeploymentPlanSnapshotByID(ctx, tx, orgID, pluginID, body.Plan.SnapshotId)
 	if err != nil {
 		return nil, err
@@ -330,6 +344,15 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	if err != nil {
 		return nil, err
 	}
+	if anchor == nil {
+		scope.FirstForwardDeploymentID, scope.RollbackBaseDeploymentID = deployment.Id, snapshot.BaseDeploymentID
+		if err := a.validateRollbackBase(ctx, tx, scope); err != nil {
+			return nil, err
+		}
+		if err := model.CreateExternalOperationRollbackAnchor(ctx, tx, scope); err != nil {
+			return nil, err
+		}
+	}
 	return &ExternalDeploymentCreation{
 		Deployment: deployment, PendingEvents: pending, PlanSnapshotID: opt.Of(snapshot.ID), BaseDeploymentID: opt.Of(snapshot.BaseDeploymentID),
 	}, nil
@@ -339,6 +362,14 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
 	environment platformorchestratorcp.Environment, recipient string,
 ) (*ExternalDeploymentCreation, error) {
+	scope := externalRollbackScope(orgID, pluginID, body)
+	anchor, err := a.operationRollbackAnchor(ctx, tx, scope, true)
+	if err != nil {
+		return nil, err
+	}
+	if anchor == nil || body.FirstForwardDeploymentId != nil && *body.FirstForwardDeploymentId != anchor.FirstForwardDeploymentID {
+		return nil, model.NewErrConflict("rollback requires the immutable first forward lineage")
+	}
 	forwardReceipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, body.Rollback.ForwardDeploymentId)
 	if err != nil {
 		return nil, model.NewErrConflict("forward external deployment receipt was not found")
@@ -356,7 +387,25 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		forward.DeploymentEnvUuid != body.EnvironmentUuid || forward.ProjectId != body.ProjectId || forward.EnvId != body.EnvId {
 		return nil, model.NewErrConflict("forward deployment is not a stopped terminal Deployment in this Environment")
 	}
-	baseID := forwardReceipt.BaseDeploymentID.Must()
+	baseID := anchor.RollbackBaseDeploymentID
+	expectedHead := forward.Id
+	retryOf := opt.Empty[uuid.UUID]()
+	if body.Rollback.RetryOfRollbackDeploymentId != nil {
+		previousID := *body.Rollback.RetryOfRollbackDeploymentId
+		previousReceipt, err := model.ReadExternalOperationDeploymentReceiptByDeployment(ctx, tx, orgID, pluginID, previousID)
+		if err != nil || !externalReceiptOwnsScope(previousReceipt, scope) || previousReceipt.ServiceAction != ExternalDeploymentRollbackAction ||
+			!previousReceipt.BaseDeploymentID.IsSet() || previousReceipt.BaseDeploymentID.Must() != baseID ||
+			!previousReceipt.ForwardDeploymentID.IsSet() || previousReceipt.ForwardDeploymentID.Must() != forward.Id {
+			return nil, model.NewErrConflict("rollback retry predecessor is outside this operation or original base")
+		}
+		previous, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, previousID, model.GetModeDefault)
+		if err != nil || previous.Mode != model.DeploymentModeRollback || previous.Status != model.DeploymentStatusFailed || !previous.CompletedAt.IsSet() ||
+			previous.DeploymentEnvUuid != body.EnvironmentUuid || previous.ProjectId != body.ProjectId || previous.EnvId != body.EnvId ||
+			!previous.RollbackToId.IsSet() || previous.RollbackToId.Must() != baseID {
+			return nil, model.NewErrConflict("rollback retry requires this operation's terminal failed rollback to the original base")
+		}
+		expectedHead, retryOf = previousID, opt.Of(previousID)
+	}
 	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, baseID, model.GetModeDefault)
 	if err != nil || base.Status != model.DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != body.EnvironmentUuid || base.ProjectId != body.ProjectId || base.EnvId != body.EnvId {
 		return nil, model.NewErrConflict("captured rollback base is not retained as a succeeded Deployment")
@@ -375,7 +424,8 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
 			RestrictedConfirmations:     confirmations,
-			ExpectedCurrentDeploymentID: opt.Of(forward.Id),
+			ExpectedCurrentDeploymentID: opt.Of(expectedHead),
+			RetryOfRollbackDeploymentID: retryOf,
 			ValidatePlan: func(captured DeploymentPlanCapture) error {
 				versions, versionErr := immutableModuleVersions(captured.ModuleArtifacts)
 				if versionErr != nil || captured.BaseDeploymentID != baseID || !reflect.DeepEqual(versions, expectedVersions) {
@@ -388,7 +438,8 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 	if err != nil {
 		return nil, err
 	}
-	return &ExternalDeploymentCreation{Deployment: deployment, PendingEvents: pending, BaseDeploymentID: opt.Of(baseID)}, nil
+	return &ExternalDeploymentCreation{Deployment: deployment, PendingEvents: pending, BaseDeploymentID: opt.Of(baseID),
+		ForwardDeploymentID: opt.Of(forward.Id), RetryOfRollbackDeploymentID: retryOf}, nil
 }
 
 func externalRunnerLogLevel(level *ExternalDeploymentAdmissionBodyRunnerLogLevel) *DeploymentCreateBodyRunnerLogLevel {

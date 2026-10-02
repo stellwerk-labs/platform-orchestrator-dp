@@ -2019,6 +2019,10 @@
           "forward_deployment_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "retry_of_rollback_deployment_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -2036,6 +2040,10 @@
         ],
         "properties": {
           "operation_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "first_forward_deployment_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -2126,6 +2134,30 @@
           "deployment_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "first_forward_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rollback_base_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "admission_base_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "forward_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retry_of_rollback_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rollback_retry_provenance_recorded": {
+            "type": "boolean",
+            "description": "Present on rollback status. True only when the retained receipt records validated predecessor provenance. False for read-only legacy lineage projection; terminal outcome and current-head eligibility remain separate admission checks."
           },
           "dispatch_id": {
             "type": "string"

@@ -88,6 +88,7 @@ type DeploymentOptions struct {
 	IgnoreEnvironmentPins       bool
 	RequireExistingRunner       bool
 	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
 	Admission                   *OrdinaryDeploymentAdmissionAttempt
 	CapturePlan                 *DeploymentPlanCapture
 	ValidatePlan                func(DeploymentPlanCapture) error
@@ -487,6 +488,7 @@ func CreateDeploymentWithOptions(
 		ModuleArtifacts:             deploymentArtifacts,
 		ModuleVersionRequestDigest:  requestDigest,
 		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
+		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")

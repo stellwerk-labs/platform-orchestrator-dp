@@ -24,20 +24,22 @@ type ExternalOperationDeploymentKey struct {
 // request to the ordinary Deployment created by the Data Plane.
 type ExternalOperationDeploymentReceipt struct {
 	ExternalOperationDeploymentKey
-	OperationRef      string
-	Fence             int64
-	AssertionAction   string
-	ServiceAction     string
-	RequestBodySHA256 string
-	ActorID           string
-	ProjectID         string
-	EnvID             string
-	ProjectUUID       opt.Opt[uuid.UUID]
-	EnvironmentUUID   opt.Opt[uuid.UUID]
-	PlanSnapshotID    opt.Opt[uuid.UUID]
-	BaseDeploymentID  opt.Opt[uuid.UUID]
-	DeploymentID      uuid.UUID
-	CreatedAt         time.Time
+	OperationRef                string
+	Fence                       int64
+	AssertionAction             string
+	ServiceAction               string
+	RequestBodySHA256           string
+	ActorID                     string
+	ProjectID                   string
+	EnvID                       string
+	ProjectUUID                 opt.Opt[uuid.UUID]
+	EnvironmentUUID             opt.Opt[uuid.UUID]
+	PlanSnapshotID              opt.Opt[uuid.UUID]
+	BaseDeploymentID            opt.Opt[uuid.UUID]
+	ForwardDeploymentID         opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
+	DeploymentID                uuid.UUID
+	CreatedAt                   time.Time
 }
 
 // GetExternalOperationDeploymentReceipt serializes the first use of a request
@@ -58,7 +60,7 @@ func GetExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, key Exter
 	receipt := &ExternalOperationDeploymentReceipt{ExternalOperationDeploymentKey: key}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT operation_ref, fence, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id,
-		       project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, deployment_id, created_at
+		       project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, forward_deployment_id, retry_of_rollback_deployment_id, deployment_id, created_at
 		FROM external_operation_deployments
 		WHERE org_id=$1 AND plugin_id=$2 AND request_id=$3
 		FOR UPDATE
@@ -75,6 +77,8 @@ func GetExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, key Exter
 		opt.Scan(&receipt.EnvironmentUUID),
 		opt.Scan(&receipt.PlanSnapshotID),
 		opt.Scan(&receipt.BaseDeploymentID),
+		opt.Scan(&receipt.ForwardDeploymentID),
+		opt.Scan(&receipt.RetryOfRollbackDeploymentID),
 		&receipt.DeploymentID,
 		&receipt.CreatedAt,
 	); err != nil {
@@ -96,14 +100,14 @@ func ReadExternalOperationDeploymentReceiptByDeployment(ctx context.Context, tx 
 	}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT request_id, operation_ref, fence, assertion_action, service_action, request_body_sha256, actor_id,
-		       project_id, env_id, project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, created_at
+		       project_id, env_id, project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, forward_deployment_id, retry_of_rollback_deployment_id, created_at
 		FROM external_operation_deployments
 		WHERE org_id=$1 AND plugin_id=$2 AND deployment_id=$3
 	`, orgID, pluginID, deploymentID).Scan(
 		&receipt.RequestID, &receipt.OperationRef, &receipt.Fence, &receipt.AssertionAction, &receipt.ServiceAction,
 		&receipt.RequestBodySHA256, &receipt.ActorID, &receipt.ProjectID, &receipt.EnvID,
 		opt.Scan(&receipt.ProjectUUID), opt.Scan(&receipt.EnvironmentUUID), opt.Scan(&receipt.PlanSnapshotID),
-		opt.Scan(&receipt.BaseDeploymentID), &receipt.CreatedAt,
+		opt.Scan(&receipt.BaseDeploymentID), opt.Scan(&receipt.ForwardDeploymentID), opt.Scan(&receipt.RetryOfRollbackDeploymentID), &receipt.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, NewErrNotFound("no external operation receipt found for the deployment")
@@ -123,12 +127,13 @@ func CreateExternalOperationDeploymentReceipt(ctx context.Context, tx Tx, receip
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO external_operation_deployments
 			(org_id, plugin_id, operation_ref, fence, request_id, assertion_action, service_action, request_body_sha256, actor_id, project_id, env_id,
-			 project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, deployment_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			 project_uuid, environment_uuid, plan_snapshot_id, base_deployment_id, deployment_id, forward_deployment_id, retry_of_rollback_deployment_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		RETURNING created_at
 	`, receipt.OrgID, receipt.PluginID, receipt.OperationRef, receipt.Fence, receipt.RequestID,
 		receipt.AssertionAction, receipt.ServiceAction, receipt.RequestBodySHA256, receipt.ActorID, receipt.ProjectID, receipt.EnvID,
 		receipt.ProjectUUID.Ref(), receipt.EnvironmentUUID.Ref(), receipt.PlanSnapshotID.Ref(), receipt.BaseDeploymentID.Ref(), receipt.DeploymentID,
+		receipt.ForwardDeploymentID.Ref(), receipt.RetryOfRollbackDeploymentID.Ref(),
 	).Scan(&receipt.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to insert external operation deployment receipt")
 	}

@@ -59,10 +59,12 @@ type ExternalDeploymentGrantAuthorizer interface {
 // the supplied transaction. It is intentionally not a second deployment
 // engine, and the service verifies the returned Deployment's owner fields.
 type ExternalDeploymentCreation struct {
-	Deployment       *model.DeploymentSummary
-	PendingEvents    []*hstandardoutbox.PendingEventMessage
-	PlanSnapshotID   opt.Opt[uuid.UUID]
-	BaseDeploymentID opt.Opt[uuid.UUID]
+	Deployment                  *model.DeploymentSummary
+	PendingEvents               []*hstandardoutbox.PendingEventMessage
+	PlanSnapshotID              opt.Opt[uuid.UUID]
+	BaseDeploymentID            opt.Opt[uuid.UUID]
+	ForwardDeploymentID         opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
 }
 
 type ExternalDeploymentCreator func(context.Context, model.Tx, uuid.UUID) (*ExternalDeploymentCreation, error)
@@ -190,6 +192,8 @@ func (s ExternalDeploymentAdmissionService) Admit(ctx context.Context, request E
 		EnvironmentUUID:                opt.Of(request.EnvUUID),
 		PlanSnapshotID:                 creation.PlanSnapshotID,
 		BaseDeploymentID:               creation.BaseDeploymentID,
+		ForwardDeploymentID:            creation.ForwardDeploymentID,
+		RetryOfRollbackDeploymentID:    creation.RetryOfRollbackDeploymentID,
 		DeploymentID:                   deployment.Id,
 	}); err != nil {
 		return nil, err
