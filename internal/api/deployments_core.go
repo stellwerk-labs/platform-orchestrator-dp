@@ -87,6 +87,7 @@ type DeploymentOptions struct {
 	ReuseLastSuccessfulManifest bool
 	IgnoreEnvironmentPins       bool
 	RequireExistingRunner       bool
+	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
 	Admission                   *OrdinaryDeploymentAdmissionAttempt
 	CapturePlan                 *DeploymentPlanCapture
 	ValidatePlan                func(DeploymentPlanCapture) error
@@ -470,21 +471,22 @@ func CreateDeploymentWithOptions(
 	}
 
 	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, model.CreateDeploymentParams{
-		CreatedBy:                  createdBy,
-		DeploymentEnvUuid:          env.Uuid,
-		Mode:                       mode,
-		Manifest:                   rawManifest,
-		RollbackToId:               rollbackTo,
-		Graph:                      rawNewGraph,
-		Tofu:                       rawTofu,
-		IdempotencyKeyDigest:       idempotencyKeyDigest,
-		RunnerId:                   runner.Id,
-		EncryptedOutputsRecipient:  opt.OfRef(encryptedOutputsRecipient),
-		EncryptedLogsRecipient:     opt.OfRef(encryptedLogsRecipient),
-		Metrics:                    metrics,
-		RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
-		ModuleArtifacts:            deploymentArtifacts,
-		ModuleVersionRequestDigest: requestDigest,
+		CreatedBy:                   createdBy,
+		DeploymentEnvUuid:           env.Uuid,
+		Mode:                        mode,
+		Manifest:                    rawManifest,
+		RollbackToId:                rollbackTo,
+		Graph:                       rawNewGraph,
+		Tofu:                        rawTofu,
+		IdempotencyKeyDigest:        idempotencyKeyDigest,
+		RunnerId:                    runner.Id,
+		EncryptedOutputsRecipient:   opt.OfRef(encryptedOutputsRecipient),
+		EncryptedLogsRecipient:      opt.OfRef(encryptedLogsRecipient),
+		Metrics:                     metrics,
+		RunnerLogLevel:              string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		ModuleArtifacts:             deploymentArtifacts,
+		ModuleVersionRequestDigest:  requestDigest,
+		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")

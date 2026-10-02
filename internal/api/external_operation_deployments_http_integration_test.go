@@ -34,10 +34,20 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 )
 
 func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesReplay(t *testing.T) {
+	for _, status := range []model.DeploymentStatus{model.DeploymentStatusSucceeded, model.DeploymentStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			testExternalDeploymentHTTPAdapterRollback(t, status)
+		})
+	}
+}
+
+func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model.DeploymentStatus) {
+	t.Helper()
 	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
 	require.NotEmpty(t, connection, "MODEL_TEST_DB_CONNECTION_STRING must name an isolated local PostgreSQL test database")
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
@@ -321,10 +331,79 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	replayed := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
 	require.EqualValues(t, 3, checks.Load(), "replay must reauthorize before loading its receipt")
-	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{
-		Status: model.DeploymentStatusSucceeded, StatusMessage: "forward ready",
-	})
-	require.NoError(t, err)
+	if forwardStatus == model.DeploymentStatusFailed {
+		resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: publisher}
+		require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, runnerID, deployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{
+			Status: Failure, Error: &Error{Error: "controlled_failure", Message: "forward worker stopped after partial effect"},
+		}))
+	} else {
+		_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: forwardStatus, StatusMessage: "forward worker stopped"})
+		require.NoError(t, err)
+	}
+	rollbackRequest := ExternalDeploymentAdmissionBody{
+		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeRollback,
+		Rollback: &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: deployment.Id},
+	}
+	for _, test := range []struct {
+		name   string
+		edit   string
+		args   []any
+		change func(*ExternalDeploymentAdmissionBody)
+		org    string
+		plugin string
+	}{
+		{name: "foreign operation", change: func(body *ExternalDeploymentAdmissionBody) { body.OperationRef = uuid.New() }},
+		{name: "foreign organization", org: "foreign"},
+		{name: "foreign plugin", plugin: "dev.example.foreign"},
+		{name: "foreign project UUID", change: func(body *ExternalDeploymentAdmissionBody) { body.ProjectUuid = uuid.New() }},
+		{name: "foreign Environment UUID", change: func(body *ExternalDeploymentAdmissionBody) { body.EnvironmentUuid = uuid.New() }},
+		{name: "foreign project slug", change: func(body *ExternalDeploymentAdmissionBody) { body.ProjectId = "foreign" }},
+		{name: "foreign Environment slug", change: func(body *ExternalDeploymentAdmissionBody) { body.EnvId = "foreign" }},
+		{name: "running forward", edit: "UPDATE deployments SET status='executing' WHERE id=$1", args: []any{deployment.Id}},
+		{name: "unknown interrupted forward", edit: "UPDATE deployments SET status='executing',completed_at=NULL WHERE id=$1", args: []any{deployment.Id}},
+		{name: "forward not ended", edit: "UPDATE deployments SET completed_at=NULL WHERE id=$1", args: []any{deployment.Id}},
+		{name: "watchdog failure without Runner result", edit: "WITH failed AS (UPDATE deployments SET status='failed' WHERE id=$1 RETURNING id) DELETE FROM runner_event_inbox WHERE deployment_id=(SELECT id FROM failed)", args: []any{deployment.Id}},
+		{name: "foreign Runner result", edit: "WITH failed AS (UPDATE deployments SET status='failed' WHERE id=$1 RETURNING id) UPDATE runner_event_inbox SET runner_id='foreign' WHERE deployment_id=(SELECT id FROM failed)", args: []any{deployment.Id}},
+		{name: "foreign organization result", edit: "WITH failed AS (UPDATE deployments SET status='failed' WHERE id=$1 RETURNING id) UPDATE runner_event_inbox SET org_id='foreign' WHERE deployment_id=(SELECT id FROM failed)", args: []any{deployment.Id}},
+		{name: "different Deployment result", edit: "WITH failed AS (UPDATE deployments SET status='failed' WHERE id=$1 RETURNING id) UPDATE runner_event_inbox SET deployment_id=$2 WHERE deployment_id=(SELECT id FROM failed)", args: []any{deployment.Id, uuid.New()}},
+		{name: "runner-error is not execution completion", edit: "WITH failed AS (UPDATE deployments SET status='failed' WHERE id=$1 RETURNING id) UPDATE runner_event_inbox SET event_type='runner-error' WHERE deployment_id=(SELECT id FROM failed)", args: []any{deployment.Id}},
+		{name: "missing captured base", edit: "UPDATE external_operation_deployments SET base_deployment_id=NULL WHERE deployment_id=$1", args: []any{deployment.Id}},
+		{name: "missing retained base", edit: "UPDATE external_operation_deployments SET base_deployment_id=$1 WHERE deployment_id=$2", args: []any{uuid.New(), deployment.Id}},
+		{name: "failed base", edit: "UPDATE deployments SET status='failed' WHERE id=$1", args: []any{base.Id}},
+		{name: "base not ended", edit: "UPDATE deployments SET completed_at=NULL WHERE id=$1", args: []any{base.Id}},
+		{name: "base missing Tofu", edit: "UPDATE deployments SET tofu='' WHERE id=$1", args: []any{base.Id}},
+		{name: "base missing manifest", edit: "UPDATE deployments SET manifest='null' WHERE id=$1", args: []any{base.Id}},
+		{name: "base missing graph", edit: "UPDATE deployments SET graph='null' WHERE id=$1", args: []any{base.Id}},
+		{name: "newer head", edit: "UPDATE deployment_environments SET last_state_deployment_id=$1 WHERE id=$2", args: []any{base.Id, environmentUUID}},
+		{name: "active mutating lease", edit: "INSERT INTO environment_deployment_leases (environment_id,org_id,project_id,env_id,holder_id,purpose,deployment_id,expires_at) VALUES ($1,$2,$3,$4,$5,'deployment',$5,now()+interval '1 hour')", args: []any{environmentUUID, orgID, projectID, envID, uuid.New()}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tx.Rollback()) }()
+			if test.edit != "" {
+				_, err = tx.ExecContext(ctx, test.edit, test.args...)
+				require.NoError(t, err)
+			}
+			body := rollbackRequest
+			if test.change != nil {
+				test.change(&body)
+			}
+			org, plugin := orgID, pluginID
+			if test.org != "" {
+				org = test.org
+			}
+			if test.plugin != "" {
+				plugin = test.plugin
+			}
+			_, err = adapter.createExternalRollback(ctx, tx, actorID, org, plugin, body, platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: projectID, ProjectUuid: &projectUUID, Id: envID, RunnerId: ref.Ref(runnerID)}, material.Recipient)
+			require.Error(t, err)
+			var count int
+			require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&count))
+			require.Zero(t, count, "rejected recovery must create no rollback Deployment")
+		})
+	}
 	rollbackBody, err := json.Marshal(ExternalDeploymentAdmissionBody{
 		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
 		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeRollback,
@@ -347,6 +426,25 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	require.Equal(t, baseVersionUUID, rollbackDeployment.ModuleArtifacts[0].VersionUUID)
 	require.Equal(t, material.Recipient, rollbackDeployment.EncryptedOutputsRecipient.Must())
 	require.EqualValues(t, 4, checks.Load())
+	rollbackReplay := do(rollbackBody, rollbackAssertion, rollbackClaims.RequestID)
+	require.Equal(t, http.StatusOK, rollbackReplay.Code, rollbackReplay.Body.String())
+	var replayedRollback ExternalDeploymentAdmissionResponse
+	require.NoError(t, json.Unmarshal(rollbackReplay.Body.Bytes(), &replayedRollback))
+	require.True(t, replayedRollback.Replayed)
+	require.Equal(t, rollbackResult.DeploymentId, replayedRollback.DeploymentId)
+	require.EqualValues(t, 5, checks.Load(), "rollback replay must reauthorize and retain one normal Deployment even after its head changes")
+	t.Run("own failed rollback head requires explicit retry design", func(t *testing.T) {
+		tx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, tx.Rollback()) }()
+		_, err = store.UpdateDeploymentStatusAndOutputs(ctx, tx, rollbackDeployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: model.DeploymentStatusFailed})
+		require.NoError(t, err)
+		_, err = adapter.createExternalRollback(ctx, tx, actorID, orgID, pluginID, rollbackRequest, platformorchestratorcp.Environment{Uuid: environmentUUID, ProjectId: projectID, ProjectUuid: &projectUUID, Id: envID, RunnerId: ref.Ref(runnerID)}, material.Recipient)
+		require.ErrorContains(t, err, "no longer the current head", "this narrow forward recovery must not silently authorize retry through another Deployment head")
+		var count int
+		require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM deployments WHERE mode='rollback'").Scan(&count))
+		require.Equal(t, 1, count)
+	})
 
 	cancelClaims := claims
 	cancelClaims.RequestID = "dispatch-cancel"
@@ -399,13 +497,13 @@ func TestExternalDeploymentHTTPAdapterCreatesNormalDeploymentAndReauthorizesRepl
 	grantActive.Store(false)
 	revoked := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusForbidden, revoked.Code, revoked.Body.String())
-	require.EqualValues(t, 6, checks.Load())
+	require.EqualValues(t, 7, checks.Load())
 
 	tampered := append([]byte(nil), bodyBytes...)
 	tampered = bytes.Replace(tampered, []byte(`"fence":7`), []byte(`"fence":8`), 1)
 	invalid := do(tampered, assertion, dispatchID)
 	require.Equal(t, http.StatusUnauthorized, invalid.Code, invalid.Body.String())
-	require.EqualValues(t, 6, checks.Load(), "invalid assertion must fail before Core callbacks")
+	require.EqualValues(t, 7, checks.Load(), "invalid assertion must fail before Core callbacks")
 }
 
 func externalDeploymentTestDatabase(t *testing.T, ctx context.Context, connection string) model.Databaser {

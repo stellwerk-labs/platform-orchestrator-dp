@@ -351,12 +351,14 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		return nil, model.NewErrConflict("forward deployment is outside this external operation or lacks a captured base")
 	}
 	forward, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, body.Rollback.ForwardDeploymentId, model.GetModeDefault)
-	if err != nil || forward.Mode != model.DeploymentModeDeploy || forward.Status != model.DeploymentStatusSucceeded || forward.DeploymentEnvUuid != body.EnvironmentUuid {
-		return nil, model.NewErrConflict("forward deployment is not a succeeded Deployment in this Environment")
+	if err != nil || forward.Mode != model.DeploymentModeDeploy || !forward.CompletedAt.IsSet() ||
+		(forward.Status != model.DeploymentStatusSucceeded && forward.Status != model.DeploymentStatusFailed) ||
+		forward.DeploymentEnvUuid != body.EnvironmentUuid || forward.ProjectId != body.ProjectId || forward.EnvId != body.EnvId {
+		return nil, model.NewErrConflict("forward deployment is not a stopped terminal Deployment in this Environment")
 	}
 	baseID := forwardReceipt.BaseDeploymentID.Must()
 	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, baseID, model.GetModeDefault)
-	if err != nil || base.Status != model.DeploymentStatusSucceeded || base.DeploymentEnvUuid != body.EnvironmentUuid || base.ProjectId != body.ProjectId || base.EnvId != body.EnvId {
+	if err != nil || base.Status != model.DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != body.EnvironmentUuid || base.ProjectId != body.ProjectId || base.EnvId != body.EnvId {
 		return nil, model.NewErrConflict("captured rollback base is not retained as a succeeded Deployment")
 	}
 	expectedVersions, err := immutableModuleVersions(base.ModuleArtifacts)
@@ -372,7 +374,8 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		model.DeploymentModeRollback, opt.Of(baseID), DeploymentManifest{}, &recipient, &recipient, nil, false,
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
-			RestrictedConfirmations: confirmations,
+			RestrictedConfirmations:     confirmations,
+			ExpectedCurrentDeploymentID: opt.Of(forward.Id),
 			ValidatePlan: func(captured DeploymentPlanCapture) error {
 				versions, versionErr := immutableModuleVersions(captured.ModuleArtifacts)
 				if versionErr != nil || captured.BaseDeploymentID != baseID || !reflect.DeepEqual(versions, expectedVersions) {

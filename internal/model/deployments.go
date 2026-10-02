@@ -102,6 +102,8 @@ type CreateDeploymentParams struct {
 	RunnerLogLevel             string
 	ModuleArtifacts            []ModuleArtifactRequirement
 	ModuleVersionRequestDigest string
+	// Optional captured-base recovery CAS, checked after the normal lease is held.
+	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
 }
 
 type ModuleArtifactRequirement struct {
@@ -189,6 +191,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	if tx == nil {
 		return nil, errors.New("transaction is required")
 	}
+	if params.ExpectedCurrentDeploymentID.IsSet() && (params.ExpectedCurrentDeploymentID.Must() == uuid.Nil || params.Mode != DeploymentModeRollback || !params.RollbackToId.IsSet()) {
+		return nil, NewErrBadRequest("expected current Deployment requires captured-base rollback")
+	}
 
 	out := &DeploymentSummary{
 		OrgId:                      orgId,
@@ -232,16 +237,48 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	{
 		var lastDeploymentId uuid.UUID
 		var lastDeploymentStatus string
+		var lastStateDeploymentID uuid.UUID
 		if err := tx.QueryRowContext(
 			ctx,
-			`SELECT d.id, d.status FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_executing_deployment_id WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 FOR UPDATE`,
+			`SELECT d.id, d.status, e.last_state_deployment_id FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_executing_deployment_id WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 FOR UPDATE`,
 			orgId, projectId, envId,
-		).Scan(&lastDeploymentId, &lastDeploymentStatus); err != nil {
+		).Scan(&lastDeploymentId, &lastDeploymentStatus, &lastStateDeploymentID); err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
 				return nil, errors.Wrap(err, "failed to query for existing executing deployment")
 			}
+			if params.ExpectedCurrentDeploymentID.IsSet() {
+				return nil, NewErrConflict("captured-base recovery has no current Deployment head")
+			}
 		} else if DeploymentStatus(lastDeploymentStatus) == DeploymentStatusExecuting {
 			return nil, NewErrConflict(fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
+		}
+		if params.ExpectedCurrentDeploymentID.IsSet() {
+			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {
+				return nil, NewErrConflict("captured-base recovery forward Deployment is no longer the current head")
+			}
+			forward, _, _, _, err := d.GetDeployment(ctx, tx, orgId, lastStateDeploymentID, GetModeForUpdate)
+			if err != nil || forward.DeploymentEnvUuid != params.DeploymentEnvUuid || forward.Mode != DeploymentModeDeploy || !forward.CompletedAt.IsSet() ||
+				(forward.Status != DeploymentStatusSucceeded && forward.Status != DeploymentStatusFailed) {
+				return nil, NewErrConflict("captured-base recovery requires a stopped terminal forward Deployment")
+			}
+			if forward.Status == DeploymentStatusFailed {
+				// Watchdog/status-check failures also set CompletedAt. Only the
+				// transactionally applied Runner result proves a terminal effect.
+				var completed bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runner_event_inbox
+					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 AND event_type='deployment-result' FOR SHARE)`,
+					orgId, forward.RunnerId, forward.Id).Scan(&completed); err != nil {
+					return nil, errors.Wrap(err, "failed to verify terminal Runner result")
+				}
+				if !completed {
+					return nil, NewErrConflict("failed forward Deployment has no authoritative terminal Runner result")
+				}
+			}
+			base, manifest, tofu, graph, err := d.GetDeployment(ctx, tx, orgId, params.RollbackToId.Must(), GetModeForUpdate)
+			if err != nil || base.Status != DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != params.DeploymentEnvUuid ||
+				base.ProjectId != projectId || base.EnvId != envId || !completeDeploymentSnapshot(manifest, tofu, graph) {
+				return nil, NewErrConflict("captured rollback base is not a complete retained successful Deployment")
+			}
 		}
 	}
 
@@ -594,6 +631,10 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 		}
 	}
 	return out, nil
+}
+
+func completeDeploymentSnapshot(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph) bool {
+	return len(tofu) > 0 && json.Valid(manifest) && json.Valid(graph) && strings.HasPrefix(strings.TrimSpace(string(manifest)), "{") && strings.HasPrefix(strings.TrimSpace(string(graph)), "{")
 }
 
 func RequiresEnvironmentLease(mode DeploymentMode) bool {
