@@ -679,13 +679,28 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 func (d *databaser) DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error) {
 	logger := hlogger.TraceScopedLoggerFromCtx(d.logger, ctx)
+	// DP-owned external material follows its retained Deployment, not the short
+	// user-key transfer window. A replay receipt alone is insufficient: it may
+	// outlive the Deployment and must match the exact scoped wrapped identity.
 	if rs, err := d.txOrDb(optionalTx).QueryContext(
 		ctx, `
 WITH UpdatedDeployments AS (
-    UPDATE deployments
+    UPDATE deployments d
     SET outputs = ''::bytea
-    WHERE completed_at < $1 AND outputs != ''::bytea
-    RETURNING de_id, id
+    FROM deployment_environments environment
+    WHERE d.de_id = environment.id AND d.completed_at < $1 AND d.outputs != ''::bytea
+      AND NOT EXISTS (
+          SELECT 1 FROM external_operation_deployments receipt
+          JOIN external_operation_material material
+            ON material.org_id = receipt.org_id AND material.plugin_id = receipt.plugin_id
+           AND material.operation_ref::text = receipt.operation_ref
+          WHERE receipt.deployment_id = d.id AND receipt.org_id = environment.org_id
+            AND receipt.project_id = environment.project_id AND receipt.env_id = environment.env_id
+            AND receipt.environment_uuid = environment.id AND receipt.project_uuid IS NOT NULL
+            AND material.recipient = d.encrypted_outputs_recipient
+            AND material.encrypted_identity ~ '^vault:v[1-9][0-9]*:.+$'
+      )
+    RETURNING d.de_id, d.id
 )
 SELECT ud.id, e.org_id, e.project_id, e.env_id
 FROM UpdatedDeployments ud

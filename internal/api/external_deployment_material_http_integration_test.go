@@ -80,10 +80,23 @@ func TestExternalDeploymentMaterialRequiresExactReceiptAndPreservesHistoricalAcc
 	})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{
-		Status: model.DeploymentStatusSucceeded, StatusMessage: "done", Outputs: opt.Of(encodedOutputs),
-	})
+	resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: &hmessaging.RecordingPublisher{}}
+	require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, "runner", deployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{
+		Status: Success, Outputs: &encodedOutputs,
+	}))
+	// Exercise the real transient cleaner after the normal five-minute window,
+	// without sleeping. The existing ownership must preserve the exact ciphertext.
+	retentionTx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
+	_, err = retentionTx.ExecContext(ctx, "UPDATE deployments SET completed_at=now()-interval '10 minutes' WHERE id=$1", deployment.Id)
+	require.NoError(t, err)
+	require.NoError(t, retentionTx.Commit())
+	cleaned, err := store.DeleteDeploymentOutputsByCompletionDate(ctx, nil, time.Now().Add(-5*time.Minute))
+	require.NoError(t, err)
+	require.Empty(t, cleaned, "historical external material is not transient user-key output")
+	retained, err := store.GetDeploymentEncryptedOutputs(ctx, nil, orgID, deployment.Id)
+	require.NoError(t, err)
+	require.Equal(t, encodedOutputs, retained, "retain original Runner ciphertext, never reconstructed outputs")
 
 	vaultServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		validMethod := assert.Equal(t, http.MethodPut, request.Method)
