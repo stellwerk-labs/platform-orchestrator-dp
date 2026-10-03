@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	MaxStatusCheckDuration = time.Hour
+	MaxStatusCheckDuration = model.RunnerExecutionBudget
 	RetryInterval          = 30 * time.Second
 	MaxDeliveries          = int(MaxStatusCheckDuration/RetryInterval) + 2
 )
@@ -75,9 +75,17 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, de
 		logger.Info("deployment no longer executing, stopping status checks", zap.String("status", string(deployment.Status)))
 		return nil
 	}
-	if time.Now().After(deployment.CreatedAt.Add(MaxStatusCheckDuration)) {
+	budget, budgetErr := h.db.GetDeploymentDispatchBudget(ctx, nil, deployment.Id)
+	if budgetErr != nil {
+		return hmessaging.NewRetryErrorWithDelay(budgetErr, RetryInterval)
+	}
+	if !budget.Deadline.Valid {
+		return hmessaging.NewTerminalError(errors.New("status check has no durable Runner dispatch budget"))
+	}
+	deployment.DispatchDeadline = budget.Deadline.Time
+	if !time.Now().Before(budget.Deadline.Time) {
 		logger.Warn("max status check duration exceeded, failing deployment",
-			zap.Time("deployment_created_at", deployment.CreatedAt),
+			zap.Time("first_dispatch_attempt_at", budget.FirstAttemptAt.Time),
 			zap.Duration("max_duration", MaxStatusCheckDuration))
 		return h.failDeployment(ctx, logger, deployment, "deployment timeout - runner did not complete within expected time")
 	}

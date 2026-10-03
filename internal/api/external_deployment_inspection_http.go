@@ -236,7 +236,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
 	}
 	response, err := a.projectExternalDeploymentStatus(request.Context(), tx, *deployment, *receipt, projectUUID, environmentUUID)
 	if err != nil {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
+		return a.writeStatusProjectionError(c, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return a.writeInspectionError(c, err)
@@ -290,7 +290,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleDispatchRead(c echo.Context) error
 	}
 	response, err := a.projectExternalDeploymentStatus(c.Request().Context(), tx, *deployment, *receipt, projectUUID, environmentUUID)
 	if err != nil {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_metadata_incomplete", Message: err.Error()})
+		return a.writeStatusProjectionError(c, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return a.writeInspectionError(c, err)
@@ -327,7 +327,26 @@ func (a *ExternalDeploymentHTTPAdapter) verifyInspectionGET(c echo.Context, acti
 	return claims, nil
 }
 
+var errDeploymentOutcomeUnreconciled = errors.New("failed dispatch has no authoritative Runner completion")
+
+func (a *ExternalDeploymentHTTPAdapter) writeStatusProjectionError(c echo.Context, err error) error {
+	code := "deployment_metadata_incomplete"
+	if errors.Is(err, errDeploymentOutcomeUnreconciled) {
+		code = "outcome_unreconciled"
+	}
+	return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: code, Message: err.Error()})
+}
+
 func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx context.Context, tx model.Tx, deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
+	if deployment.Status == model.DeploymentStatusFailed {
+		unknown, err := model.DeploymentOutcomeUnreconciled(ctx, tx, deployment.Id)
+		if err != nil {
+			return externalDeploymentStatusResponse{}, err
+		}
+		if unknown {
+			return externalDeploymentStatusResponse{}, errDeploymentOutcomeUnreconciled
+		}
+	}
 	if err := validateExternalStatusModuleArtifacts(deployment.ModuleArtifacts); err != nil {
 		return externalDeploymentStatusResponse{}, err
 	}

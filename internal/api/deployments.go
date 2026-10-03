@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/herrors"
 	"github.com/stellwerk-labs/golib/hlogger"
+	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/golib/htelemetry"
@@ -698,7 +701,7 @@ func (s *Server) UpdateDeploymentResults(ctx context.Context, request UpdateDepl
 			return nil, err
 		}
 
-		if _, err := s.commonUpdateDeploymentResults(ctx, logger, request, updateParams, nil); err != nil {
+		if _, err := s.commonUpdateDeploymentResults(ctx, logger, request, updateParams, nil, true); err != nil {
 			if e, ok := model.IsErrNotFound(err); ok {
 				return UpdateDeploymentResults404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 			} else if e, ok := model.IsErrConflict(err); ok {
@@ -756,6 +759,25 @@ func (s *Server) ApplyRunnerDeploymentResult(
 	eventID string,
 	body DeploymentResultsUpdateBody,
 ) error {
+	return s.applyRunnerDeploymentResult(ctx, orgID, runnerID, deploymentID, eventID, body, nil)
+}
+
+// ApplyRunnerDeploymentResultEnvelope retains a genuine late completion without
+// overwriting a watchdog's terminal failure, metadata, or adoption history.
+func (s *Server) ApplyRunnerDeploymentResultEnvelope(ctx context.Context, envelope hmessaging.EventEnvelope, body DeploymentResultsUpdateBody) error {
+	deploymentID, err := uuid.Parse(envelope.DeploymentID)
+	if err != nil || envelope.ProtocolVersion != hmessaging.ProtocolVersionV1 || envelope.Type != "deployment-result" ||
+		envelope.EventID == "" || envelope.CreatedAt.IsZero() || envelope.CreatedAt.After(time.Now().Add(time.Minute)) {
+		return fmt.Errorf("%w: invalid completion envelope", ErrRunnerEventTargetInvalid)
+	}
+	var authored DeploymentResultsUpdateBody
+	if err := json.Unmarshal(envelope.Payload, &authored); err != nil || !reflect.DeepEqual(authored, body) {
+		return fmt.Errorf("%w: completion body differs from authenticated envelope", ErrRunnerEventTargetInvalid)
+	}
+	return s.applyRunnerDeploymentResult(ctx, envelope.OrganizationID, envelope.RunnerID, deploymentID, envelope.EventID, body, &envelope)
+}
+
+func (s *Server) applyRunnerDeploymentResult(ctx context.Context, orgID, runnerID string, deploymentID uuid.UUID, eventID string, body DeploymentResultsUpdateBody, envelope *hmessaging.EventEnvelope) error {
 	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).With(
 		logging.ZapOrgId(orgID),
 		logging.ZapRunnerId(runnerID),
@@ -774,11 +796,34 @@ func (s *Server) ApplyRunnerDeploymentResult(
 		DeploymentId: deploymentID,
 		Body:         &body,
 	}
+	if envelope != nil {
+		dep, _, _, _, peekErr := s.Database.GetDeployment(ctx, nil, orgID, deploymentID, model.GetModeDefault)
+		if peekErr != nil {
+			return fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, peekErr)
+		}
+		if dep.CompletedAt.IsSet() && dep.Status == model.DeploymentStatusFailed {
+			canonical, err := json.Marshal(envelope)
+			if err != nil {
+				return err
+			}
+			return s.retainLateRunnerResult(ctx, *dep, runnerID, *envelope, fmt.Sprintf("%x", sha256.Sum256(canonical)), body)
+		}
+	}
 	_, err = s.commonUpdateDeploymentResults(ctx, logger, request, updateParams, &RunnerEventMetadata{
 		EventID:  eventID,
 		RunnerID: runnerID,
 		Type:     "deployment-result",
-	})
+	}, true)
+	if err != nil && envelope != nil && errors.Is(err, ErrRunnerEventTargetInvalid) {
+		dep, _, _, _, peekErr := s.Database.GetDeployment(ctx, nil, orgID, deploymentID, model.GetModeDefault)
+		if peekErr == nil && dep.Status == model.DeploymentStatusFailed && dep.CompletedAt.IsSet() {
+			canonical, encodeErr := json.Marshal(envelope)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			return s.retainLateRunnerResult(ctx, *dep, runnerID, *envelope, fmt.Sprintf("%x", sha256.Sum256(canonical)), body)
+		}
+	}
 	return err
 }
 
@@ -805,7 +850,7 @@ func (s *Server) ApplyRunnerError(
 		OrgId: orgID, DeploymentId: deploymentID, Body: &body,
 	}, model.UpdateDeploymentStatusAndOutputsParams{
 		Status: model.DeploymentStatusFailed, StatusMessage: message,
-	}, &RunnerEventMetadata{EventID: eventID, RunnerID: runnerID, Type: "runner-error"})
+	}, &RunnerEventMetadata{EventID: eventID, RunnerID: runnerID, Type: "runner-error"}, false)
 	return err
 }
 
@@ -823,6 +868,7 @@ func (s *Server) commonUpdateDeploymentResults(
 	request UpdateDeploymentResultsRequestObject,
 	updateParams model.UpdateDeploymentStatusAndOutputsParams,
 	runnerEvent *RunnerEventMetadata,
+	completionProven bool,
 ) (*model.DeploymentSummary, error) {
 	if tx, err := s.Database.BeginTx(ctx, nil); err != nil {
 		return nil, errors.Wrap(err, "failed to begin transaction")
@@ -875,6 +921,9 @@ func (s *Server) commonUpdateDeploymentResults(
 			ids.EnvId = dep.EnvId
 			ids.RunnerId = dep.RunnerId
 
+			// NATS completion is already bound by its transactional inbox receipt.
+			// The separate marker preserves proof for the authenticated HTTP path.
+			updateParams.RunnerCompletionProven = completionProven && runnerEvent == nil
 			dep.Metrics.TfResources = request.Body.TfResourceCounts.NumResources
 			dep.Metrics.TfResourcesAdded = request.Body.TfResourceCounts.NumResourcesAdded
 			dep.Metrics.TfResourcesChanged = request.Body.TfResourceCounts.NumResourcesChanged
@@ -1174,7 +1223,7 @@ func (s *Server) InternalForceFailDeployment(ctx context.Context, request Intern
 		StatusMessage: "deployment was manually failed by an operator",
 	}
 
-	if dep, err := s.commonUpdateDeploymentResults(ctx, logger, updateRequest, updateParams, nil); err != nil {
+	if dep, err := s.commonUpdateDeploymentResults(ctx, logger, updateRequest, updateParams, nil, false); err != nil {
 		if e, ok := model.IsErrNotFound(err); ok {
 			return InternalForceFailDeployment404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 		} else if e, ok := model.IsErrConflict(err); ok {

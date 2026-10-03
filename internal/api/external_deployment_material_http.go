@@ -100,7 +100,19 @@ func (a *ExternalDeploymentHTTPAdapter) handleMaterial(c echo.Context, kind exte
 		}
 		return a.writeInspectionError(c, err)
 	}
-	if err := validateExternalDeploymentMaterialOwner(*deployment, *material, kind); err != nil {
+	materialDeployment := *deployment
+	if kind == externalDeploymentOutputs && materialDeployment.Status == model.DeploymentStatusFailed && materialDeployment.CompletedAt.IsSet() {
+		late, err := lateSuccessfulOutputs(c.Request().Context(), tx, *deployment)
+		if err != nil {
+			return a.writeInspectionError(c, err)
+		}
+		// Local ownership validation may consume late ciphertext, without
+		// persisting or exposing a succeeded Deployment projection.
+		if late {
+			materialDeployment.Status = model.DeploymentStatusSucceeded
+		}
+	}
+	if err := validateExternalDeploymentMaterialOwner(materialDeployment, *material, kind); err != nil {
 		if _, missing := model.IsErrNotFound(err); missing {
 			return a.writeMaterialNotFound(c, kind)
 		}

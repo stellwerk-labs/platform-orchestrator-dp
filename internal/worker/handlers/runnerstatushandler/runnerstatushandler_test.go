@@ -2,6 +2,7 @@ package runnerstatushandler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -56,6 +57,9 @@ func runningHandler(t *testing.T, deployment *model.DeploymentSummary) (*RunnerS
 	t.Helper()
 	controller := gomock.NewController(t)
 	database := mockmodel.NewMockDatabaser(controller)
+	database.EXPECT().GetDeploymentDispatchBudget(gomock.Any(), nil, deployment.Id).Return(model.DeploymentDispatchBudget{
+		FirstAttemptAt: sql.NullTime{Time: deployment.CreatedAt, Valid: true}, Deadline: sql.NullTime{Time: deployment.CreatedAt.Add(model.RunnerExecutionBudget), Valid: true},
+	}, nil)
 	database.EXPECT().GetDeployment(gomock.Any(), nil, testOrgID, deployment.Id, model.GetModeDefault).
 		Return(deployment, nil, nil, nil, nil)
 	controlPlane := mockplatformorchestratorcp.NewMockClientWithResponsesInterface(controller)

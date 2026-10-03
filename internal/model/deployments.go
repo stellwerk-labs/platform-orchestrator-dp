@@ -69,6 +69,8 @@ type DeploymentSummary struct {
 	RunnerLogLevel             string
 	ModuleArtifacts            []ModuleArtifactRequirement
 	ModuleVersionRequestDigest string
+	// Internal only: caps buffered Runner commands at the immutable first attempt budget.
+	DispatchDeadline time.Time
 }
 
 type UpdateDeploymentStatusAndOutputsParams struct {
@@ -80,6 +82,8 @@ type UpdateDeploymentStatusAndOutputsParams struct {
 
 	// ExpectedRevision will reject the update if the deployment is not at the same revision number
 	ExpectedRevision opt.Opt[int64]
+	// Set only by an authenticated Runner result, never an operator/watchdog failure.
+	RunnerCompletionProven bool
 }
 
 type EncodedDeploymentManifest json.RawMessage
@@ -221,6 +225,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	}
 
 	if RequiresEnvironmentLease(params.Mode) {
+		if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
+			return nil, err
+		}
 		var holder uuid.UUID
 		if err := tx.QueryRowContext(ctx, `INSERT INTO environment_deployment_leases
 			(environment_id, org_id, project_id, env_id, holder_id, purpose, deployment_id, expires_at)
@@ -256,6 +263,21 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		} else if DeploymentStatus(lastDeploymentStatus) == DeploymentStatusExecuting {
 			return nil, NewErrConflict(fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
 		}
+		if lastStateDeploymentID != uuid.Nil {
+			var failed bool
+			if err := tx.QueryRowContext(ctx, `SELECT status='failed' FROM deployments WHERE id=$1`, lastStateDeploymentID).Scan(&failed); err != nil {
+				return nil, err
+			}
+			if failed {
+				unknown, err := DeploymentOutcomeUnreconciled(ctx, tx, lastStateDeploymentID)
+				if err != nil {
+					return nil, err
+				}
+				if unknown {
+					return nil, NewErrConflict("failed Deployment may still have an active Runner; outcome is unreconciled")
+				}
+			}
+		}
 		if params.ExpectedCurrentDeploymentID.IsSet() {
 			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {
 				return nil, NewErrConflict("captured-base recovery forward Deployment is no longer the current head")
@@ -275,7 +297,10 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 				// transactionally applied Runner result proves a terminal effect.
 				var completed bool
 				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runner_event_inbox
-					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 AND event_type='deployment-result' FOR SHARE)`,
+					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 AND event_type='deployment-result' FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_late_runner_results
+					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_dispatch_budgets WHERE deployment_id=$3 AND completion_received_at IS NOT NULL FOR SHARE)`,
 					orgId, forward.RunnerId, forward.Id).Scan(&completed); err != nil {
 					return nil, errors.Wrap(err, "failed to verify terminal Runner result")
 				}
@@ -328,6 +353,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		return nil, errors.Wrap(err, "failed to insert deployment")
 	}
 
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_dispatch_budgets (deployment_id,deployment_revision) VALUES ($1,$2)`, out.Id, out.Revision); err != nil {
+		return nil, errors.Wrap(err, "failed to create Runner dispatch budget")
+	}
 	return out, nil
 }
 
@@ -635,6 +663,11 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 		return nil, errors.Wrap(err, "failed to update deployment")
 	}
 	if params.Status == DeploymentStatusSucceeded || params.Status == DeploymentStatusFailed {
+		if params.RunnerCompletionProven {
+			if err := RecordDeploymentCompletion(ctx, d.txOrDb(optionalTx), deploymentId); err != nil {
+				return nil, err
+			}
+		}
 		if _, err := d.txOrDb(optionalTx).ExecContext(ctx, `DELETE FROM environment_deployment_leases WHERE deployment_id = $1`, deploymentId); err != nil {
 			return nil, errors.Wrap(err, "failed to release environment deployment lease")
 		}
@@ -693,7 +726,22 @@ func (d *databaser) DeleteDeploymentOutputsByCompletionDate(ctx context.Context,
 	// outlive the Deployment and must match the exact scoped wrapped identity.
 	if rs, err := d.txOrDb(optionalTx).QueryContext(
 		ctx, `
-WITH UpdatedDeployments AS (
+WITH UpdatedLateResults AS (
+    UPDATE deployment_late_runner_results late SET encrypted_outputs=NULL
+    FROM deployments d JOIN deployment_environments environment ON d.de_id=environment.id
+    WHERE late.deployment_id=d.id AND d.completed_at<$1 AND late.encrypted_outputs IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM external_operation_deployments receipt
+          JOIN external_operation_material material
+            ON material.org_id=receipt.org_id AND material.plugin_id=receipt.plugin_id
+           AND material.operation_ref::text=receipt.operation_ref
+          WHERE receipt.deployment_id=d.id AND receipt.org_id=environment.org_id
+            AND receipt.project_id=environment.project_id AND receipt.env_id=environment.env_id
+            AND receipt.environment_uuid=environment.id AND receipt.project_uuid IS NOT NULL
+            AND material.recipient=d.encrypted_outputs_recipient AND material.recipient=late.recipient
+            AND material.encrypted_identity ~ '^vault:v[1-9][0-9]*:.+$'
+      )
+), UpdatedDeployments AS (
     UPDATE deployments d
     SET outputs = ''::bytea
     FROM deployment_environments environment
@@ -739,7 +787,10 @@ INNER JOIN deployment_environments e ON ud.de_id = e.id;`, completedBefore,
 
 func (d *databaser) GetDeploymentEncryptedOutputs(ctx context.Context, optionalTx Tx, orgId string, deploymentId uuid.UUID) (string, error) {
 	var out string
-	if err := d.txOrDb(optionalTx).QueryRowContext(ctx, `SELECT d.outputs FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`, orgId, deploymentId).Scan(&out); err != nil {
+	if err := d.txOrDb(optionalTx).QueryRowContext(ctx, `SELECT COALESCE(NULLIF(d.outputs,''::bytea),
+        (SELECT late.encrypted_outputs FROM deployment_late_runner_results late WHERE late.deployment_id=d.id
+         AND late.org_id=e.org_id AND late.runner_id=d.runner_id AND late.result_status='success' AND late.recipient=d.encrypted_outputs_recipient),''::bytea)
+        FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`, orgId, deploymentId).Scan(&out); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", NewErrNotFound(fmt.Sprintf("deployment '%s' not found", deploymentId))
 		}

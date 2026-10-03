@@ -195,6 +195,7 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	if isRunning, err := runner.IsRunning(ctx); err != nil {
 		return errors.Wrap(err, "failed to check if runner is running")
 	} else if isRunning {
+		// Upgraded legacy attempts retain their conservative admission budget.
 		logger.Info("job already running, ensuring status check is scheduled")
 		return h.scheduleStatusCheck(ctx, d)
 	}
@@ -208,12 +209,17 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	deadline, err := h.db.BeginDeploymentDispatch(ctx, d)
+	if err != nil {
+		return err
+	}
+	d.DispatchDeadline = deadline
 	if err := runner.Start(ctx); err != nil {
 		if errors.Is(err, runners.ErrRunnerCommandPublishRetry) {
 			return hmessaging.NewRetryError(errors.Wrap(err, "failed to durably publish runner command"))
 		}
 		if errors.Is(err, runners.ErrKubernetesAgentNotReachableRetry) {
-			if time.Since(d.CreatedAt) < runners.KubernetesAgentConnectionIssueTolerance {
+			if time.Until(deadline) > model.RunnerExecutionBudget-runners.KubernetesAgentConnectionIssueTolerance {
 				return hmessaging.NewRetryError(errors.Wrap(err, "kubernetes agent temporary not reachable, will retry"))
 			} else {
 				return usererrors.NewUserErrorWithDetails(fmt.Sprintf("kubernetes-agent runner %q not reachable, please check your network connectivity and configuration", rn.Id), err)
