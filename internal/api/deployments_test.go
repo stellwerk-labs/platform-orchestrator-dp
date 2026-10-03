@@ -2432,6 +2432,7 @@ func TestGetDeploymentBundle(t *testing.T) {
 				{
 					ResourceType: "thing",
 					Id:           "thing1", VersionId: "v2",
+					ModuleSource:     "inline",
 					ModuleSourceCode: ref.Ref("some-module-source"),
 				},
 			},
