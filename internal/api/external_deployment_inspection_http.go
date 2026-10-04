@@ -433,7 +433,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleReadiness(c echo.Context) error {
 	c.SetRequest(c.Request().WithContext(requestContext))
 	bodyBytes, _, err := a.verifyInspectionRequest(c, ExternalDeploymentReadinessAction)
 	if err != nil {
-		return err
+		return a.writeInspectionError(c, err)
 	}
 	var body externalDeploymentReadinessBody
 	if err := decodeStrictJSON(bodyBytes, &body); err != nil || len(body.Environments) == 0 || len(body.Environments) > maxExternalReadinessEnvironments {
@@ -484,7 +484,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 	c.SetRequest(c.Request().WithContext(requestContext))
 	bodyBytes, claims, err := a.verifyInspectionRequest(c, ExternalDeploymentPlanningAction)
 	if err != nil {
-		return err
+		return a.writeInspectionError(c, err)
 	}
 	var body externalDeploymentPlanBody
 	if err := decodeStrictJSON(bodyBytes, &body); err != nil || body.ProjectID == "" || body.EnvID == "" || body.ProjectUUID == uuid.Nil || body.EnvironmentUUID == uuid.Nil || len(body.ModuleVersions) == 0 {
@@ -628,31 +628,31 @@ func externalPlanResponse(snapshot model.ExternalDeploymentPlanSnapshot) (extern
 
 func (a *ExternalDeploymentHTTPAdapter) verifyInspectionRequest(c echo.Context, action string) ([]byte, plugincontext.Claims, error) {
 	if err := a.validateConfiguration(); err != nil {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment inspection is unavailable"})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "external deployment inspection is unavailable"})
 	}
 	request := c.Request()
 	if request.URL.RawQuery != "" || request.URL.Fragment != "" {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalQueryUnsupportedMessage})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalQueryUnsupportedMessage})
 	}
 	if contentType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type")); err != nil || contentType != "application/json" {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnsupportedMediaType, externalDeploymentErrorResponse{Error: "invalid_content_type", Message: "Content-Type must be application/json"})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusUnsupportedMediaType, externalDeploymentErrorResponse{Error: "invalid_content_type", Message: "Content-Type must be application/json"})
 	}
 	idempotencyKey, ok := singleHeader(request.Header, "Idempotency-Key")
 	if !ok || idempotencyKey == "" || len(idempotencyKey) > 128 {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_idempotency_key", Message: "one request identifier of at most 128 characters is required"})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_idempotency_key", Message: "one request identifier of at most 128 characters is required"})
 	}
 	assertion, ok := singleHeader(request.Header, plugincontext.Header)
 	if !ok || assertion == "" {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 	request.Body = http.MaxBytesReader(c.Response(), request.Body, maxExternalInspectionBodyBytes)
 	bodyBytes, err := io.ReadAll(request.Body)
 	if err != nil {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "request body is invalid or too large"})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: "request body is invalid or too large"})
 	}
 	orgID, pluginID := c.Param("orgId"), c.Param("pluginId")
 	if !validExternalPathIdentity(orgID, pluginID) {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalInvalidPathIdentityMessage})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusBadRequest, externalDeploymentErrorResponse{Error: externalDeploymentInvalidRequestCode, Message: externalInvalidPathIdentityMessage})
 	}
 	claims, err := plugincontext.Verify(a.VerificationKey, assertion, plugincontext.Request{
 		Issuer: a.Issuer, Audience: ExternalDeploymentAudience, PluginID: pluginID, OrgID: orgID,
@@ -660,15 +660,21 @@ func (a *ExternalDeploymentHTTPAdapter) verifyInspectionRequest(c echo.Context, 
 		OperationID: action, IdempotencyKey: idempotencyKey,
 	}, a.now())
 	if err != nil {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidPluginContextMessage})
 	}
 	if _, err := uuid.Parse(claims.ActorID); err != nil {
-		return nil, plugincontext.Claims{}, c.JSON(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidActorMessage})
+		return nil, plugincontext.Claims{}, echo.NewHTTPError(http.StatusUnauthorized, externalDeploymentErrorResponse{Error: externalInvalidPluginContextCode, Message: externalInvalidActorMessage})
 	}
 	return bodyBytes, claims, nil
 }
 
 func (a *ExternalDeploymentHTTPAdapter) writeInspectionError(c echo.Context, err error) error {
+	var httpError *echo.HTTPError
+	if errors.As(err, &httpError) {
+		if rejection, ok := httpError.Message.(externalDeploymentErrorResponse); ok {
+			return c.JSON(httpError.Code, rejection)
+		}
+	}
 	if err == nil {
 		return c.JSON(http.StatusInternalServerError, externalDeploymentErrorResponse{Error: externalDeploymentFailedCode, Message: "external deployment inspection failed"})
 	}
