@@ -17,7 +17,10 @@ VAULT_PORT ?= 8200
 export NATS_PORT NATS_HEALTH_PORT VAULT_PORT
 DEFAULT_K8S_RES := platform-orchestrator-runner
 RUNNER_CONFIGURATION := runner_config.json
-CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
+# CP v3.0.0 is the oldest public release that accepts the immutable Module
+# Version fields the fixtures publish (semantic_version, artifact_digest,
+# output_schema). CI overrides this with CORE_CP_INTEGRATION_IMAGE.
+CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:d3ba43fea96d28fa4d80adb5ff5d1d726ea3593b49da85f2ebef03ffd131a3f9
 IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.2.0
 RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
 # Docker tags and kind imports cannot use a registry digest as a tag. Keep the
