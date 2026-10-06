@@ -16,19 +16,29 @@ The migration does not change their status, history, resources or outputs.
 ## Timeout is not proof that the Runner stopped
 
 A possibly dispatched failed Deployment without authoritative completion is
-unreconciled. External status inspection returns HTTP 409
-`outcome_unreconciled`; mutation admission rejects replacing its Environment
-head even after its ordinary lease expires. Operator force-fail and Runner
-error messages do not prove completion. A failure before any recorded dispatch
-is distinguishable from a potentially started attempt.
+unreconciled. Operator force-fail and Runner error messages do not prove
+completion. A failure before any recorded dispatch is distinguishable from a
+potentially started attempt.
 
 Current authenticated HTTP results retain completion proof transactionally.
 NATS deployment results use their exact organization/Runner/Deployment inbox
-receipt. Legacy failed HTTP results without durable completion evidence cannot
-be distinguished from watchdog or force-fail records and intentionally fail
-closed. There is no supported blanket status reset or fabricated completion
-proof for these historical records. Late HTTP completion after an already
-terminal failure is not recovered by this NATS evidence path.
+receipt. Legacy failed HTTP results have no durable completion evidence and
+stay unreconciled. Late HTTP completion after an already terminal failure is
+not recovered by the NATS evidence path below.
+
+## Which Deployments fence their Environment
+
+Only a failed **plugin-dispatched** Deployment with an unreconciled outcome
+blocks its Environment. Plugin-dispatched means it was admitted through a
+plugin operation receipt on the external-deployment API. While such a
+Deployment is the Environment head, every new Deployment of that Environment
+is rejected with a conflict, even after its lease expired.
+External status inspection returns HTTP 409 `outcome_unreconciled` for it.
+
+Ordinary Core Deployments keep their existing behaviour: a failed Deployment,
+with or without Runner stop proof, never blocks the next Deployment of its
+Environment. This includes legacy failures backfilled by migration 31, so an
+upgraded installation stays deployable without data changes.
 
 ## Genuine late completion
 

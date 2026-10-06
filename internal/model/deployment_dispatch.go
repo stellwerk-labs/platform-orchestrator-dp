@@ -76,27 +76,65 @@ func BeginDeploymentDispatch(ctx context.Context, db Databaser, dep *DeploymentS
 	return budget.Deadline.Time, nil
 }
 
+// DeploymentStopEvidence is what DP knows about whether a Runner attempt of one
+// Deployment can still change its Environment.
+type DeploymentStopEvidence struct {
+	Failed bool
+	// PluginDispatched is set when a plugin operation receipt admitted the
+	// Deployment. Ordinary Core Deployments never have one.
+	PluginDispatched bool
+	// Dispatched is set when a durable first dispatch attempt exists, or when
+	// no dispatch budget exists at all and the attempt must be assumed.
+	Dispatched bool
+	// StopProven is set by an authenticated Runner completion: an HTTP result,
+	// the NATS result inbox receipt, or a retained genuine late result.
+	StopProven bool
+}
+
+// OutcomeUnreconciled reports a possibly started Runner attempt without stop
+// proof.
+func (e DeploymentStopEvidence) OutcomeUnreconciled() bool {
+	return e.Dispatched && !e.StopProven
+}
+
+// BlocksReplacement fences an Environment only behind a failed
+// plugin-dispatched Deployment with an unreconciled outcome. An ordinary Core
+// Deployment failure never blocks the next Deployment, exactly as before
+// dispatch evidence existed.
+func (e DeploymentStopEvidence) BlocksReplacement() bool {
+	return e.Failed && e.PluginDispatched && e.OutcomeUnreconciled()
+}
+
+func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UUID) (DeploymentStopEvidence, error) {
+	var evidence DeploymentStopEvidence
+	err := tx.QueryRowContext(ctx, `SELECT d.status='failed',
+        EXISTS (SELECT 1 FROM external_operation_deployments receipt WHERE receipt.deployment_id=d.id AND receipt.org_id=e.org_id),
+        budget.deployment_id IS NULL OR budget.first_attempt_at IS NOT NULL,
+        budget.completion_received_at IS NOT NULL
+          OR EXISTS (SELECT 1 FROM runner_event_inbox result WHERE result.deployment_id=d.id AND result.event_type='deployment-result'
+                     AND result.org_id=e.org_id AND result.runner_id=d.runner_id)
+          OR EXISTS (SELECT 1 FROM deployment_late_runner_results late WHERE late.deployment_id=d.id
+                     AND late.org_id=e.org_id AND late.runner_id=d.runner_id)
+        FROM deployments d
+        JOIN deployment_environments e ON e.id=d.de_id
+        LEFT JOIN deployment_dispatch_budgets budget ON budget.deployment_id=d.id
+        WHERE d.id=$1`, deploymentID).Scan(
+		&evidence.Failed, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeploymentStopEvidence{}, NewErrNotFound("deployment not found for stop evidence")
+	}
+	return evidence, err
+}
+
 // DeploymentOutcomeUnreconciled distinguishes a failure record from proof that
 // a possibly-started Runner has stopped. Normal authenticated HTTP results and
 // NATS results both mark completion in their existing update transaction.
 func DeploymentOutcomeUnreconciled(ctx context.Context, tx Tx, deploymentID uuid.UUID) (bool, error) {
-	budget, err := ReadDeploymentDispatchBudget(ctx, tx, deploymentID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
+	evidence, err := ReadDeploymentStopEvidence(ctx, tx, deploymentID)
 	if err != nil {
 		return false, err
 	}
-	if !budget.FirstAttemptAt.Valid || budget.CompletionReceivedAt.Valid {
-		return false, nil
-	}
-	var stopped bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runner_event_inbox result JOIN deployments d ON d.id=result.deployment_id
-        JOIN deployment_environments e ON e.id=d.de_id WHERE d.id=$1 AND result.event_type='deployment-result'
-        AND result.org_id=e.org_id AND result.runner_id=d.runner_id)
-        OR EXISTS (SELECT 1 FROM deployment_late_runner_results result JOIN deployments d ON d.id=result.deployment_id
-        JOIN deployment_environments e ON e.id=d.de_id WHERE d.id=$1 AND result.org_id=e.org_id AND result.runner_id=d.runner_id)`, deploymentID).Scan(&stopped)
-	return !stopped, err
+	return evidence.OutcomeUnreconciled(), nil
 }
 
 func RecordDeploymentCompletion(ctx context.Context, tx Tx, deploymentID uuid.UUID) error {

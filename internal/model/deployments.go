@@ -264,18 +264,12 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 			return nil, NewErrConflict(fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
 		}
 		if lastStateDeploymentID != uuid.Nil {
-			var failed bool
-			if err := tx.QueryRowContext(ctx, `SELECT status='failed' FROM deployments WHERE id=$1`, lastStateDeploymentID).Scan(&failed); err != nil {
+			evidence, err := ReadDeploymentStopEvidence(ctx, tx, lastStateDeploymentID)
+			if err != nil {
 				return nil, err
 			}
-			if failed {
-				unknown, err := DeploymentOutcomeUnreconciled(ctx, tx, lastStateDeploymentID)
-				if err != nil {
-					return nil, err
-				}
-				if unknown {
-					return nil, NewErrConflict("failed Deployment may still have an active Runner; outcome is unreconciled")
-				}
+			if evidence.BlocksReplacement() {
+				return nil, NewErrConflict(fmt.Sprintf("failed plugin-dispatched Deployment '%s' may still have an active Runner; outcome is unreconciled", lastStateDeploymentID))
 			}
 		}
 		if params.ExpectedCurrentDeploymentID.IsSet() {
