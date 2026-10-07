@@ -1247,7 +1247,7 @@ type MetadataKeyPage struct {
 type MetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format *string `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.
@@ -1313,7 +1313,7 @@ type ResourceNodesPage struct {
 type UpdateMetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format nullable.Nullable[string] `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.

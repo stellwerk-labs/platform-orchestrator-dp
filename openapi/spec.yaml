@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
-  title: ""
-  version: ""
+  title: Stellwerk Data Plane API
+  version: unreleased
 paths:
   /orgs/{orgId}/plugins/{pluginId}/external-deployments:
     post:
@@ -2099,7 +2099,7 @@ components:
         format:
           description: The format of the metadata key.
           type: string
-          example: true
+          example: date-time
         pattern:
           description: A regular expression pattern for the metadata key.
           type: string
@@ -2153,7 +2153,7 @@ components:
           description: The format of the metadata key.
           type: string
           nullable: true
-          example: true
+          example: date-time
         pattern:
           description: A regular expression pattern for the metadata key.
           type: string
