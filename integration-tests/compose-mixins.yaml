@@ -1,6 +1,6 @@
 services:
   nats:
-    image: nats:2.12-alpine
+    image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     ports:
       - "${NATS_PORT:-4222}:4222"
@@ -40,7 +40,7 @@ services:
       platform-orchestrator-iam-ready:
         condition: service_completed_successfully
   platform-orchestrator-dp-ready:
-    image: nats:2.12-alpine
+    image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     entrypoint: ["sh", "-c"]
     command:
       - timeout 60 sh -c 'until wget --spider -q http://platform-orchestrator-dp-platform-orchestrator-dp:8080/health; do sleep 1; done'
@@ -48,7 +48,7 @@ services:
       platform-orchestrator-dp-platform-orchestrator-dp:
         condition: service_started
   runner-gateway:
-    image: ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90
     command: ["gateway"]
     environment:
       NATS_URL: nats://nats:4222
@@ -68,7 +68,7 @@ services:
       nats:
         condition: service_healthy
   platform-orchestrator-iam-ready:
-    image: nats:2.12-alpine
+    image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     entrypoint: ["sh", "-c"]
     command:
       - timeout 60 sh -c 'until wget --spider -q http://platform-orchestrator-iam-platform-orchestrator-iam:8080/health; do sleep 1; done'
@@ -76,7 +76,7 @@ services:
       platform-orchestrator-iam-platform-orchestrator-iam:
         condition: service_started
   vault:
-    image: hashicorp/vault:1.14
+    image: hashicorp/vault:1.14@sha256:14be0a8eb323181a56d10facab3b424809d9921e85d2f2678126ce232766a8e1
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: mytoken
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
@@ -85,7 +85,7 @@ services:
     ports:
       - "${VAULT_PORT:-8200}:8200"
   vault-init:
-    image: hashicorp/vault:1.14
+    image: hashicorp/vault:1.14@sha256:14be0a8eb323181a56d10facab3b424809d9921e85d2f2678126ce232766a8e1
     environment:
       VAULT_TOKEN: mytoken
       VAULT_ADDR: http://vault:8200

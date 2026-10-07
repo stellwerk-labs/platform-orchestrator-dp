@@ -21,8 +21,8 @@ RUNNER_CONFIGURATION := runner_config.json
 # Version fields the fixtures publish (semantic_version, artifact_digest,
 # output_schema). CI overrides this with CORE_CP_INTEGRATION_IMAGE.
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:d3ba43fea96d28fa4d80adb5ff5d1d726ea3593b49da85f2ebef03ffd131a3f9
-IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.2.0
-RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0
+IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.2.0@sha256:7c3482b85dc762479ef213720893394526afe4055ea39b52d00510942ad1e4ea
+RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90
 # Docker tags and kind imports cannot use a registry digest as a tag. Keep the
 # immutable source in RUNNER_IMAGE and use a digest-derived alias only locally.
 RUNNER_TEST_IMAGE = $(if $(findstring @sha256:,$(RUNNER_IMAGE)),stellwerk-runner-integration:sha256-$(lastword $(subst :, ,$(RUNNER_IMAGE))),$(RUNNER_IMAGE))
@@ -37,7 +37,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose init --no-sample --project $(COMPOSE_PROJECT_NAME)
 	cp score.provisioners.yaml .score-compose/
 	cp score.cp.yaml score.iam.yaml .score-compose/
-	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0"; "$(RUNNER_TEST_IMAGE)")' .score-compose/score.provisioners.yaml
+	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90"; "$(RUNNER_TEST_IMAGE)")' .score-compose/score.provisioners.yaml
 	yq -i '.containers.platform-orchestrator-cp.image = "$(CP_IMAGE)"' .score-compose/score.cp.yaml
 	yq -i '.containers.platform-orchestrator-iam.image = "$(IAM_IMAGE)"' .score-compose/score.iam.yaml
 	score-compose --quiet generate ../score.yaml --build 'platform-orchestrator-dp=$(BUILD_ARGS)'
@@ -78,7 +78,7 @@ test-integration-logs:
 .PHONY: connect-to-integ-db
 connect-to-integ-db:
 	@score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' \
-		--format 'Command: docker run -it --network integration-tests_default --rm postgres:16-alpine psql -h {{ .host }} -U {{ .username }} --dbname {{ .name }}'
+		--format 'Command: docker run -it --network integration-tests_default --rm postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea psql -h {{ .host }} -U {{ .username }} --dbname {{ .name }}'
 	@score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' --format 'Password: {{ .password }}'
 
 .PHONY: prepare-tests
