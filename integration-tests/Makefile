@@ -21,7 +21,7 @@ RUNNER_CONFIGURATION := runner_config.json
 # Version fields the fixtures publish (semantic_version, artifact_digest,
 # output_schema). CI overrides this with CORE_CP_INTEGRATION_IMAGE.
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:d3ba43fea96d28fa4d80adb5ff5d1d726ea3593b49da85f2ebef03ffd131a3f9
-IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.2.0@sha256:7c3482b85dc762479ef213720893394526afe4055ea39b52d00510942ad1e4ea
+IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.4.0@sha256:0fb4b3645ae2d7ccf366921c8d9490a6862cce111bdcb683ef6afcc852b40331
 RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90
 # Docker tags and kind imports cannot use a registry digest as a tag. Keep the
 # immutable source in RUNNER_IMAGE and use a digest-derived alias only locally.
