@@ -32,7 +32,9 @@ Only a failed **plugin-dispatched** Deployment with an unreconciled outcome
 blocks its Environment. Plugin-dispatched means it was admitted through a
 plugin operation receipt on the external-deployment API. While such a
 Deployment is the Environment head, every new Deployment of that Environment
-is rejected with a conflict, even after its lease expired.
+is rejected with the conflict code `outcome_unreconciled`, even after its lease
+expired, and requests waiting in the Environment's deployment queue are
+rejected as well (see `deployment-queue.md`).
 External status inspection returns HTTP 409 `outcome_unreconciled` for it.
 
 Ordinary Core Deployments keep their existing behaviour: a failed Deployment,
@@ -89,7 +91,9 @@ one Deployment only: the next Deployment and an explicitly authorized
 captured-base rollback may proceed, and plugin status inspection reports the
 failure instead of `outcome_unreconciled`. It never changes the Deployment's
 status, history or outputs, and it does not carry over to any later failure.
-There is no bulk or Environment-wide reset.
+There is no bulk or Environment-wide reset. Queued requests that waited behind
+the fenced Deployment are rejected in the same transaction; acknowledging never
+starts queued work.
 
 ## Upgrade and fallback
 
