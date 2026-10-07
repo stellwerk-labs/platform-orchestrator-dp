@@ -109,6 +109,10 @@ type CreateDeploymentParams struct {
 	// Optional captured-base recovery CAS, checked after the normal lease is held.
 	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
 	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
+	// Optional client CAS on the current state head, for manifests derived from it.
+	ExpectedBaseDeploymentID opt.Opt[uuid.UUID]
+	// The queue head being promoted. Every other mutating creation yields to queued work.
+	QueueItemID opt.Opt[uuid.UUID]
 }
 
 type ModuleArtifactRequirement struct {
@@ -140,6 +144,8 @@ type EnvironmentDeploymentReadiness struct {
 	ActiveLeaseUntil          opt.Opt[time.Time]
 	EffectiveBaseDeploymentID opt.Opt[uuid.UUID]
 	ActiveModules             []ModuleArtifactRequirement
+	// Queued reports Core-queued Deployments that every other mutation must wait for.
+	Queued bool
 }
 
 type ListDeploymentsParams struct {
@@ -239,7 +245,7 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 			WHERE environment_deployment_leases.expires_at <= now()
 			RETURNING holder_id`, out.DeploymentEnvUuid, orgId, projectId, envId, out.Id, DefaultEnvironmentLeaseTTL.String()).Scan(&holder); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, NewErrConflict("environment has an active deployment lease")
+				return nil, NewErrCodedConflict(CodeEnvironmentBusy, "environment has an active deployment lease")
 			}
 			return nil, errors.Wrap(err, "failed to acquire environment deployment lease")
 		}
@@ -261,16 +267,18 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 				return nil, NewErrConflict("captured-base recovery has no current Deployment head")
 			}
 		} else if DeploymentStatus(lastDeploymentStatus) == DeploymentStatusExecuting {
-			return nil, NewErrConflict(fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
+			return nil, NewErrCodedConflict(CodeEnvironmentBusy, fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
 		}
-		if lastStateDeploymentID != uuid.Nil {
-			evidence, err := ReadDeploymentStopEvidence(ctx, tx, lastStateDeploymentID)
-			if err != nil {
+		if err := requireReplaceableStateHead(ctx, tx, lastStateDeploymentID); err != nil {
+			return nil, err
+		}
+		if RequiresEnvironmentLease(params.Mode) {
+			if err := requireQueueHead(ctx, tx, out.DeploymentEnvUuid, params.QueueItemID.Or(uuid.Nil)); err != nil {
 				return nil, err
 			}
-			if evidence.BlocksReplacement() {
-				return nil, NewErrConflict(fmt.Sprintf("failed plugin-dispatched Deployment '%s' may still have an active Runner; outcome is unreconciled", lastStateDeploymentID))
-			}
+		}
+		if params.ExpectedBaseDeploymentID.IsSet() && params.ExpectedBaseDeploymentID.Must() != lastStateDeploymentID {
+			return nil, NewErrCodedConflict(CodeDeploymentBaseChanged, "the Environment's current Deployment is no longer the expected base")
 		}
 		if params.ExpectedCurrentDeploymentID.IsSet() {
 			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {
@@ -543,6 +551,9 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		}
 	}
 
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+		return errors.Wrap(err, "failed to delete deployment queue items")
+	}
 	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
 		return errors.Wrap(err, "failed to delete deployment environments")
 	} else if _, err := rs.RowsAffected(); err != nil {
@@ -593,7 +604,10 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 		)
 		SELECT request.project_id, request.env_id, environment.id,
 		       latest.id, latest.status, latest.mode, lease.expires_at,
-		       base.id, COALESCE(base.module_artifacts, '[]'::jsonb)
+		       base.id, COALESCE(base.module_artifacts, '[]'::jsonb),
+		       EXISTS (SELECT 1 FROM environment_deployment_queue queued
+		               WHERE queued.org_id=$1 AND queued.project_id=request.project_id
+		                 AND queued.env_id=request.env_id AND queued.state='queued')
 		FROM requested request
 		LEFT JOIN deployment_environments environment
 		  ON environment.org_id=$1 AND environment.project_id=request.project_id AND environment.env_id=request.env_id
@@ -621,7 +635,7 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 		if err := rows.Scan(
 			&item.ProjectID, &item.EnvID, opt.Scan(&item.EnvironmentUUID),
 			opt.Scan(&item.LatestDeploymentID), opt.Scan(&item.LatestStatus), opt.Scan(&item.LatestMode),
-			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts,
+			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts, &item.Queued,
 		); err != nil {
 			return nil, errors.Wrap(err, "failed to scan environment deployment readiness")
 		}

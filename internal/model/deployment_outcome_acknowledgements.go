@@ -88,6 +88,12 @@ func AcknowledgeDeploymentOutcome(ctx context.Context, tx Tx, orgID string, depl
 	).Scan(&ack.AcknowledgedAt); err != nil {
 		return nil, false, errors.Wrap(err, "failed to record deployment outcome acknowledgement")
 	}
+	// Requests that waited behind the fenced Deployment never start by themselves
+	// once an operator acknowledges it; the operator deploys again on purpose.
+	if _, err := SettleQueuedDeployments(ctx, tx, environmentID, DeploymentQueueRejected, CodeOutcomeUnreconciled,
+		fmt.Sprintf("plugin-dispatched Deployment '%s' failed with an unreconciled outcome", deploymentID)); err != nil {
+		return nil, false, err
+	}
 	return ack, false, nil
 }
 
