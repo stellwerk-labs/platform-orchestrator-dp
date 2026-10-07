@@ -105,6 +105,19 @@ func replaceHead(ctx context.Context, store Databaser, params CreateDeploymentPa
 	return tx.Commit()
 }
 
+func acknowledge(ctx context.Context, store Databaser, deploymentID, actorID uuid.UUID, reason string) (*DeploymentOutcomeAcknowledgement, bool, error) {
+	tx, err := store.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ack, replayed, err := AcknowledgeDeploymentOutcome(ctx, tx, "unknown-org", deploymentID, actorID, reason, time.Now())
+	if err != nil {
+		return nil, false, err
+	}
+	return ack, replayed, tx.Commit()
+}
+
 func TestOrdinaryFailedDispatchWithoutRunnerProofDoesNotBlockReplacement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
@@ -118,6 +131,9 @@ func TestOrdinaryFailedDispatchWithoutRunnerProofDoesNotBlockReplacement(t *test
 	require.True(t, unknown, "the evidence stays honest; only the fence is scoped to plugin dispatches")
 	require.NoError(t, tx.Rollback())
 	require.NoError(t, replaceHead(ctx, store, params), "ordinary Core behaviour: a terminal failure never blocks the next Deployment")
+	_, _, err = acknowledge(ctx, store, dep.Id, uuid.New(), "runner job deleted")
+	_, conflict := IsErrConflict(err)
+	require.True(t, conflict, "ordinary Deployments have nothing to acknowledge")
 }
 
 func TestPluginDispatchedUnknownFailureBlocksReplacementAfterLeaseExpiry(t *testing.T) {
@@ -132,6 +148,50 @@ func TestPluginDispatchedUnknownFailureBlocksReplacementAfterLeaseExpiry(t *test
 	var total int
 	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT count(*) FROM deployments`).Scan(&total))
 	require.Equal(t, 1, total)
+}
+
+func TestPluginDispatchedUnknownFailureBlocksUntilAcknowledgedExactlyOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	store := dispatchTestStore(t, ctx)
+	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
+	first := dispatchedFailure(t, ctx, store, params, true)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled")
+
+	actor, reason := uuid.New(), "runner job deleted from the cluster"
+	_, _, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.ErrorContains(t, err, "dispatch window is open")
+	_, err = store.(*databaser).ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET first_attempt_at=now()-interval '2 hours', deadline=now()-interval '1 hour' WHERE deployment_id=$1`, first.Id)
+	require.NoError(t, err)
+
+	ack, replayed, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.False(t, replayed)
+	require.Equal(t, actor, ack.ActorID)
+	require.Equal(t, reason, ack.Reason)
+	require.Equal(t, params.DeploymentEnvUuid, ack.EnvironmentID)
+	require.Equal(t, "dev.example.rollouts", ack.PluginID)
+	again, replayed, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	require.Equal(t, ack.AcknowledgedAt, again.AcknowledgedAt)
+	_, _, err = acknowledge(ctx, store, first.Id, uuid.New(), reason)
+	_, conflict := IsErrConflict(err)
+	require.True(t, conflict, "a different actor cannot rewrite the audit record")
+
+	second := dispatchedFailure(t, ctx, store, params, true)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled", "the acknowledgement covers exactly one Deployment")
+	_, replayed, err = acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled", "replaying an old acknowledgement unblocks nothing")
+	var acknowledgements int
+	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT count(*) FROM deployment_outcome_acknowledgements`).Scan(&acknowledgements))
+	require.Equal(t, 1, acknowledgements)
+	var failed string
+	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT status FROM deployments WHERE id=$1`, first.Id).Scan(&failed))
+	require.Equal(t, string(DeploymentStatusFailed), failed, "acknowledgement never rewrites the Deployment")
+	require.NotEqual(t, first.Id, second.Id)
 }
 
 func TestUpgradeKeepsLegacyOrdinaryFailuresDeployableAndFencesPluginDispatches(t *testing.T) {
@@ -151,11 +211,15 @@ func TestUpgradeKeepsLegacyOrdinaryFailuresDeployableAndFencesPluginDispatches(t
 	_, err = provider.UpTo(ctx, 30)
 	require.NoError(t, err)
 	ordinaryEnv, pluginEnv := uuid.New(), uuid.New()
+	// The Environment head foreign keys are deferred, so seed in one transaction.
+	seed, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = seed.Rollback() }()
 	for env, plugin := range map[uuid.UUID]bool{ordinaryEnv: false, pluginEnv: true} {
 		dep := uuid.New()
-		_, err = db.ExecContext(ctx, `INSERT INTO deployment_environments(id,org_id,project_id,env_id,last_executing_deployment_id,last_executing_deployment_at,last_state_deployment_id,last_state_deployment_at) VALUES($1,'unknown-org','p',$2,$3,now(),$3,now())`, env, env.String(), dep)
+		_, err = seed.ExecContext(ctx, `INSERT INTO deployment_environments(id,org_id,project_id,env_id,last_executing_deployment_id,last_executing_deployment_at,last_state_deployment_id,last_state_deployment_at) VALUES($1,'unknown-org','p',$2,$3,now(),$3,now())`, env, env.String(), dep)
 		require.NoError(t, err)
-		_, err = db.ExecContext(
+		_, err = seed.ExecContext(
 			ctx,
 			`INSERT INTO deployments(id,de_id,mode,status,status_message,manifest,graph,tofu,runner_id,runner_log_level,created_by,created_at,completed_at) VALUES($1,$2,'deploy','failed','watchdog','{}','{}','terraform {}','runner','info',$3,now()-interval '3 hours',now()-interval '2 hours')`,
 			dep,
@@ -164,11 +228,12 @@ func TestUpgradeKeepsLegacyOrdinaryFailuresDeployableAndFencesPluginDispatches(t
 		)
 		require.NoError(t, err)
 		if plugin {
-			_, err = db.ExecContext(ctx, `INSERT INTO external_operation_deployments(org_id,plugin_id,operation_ref,fence,request_id,assertion_action,service_action,request_body_sha256,actor_id,project_id,env_id,deployment_id)
+			_, err = seed.ExecContext(ctx, `INSERT INTO external_operation_deployments(org_id,plugin_id,operation_ref,fence,request_id,assertion_action,service_action,request_body_sha256,actor_id,project_id,env_id,deployment_id)
 				VALUES('unknown-org','dev.example.rollouts',$1,1,$2,'external-deployment.admit','external-deployment.admit',$3,$4,'p',$5,$6)`, uuid.NewString(), uuid.NewString(), strings.Repeat("a", 64), uuid.NewString(), env.String(), dep)
 			require.NoError(t, err)
 		}
 	}
+	require.NoError(t, seed.Commit())
 	_, err = provider.Up(ctx)
 	require.NoError(t, err)
 	store, err := NewDatabaser(ctx, zap.NewNop(), scoped)
@@ -239,12 +304,12 @@ func TestDispatchEvidenceMigrationConservativeRestartAndGuardedDown(t *testing.T
 	second, err := ReadDeploymentDispatchBudget(ctx, db, dep)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
-	_, err = provider.Down(ctx)
+	_, err = provider.DownTo(ctx, 30)
 	require.NoError(t, err, "empty new evidence allows schema30 fallback")
 	_, err = provider.Up(ctx)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET legacy=false WHERE deployment_id=$1`, dep)
 	require.NoError(t, err)
-	_, err = provider.Down(ctx)
+	_, err = provider.DownTo(ctx, 30)
 	require.ErrorContains(t, err, "cannot discard durable Runner")
 }

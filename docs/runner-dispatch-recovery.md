@@ -1,4 +1,4 @@
-# Runner dispatch and completion recovery (schema 31)
+# Runner dispatch and completion recovery (schema 32)
 
 The one-hour execution budget starts at the first durable dispatch attempt,
 after the Runner bundle is prepared and before `Runner.Start` can have an
@@ -59,15 +59,47 @@ already-encrypted bytes and recipient. Protected material access still requires
 the same scoped receipt and wrapped operation identity; the existing cleanup
 ownership rules apply. Neutral completion evidence survives ciphertext cleanup.
 
+## Acknowledging an unknown outcome
+
+If no late result will ever arrive, for example because the Runner job was
+deleted, an operator can record that the attempt can no longer change the
+Environment:
+
+```text
+POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome
+From: <acting user id>
+{"reason": "Runner job deleted after node loss; no pod remains"}
+```
+
+- The acting user needs `deployment.outcome.acknowledge` on the Environment
+  (organization scope as fallback). The system user and organization tokens
+  are rejected because the actor is the audit record.
+- A reason of 1 to 1000 characters is mandatory.
+- Only the current Environment head is accepted, and only if it is a terminal
+  failed plugin-dispatched Deployment without stop evidence whose Runner
+  dispatch window (`deadline` of its dispatch budget) has closed. Anything
+  else returns 409 and records nothing.
+- The first request returns 201. Repeating the identical request (same actor
+  and reason) returns 200 with `replayed: true`; any other request for the same
+  Deployment returns 409. Exactly one record per Deployment exists.
+
+The acknowledgement (migration 32) stores Deployment, Environment, plugin,
+operation, actor, reason and time. It counts as the stop attestation for this
+one Deployment only: the next Deployment and an explicitly authorized
+captured-base rollback may proceed, and plugin status inspection reports the
+failure instead of `outcome_unreconciled`. It never changes the Deployment's
+status, history or outputs, and it does not carry over to any later failure.
+There is no bulk or Environment-wide reset.
+
 ## Upgrade and fallback
 
-Schema 31 is additive. Its Down migration refuses to discard a new dispatch
-attempt or any retained late completion. It is not safe to assume an older
-schema-30 binary can run against this database or to downgrade after evidence
-has been recorded. Qualify an approved schema-31-compatible forward-only
-fallback, including the plugin-disabled path, before enabling a recovery.
-Retain original deployment, broker and encrypted-material evidence. Do not
-edit database statuses, duplicate an override, or blindly replay an uncertain
-send. Transport redrive requires a separately reviewed, once-only operational
-procedure and fresh stop/head/lease/ownership proof; this change supplies no
-automatic redrive API.
+Schemas 31 and 32 are additive. The Down migrations refuse to discard a new
+dispatch attempt, any retained late completion, or any acknowledgement. It is
+not safe to assume an older schema-30 binary can run against this database or
+to downgrade after evidence has been recorded. Qualify an approved compatible
+forward-only fallback, including the plugin-disabled path, before enabling a
+recovery. Retain original deployment, broker and encrypted-material evidence.
+Do not edit database statuses, duplicate an override, or blindly replay an
+uncertain send. Transport redrive requires a separately reviewed, once-only
+operational procedure and fresh stop/head/lease/ownership proof; this change
+supplies no automatic redrive API.

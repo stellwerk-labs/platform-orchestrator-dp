@@ -48,8 +48,8 @@ containerd image store may resolve the issue. See the
 
 ## Configuration and APIs
 
-Runner timeout and recovery behavior for schema 31 is documented in
-[Runner dispatch and completion recovery](./docs/runner-dispatch-recovery.md).
+Runner timeout, unknown-outcome fencing and its audited acknowledgement are
+documented in [Runner dispatch and completion recovery](./docs/runner-dispatch-recovery.md).
 
 Runtime configuration is defined in
 [`internal/config/config.go`](./internal/config/config.go). The OpenAPI contract

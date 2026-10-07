@@ -43,6 +43,7 @@ func TestMigrationHistoryReconciliation(t *testing.T) {
 		requireTablePresent(t, ctx, admin, schema, "deployment_admission_receipts")
 		requireColumn(t, ctx, admin, schema, "deployment_admission_receipts", "carry_forward_module_versions")
 		requireColumn(t, ctx, admin, schema, "deployment_admission_receipts", "confirmed_restricted_version_uuids")
+		requireTablePresent(t, ctx, admin, schema, "deployment_outcome_acknowledgements")
 	})
 
 	t.Run("exercised version 28 receives additive lifecycle evidence", func(t *testing.T) {

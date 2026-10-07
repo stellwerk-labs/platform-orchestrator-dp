@@ -288,13 +288,15 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 			}
 			if forward.Status == DeploymentStatusFailed {
 				// Watchdog/status-check failures also set CompletedAt. Only the
-				// transactionally applied Runner result proves a terminal effect.
+				// transactionally applied Runner result proves a terminal effect,
+				// unless an operator acknowledged this exact unknown outcome.
 				var completed bool
 				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runner_event_inbox
 					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 AND event_type='deployment-result' FOR SHARE)
 					OR EXISTS (SELECT 1 FROM deployment_late_runner_results
 					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 FOR SHARE)
-					OR EXISTS (SELECT 1 FROM deployment_dispatch_budgets WHERE deployment_id=$3 AND completion_received_at IS NOT NULL FOR SHARE)`,
+					OR EXISTS (SELECT 1 FROM deployment_dispatch_budgets WHERE deployment_id=$3 AND completion_received_at IS NOT NULL FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_outcome_acknowledgements WHERE org_id=$1 AND deployment_id=$3 FOR SHARE)`,
 					orgId, forward.RunnerId, forward.Id).Scan(&completed); err != nil {
 					return nil, errors.Wrap(err, "failed to verify terminal Runner result")
 				}

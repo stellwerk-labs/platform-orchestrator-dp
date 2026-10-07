@@ -529,6 +529,51 @@ paths:
         "409":
           $ref: "#/components/responses/409Conflict"
 
+  /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome:
+    post:
+      operationId: internalAcknowledgeDeploymentOutcome
+      tags:
+        - internal
+        - Deployment
+      summary: Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+      description: |
+        Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+        failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+        without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+        the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+        Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+        tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+      security:
+        - userIdHeader: []
+      parameters:
+        - $ref: "#/components/parameters/orgIdPathParam"
+        - $ref: "#/components/parameters/deploymentIdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeploymentOutcomeAcknowledgementBody"
+      responses:
+        "200":
+          description: The identical acknowledgement was already recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentOutcomeAcknowledgement"
+        "201":
+          description: The acknowledgement was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentOutcomeAcknowledgement"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "404":
+          $ref: "#/components/responses/404NotFound"
+        "409":
+          $ref: "#/components/responses/409Conflict"
+
   /orgs/{orgId}/deployments/{deploymentId}/resources:
     get:
       operationId: listDeploymentResourceNodes
@@ -1384,6 +1429,33 @@ components:
         num_tf_resources_changed:
           type: integer
           description: The number of terraformed resources changed. Only known after deployment.
+
+    DeploymentOutcomeAcknowledgementBody:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Why the operator is certain the Runner attempt can no longer change the Environment, for example the confirmed removal of its job.
+
+    DeploymentOutcomeAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [deployment_id, environment_id, plugin_id, operation_ref, actor_id, reason, acknowledged_at, replayed]
+      properties:
+        deployment_id: {type: string, format: uuid}
+        environment_id: {type: string, format: uuid}
+        plugin_id: {type: string}
+        operation_ref: {type: string}
+        actor_id: {type: string, format: uuid}
+        reason: {type: string}
+        acknowledged_at: {type: string, format: date-time}
+        replayed:
+          type: boolean
+          description: True when this identical acknowledgement had already been recorded.
 
     DeploymentSummary:
       description: Summary information for a deployment, more information can be retrieved through the GetDeployment APIs.

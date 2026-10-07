@@ -649,6 +649,26 @@ type DeploymentMetrics struct {
 	NumWorkloads int `json:"num_workloads"`
 }
 
+// DeploymentOutcomeAcknowledgement defines model for DeploymentOutcomeAcknowledgement.
+type DeploymentOutcomeAcknowledgement struct {
+	AcknowledgedAt time.Time          `json:"acknowledged_at"`
+	ActorId        openapi_types.UUID `json:"actor_id"`
+	DeploymentId   openapi_types.UUID `json:"deployment_id"`
+	EnvironmentId  openapi_types.UUID `json:"environment_id"`
+	OperationRef   string             `json:"operation_ref"`
+	PluginId       string             `json:"plugin_id"`
+	Reason         string             `json:"reason"`
+
+	// Replayed True when this identical acknowledgement had already been recorded.
+	Replayed bool `json:"replayed"`
+}
+
+// DeploymentOutcomeAcknowledgementBody defines model for DeploymentOutcomeAcknowledgementBody.
+type DeploymentOutcomeAcknowledgementBody struct {
+	// Reason Why the operator is certain the Runner attempt can no longer change the Environment, for example the confirmed removal of its job.
+	Reason string `json:"reason"`
+}
+
 // DeploymentPage A page of deployments
 type DeploymentPage struct {
 	Items []DeploymentSummary `json:"items"`
@@ -1349,6 +1369,9 @@ type AdmitExternalDeploymentParams struct {
 	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
 }
 
+// InternalAcknowledgeDeploymentOutcomeJSONRequestBody defines body for InternalAcknowledgeDeploymentOutcome for application/json ContentType.
+type InternalAcknowledgeDeploymentOutcomeJSONRequestBody = DeploymentOutcomeAcknowledgementBody
+
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
 
@@ -1458,6 +1481,34 @@ type ClientInterface interface {
 	//
 	// Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 	InternalDeleteDeployments(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalAcknowledgeDeploymentOutcomeWithBody Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithBody(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcome(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalForceFailDeployment Emergency API for force failing a deployment.
 	//
@@ -1741,6 +1792,54 @@ func (c *Client) GetOpenidConfiguration(ctx context.Context, reqEditors ...Reque
 // Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 func (c *Client) InternalDeleteDeployments(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalDeleteDeploymentsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalAcknowledgeDeploymentOutcomeWithBody Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *Client) InternalAcknowledgeDeploymentOutcomeWithBody(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(c.Server, orgId, deploymentId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *Client) InternalAcknowledgeDeploymentOutcome(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalAcknowledgeDeploymentOutcomeRequest(c.Server, orgId, deploymentId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2472,6 +2571,60 @@ func NewInternalDeleteDeploymentsRequest(server string, orgId OrgIdPathParam, pa
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewInternalAcknowledgeDeploymentOutcomeRequest calls the generic InternalAcknowledgeDeploymentOutcome builder with application/json body
+func NewInternalAcknowledgeDeploymentOutcomeRequest(server string, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(server, orgId, deploymentId, "application/json", bodyReader)
+}
+
+// NewInternalAcknowledgeDeploymentOutcomeRequestWithBody constructs an http.Request for the InternalAcknowledgeDeploymentOutcome method, with any body, and a specified content type
+func NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(server string, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/orgs/%s/deployments/%s/actions/acknowledge-outcome", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4197,6 +4350,34 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 	InternalDeleteDeploymentsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*InternalDeleteDeploymentsResponse, error)
 
+	// InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error)
+
+	// InternalAcknowledgeDeploymentOutcomeWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error)
+
 	// InternalForceFailDeploymentWithResponse Emergency API for force failing a deployment.
 	//
 	// This should only be used once you have confirmed that the underlying runner job has stopped, failed, or will
@@ -4629,6 +4810,75 @@ func (r InternalDeleteDeploymentsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r InternalDeleteDeploymentsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InternalAcknowledgeDeploymentOutcomeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentOutcomeAcknowledgement
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *DeploymentOutcomeAcknowledgement
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON200() *DeploymentOutcomeAcknowledgement {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON201() *DeploymentOutcomeAcknowledgement {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalAcknowledgeDeploymentOutcomeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalAcknowledgeDeploymentOutcomeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InternalAcknowledgeDeploymentOutcomeResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6131,6 +6381,46 @@ func (c *ClientWithResponses) InternalDeleteDeploymentsWithResponse(ctx context.
 	return ParseInternalDeleteDeploymentsResponse(rsp)
 }
 
+// InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *ClientWithResponses) InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	rsp, err := c.InternalAcknowledgeDeploymentOutcomeWithBody(ctx, orgId, deploymentId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp)
+}
+
+// InternalAcknowledgeDeploymentOutcomeWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *ClientWithResponses) InternalAcknowledgeDeploymentOutcomeWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	rsp, err := c.InternalAcknowledgeDeploymentOutcome(ctx, orgId, deploymentId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp)
+}
+
 // InternalForceFailDeploymentWithResponse Emergency API for force failing a deployment.
 //
 // This should only be used once you have confirmed that the underlying runner job has stopped, failed, or will
@@ -6703,6 +6993,60 @@ func ParseInternalDeleteDeploymentsResponse(rsp *http.Response) (*InternalDelete
 	switch {
 	case rsp.StatusCode == 204:
 		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalAcknowledgeDeploymentOutcomeResponse parses an HTTP response from a InternalAcknowledgeDeploymentOutcomeWithResponse call
+func ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp *http.Response) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalAcknowledgeDeploymentOutcomeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentOutcomeAcknowledgement
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest DeploymentOutcomeAcknowledgement
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest N400BadRequest

@@ -89,12 +89,14 @@ type DeploymentStopEvidence struct {
 	// StopProven is set by an authenticated Runner completion: an HTTP result,
 	// the NATS result inbox receipt, or a retained genuine late result.
 	StopProven bool
+	// Acknowledged is set by an audited operator acknowledgement.
+	Acknowledged bool
 }
 
-// OutcomeUnreconciled reports a possibly started Runner attempt without stop
-// proof.
+// OutcomeUnreconciled reports a possibly started Runner attempt that has
+// neither stop proof nor an operator acknowledgement.
 func (e DeploymentStopEvidence) OutcomeUnreconciled() bool {
-	return e.Dispatched && !e.StopProven
+	return e.Dispatched && !e.StopProven && !e.Acknowledged
 }
 
 // BlocksReplacement fences an Environment only behind a failed
@@ -114,12 +116,13 @@ func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UU
           OR EXISTS (SELECT 1 FROM runner_event_inbox result WHERE result.deployment_id=d.id AND result.event_type='deployment-result'
                      AND result.org_id=e.org_id AND result.runner_id=d.runner_id)
           OR EXISTS (SELECT 1 FROM deployment_late_runner_results late WHERE late.deployment_id=d.id
-                     AND late.org_id=e.org_id AND late.runner_id=d.runner_id)
+                     AND late.org_id=e.org_id AND late.runner_id=d.runner_id),
+        EXISTS (SELECT 1 FROM deployment_outcome_acknowledgements ack WHERE ack.deployment_id=d.id AND ack.org_id=e.org_id)
         FROM deployments d
         JOIN deployment_environments e ON e.id=d.de_id
         LEFT JOIN deployment_dispatch_budgets budget ON budget.deployment_id=d.id
         WHERE d.id=$1`, deploymentID).Scan(
-		&evidence.Failed, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven)
+		&evidence.Failed, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven, &evidence.Acknowledged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeploymentStopEvidence{}, NewErrNotFound("deployment not found for stop evidence")
 	}

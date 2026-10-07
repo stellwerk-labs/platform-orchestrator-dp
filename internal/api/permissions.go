@@ -19,6 +19,7 @@ const (
 	PermissionModuleVersionUseProposed        = "module.version.use-proposed"
 	PermissionModuleVersionPinDefective       = "module.version.pin-defective"
 	PermissionModuleVersionRollbackRestricted = "module.version.rollback-restricted"
+	PermissionDeploymentOutcomeAcknowledge    = "deployment.outcome.acknowledge"
 )
 
 func orgCheck(orgID, permission string) platformorchestratoriam.ResourcePermissionCheck {
