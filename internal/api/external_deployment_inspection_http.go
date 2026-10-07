@@ -709,6 +709,10 @@ func projectEnvironmentReadiness(item model.EnvironmentDeploymentReadiness) exte
 			state = "ready"
 		}
 	}
+	// Plugin dispatches yield to Core-queued Deployments; the queue deploys next.
+	if item.Queued {
+		state = "busy"
+	}
 	result := externalEnvironmentReadiness{
 		ProjectID: item.ProjectID, EnvID: item.EnvID, State: state,
 		EnvironmentUUID: item.EnvironmentUUID.Ref(), LatestDeploymentID: item.LatestDeploymentID.Ref(),

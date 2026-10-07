@@ -463,6 +463,7 @@
           "Deployment"
         ],
         "summary": "Create a new deployment in the target project and environment.",
+        "description": "Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment\nbusy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits\nin the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted\nstrictly in order and resolved against the Environment state at promotion.\n\nConflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed\nplugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and\n`deployment_base_changed`. Other conflicts keep the code `HTTP-409`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/orgIdPathParam"
@@ -474,7 +475,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Ensures that the deployment request is only accepted once per idempotency key per 24 hours. A uuid or similar is recommended.\nWhen the key matches the key in last deployment and the environment and manifest is the same, this will return the last deployment.\n"
+            "description": "Ensures that the deployment request is only accepted once per idempotency key per 24 hours. A uuid or similar is recommended.\nWhen the key matches the key in last deployment and the environment and manifest is the same, this will return the last deployment.\nWhen the key matches a queued request, this returns its queue item until it is dispatched, and its Deployment afterwards.\n"
           }
         ],
         "requestBody": {
@@ -508,8 +509,149 @@
               }
             }
           },
+          "202": {
+            "description": "The Environment is busy and the request waits in its deployment queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentQueueItem"
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/400BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/409Conflict"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/deployment-queue": {
+      "get": {
+        "operationId": "listDeploymentQueueItems",
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "List deployment queue items in the organization in queue order.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/orgIdPathParam"
+          },
+          {
+            "$ref": "#/components/parameters/projectIdQueryParam"
+          },
+          {
+            "$ref": "#/components/parameters/envIdQueryParam"
+          },
+          {
+            "$ref": "#/components/parameters/perPageQueryParam"
+          },
+          {
+            "$ref": "#/components/parameters/pageTokenQueryParam"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Only return items in this state.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DeploymentQueueItemState"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful list response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentQueueItemPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/deployment-queue/{queueItemId}": {
+      "get": {
+        "operationId": "getDeploymentQueueItem",
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Get a deployment queue item, including the manifest it requested.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/orgIdPathParam"
+          },
+          {
+            "$ref": "#/components/parameters/queueItemIdPathParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The queue item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentQueueItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel": {
+      "post": {
+        "operationId": "cancelDeploymentQueueItem",
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Cancel a queued deployment request.",
+        "description": "Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the\nidentical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the\nerror code `queue_item_dispatching`; read the item again to see whether it was dispatched.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/orgIdPathParam"
+          },
+          {
+            "$ref": "#/components/parameters/queueItemIdPathParam"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentQueueCancelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The cancelled queue item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentQueueItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
           },
           "409": {
             "$ref": "#/components/responses/409Conflict"
@@ -1531,6 +1673,17 @@
         "name": "deploymentId",
         "in": "path",
         "description": "A Deployment ID",
+        "example": "01234567-89ab-cdef-0123-456789abcdef",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "queueItemIdPathParam": {
+        "name": "queueItemId",
+        "in": "path",
+        "description": "A deployment queue item ID",
         "example": "01234567-89ab-cdef-0123-456789abcdef",
         "required": true,
         "schema": {
@@ -2638,6 +2791,145 @@
           }
         }
       },
+      "DeploymentQueueItemState": {
+        "type": "string",
+        "description": "`queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,\n`expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.\n",
+        "enum": [
+          "queued",
+          "dispatched",
+          "cancelled",
+          "expired",
+          "rejected"
+        ]
+      },
+      "DeploymentQueueItem": {
+        "type": "object",
+        "description": "A deploy or rollback request waiting for its Environment, or the record of how its wait ended.",
+        "required": [
+          "id",
+          "org_id",
+          "project_id",
+          "env_id",
+          "mode",
+          "state",
+          "position",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "attempts"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "env_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "rollback"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeploymentQueueItemState"
+          },
+          "position": {
+            "type": "integer",
+            "description": "The 1-based position in the Environment's queue while queued, otherwise 0."
+          },
+          "rollback_to_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_base_deployment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Promotion attempts that failed transiently, for example while Core was unavailable."
+          },
+          "last_error": {
+            "type": "string",
+            "description": "The most recent transient promotion failure."
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,\n`outcome_unreconciled`, `deployment_base_changed`, `pin_protection` or `actor_forbidden`.\n"
+          },
+          "reason_message": {
+            "type": "string"
+          },
+          "settled_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The user who cancelled the item."
+          },
+          "settled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deployment_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Deployment the item became once dispatched."
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/DeploymentManifest"
+          }
+        }
+      },
+      "DeploymentQueueItemPage": {
+        "description": "A page of deployment queue items",
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeploymentQueueItem"
+            }
+          },
+          "next_page_token": {
+            "type": "string",
+            "description": "The page token to use to request the next page of items"
+          }
+        }
+      },
+      "DeploymentQueueCancelBody": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Why the request is no longer wanted."
+          }
+        }
+      },
       "DeploymentPage": {
         "description": "A page of deployments",
         "type": "object",
@@ -2867,6 +3159,25 @@
             ],
             "example": "info",
             "default": "info"
+          },
+          "when_busy": {
+            "description": "What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests\nor is still settling the previous Deployment with Core. `reject` (the default) answers 409 with the error code\n`environment_busy`. `queue` waits in the Environment's deployment queue and answers 202 with the queue item.\nA queued request is resolved like a new request when it reaches the head of the queue. Plan-only requests and\ndry runs are never queued.\n",
+            "type": "string",
+            "enum": [
+              "reject",
+              "queue"
+            ],
+            "default": "reject"
+          },
+          "queue_ttl_seconds": {
+            "description": "How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not\nexceed its configured maximum. Only valid with `when_busy` set to `queue`.\n",
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_base_deployment_id": {
+            "description": "The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`\nwhen the Environment's current Deployment differs at the moment the Deployment is created, also when a queued request\nis promoted. Dry runs do not check it.\n",
+            "type": "string",
+            "format": "uuid"
           }
         }
       },

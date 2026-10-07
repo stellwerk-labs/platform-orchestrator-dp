@@ -89,9 +89,13 @@ type DeploymentOptions struct {
 	RequireExistingRunner       bool
 	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
 	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
-	Admission                   *OrdinaryDeploymentAdmissionAttempt
-	CapturePlan                 *DeploymentPlanCapture
-	ValidatePlan                func(DeploymentPlanCapture) error
+	ExpectedBaseDeploymentID    opt.Opt[uuid.UUID]
+	// A promoted queue item carries its key digest instead of the raw key.
+	IdempotencyKeyDigest opt.Opt[string]
+	QueueItemID          opt.Opt[uuid.UUID]
+	Admission            *OrdinaryDeploymentAdmissionAttempt
+	CapturePlan          *DeploymentPlanCapture
+	ValidatePlan         func(DeploymentPlanCapture) error
 }
 
 // DeploymentPlanCapture keeps the exact DP-internal planning snapshot. HTTP
@@ -112,7 +116,7 @@ func CreateDeploymentWithOptions(
 	db model.Databaser, tx model.Tx, options DeploymentOptions,
 ) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
 	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
-		return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("environment is in status '%s'", env.Status))
+		return nil, nil, nil, model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status))
 	}
 	isRollback := mode == model.DeploymentModeRollback || mode == model.DeploymentModeRollbackPlan
 	useLastGraph := mode == model.DeploymentModeDestroy || isRollback
@@ -135,14 +139,12 @@ func CreateDeploymentWithOptions(
 		}
 	}
 
-	// If the idempotency key was provided, then we use the hex(sha256(.)) digest.
-	var idempotencyKeyDigest opt.Opt[string]
-	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
+	idempotencyKeyDigest := options.IdempotencyKeyDigest
 	if idempotencyKey != nil {
-		h := sha256.New()
-		_, _ = h.Write([]byte(*idempotencyKey))
-		idempotencyKeyDigest = opt.Of(hex.EncodeToString(h.Sum(nil)))
-
+		idempotencyKeyDigest = opt.Of(digestIdempotencyKey(*idempotencyKey))
+	}
+	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
+	if idempotencyKeyDigest.IsSet() {
 		if d, m, err := db.GetDeploymentByIdempotencyKeyDigest(ctx, tx, orgId, projectId, envId, idempotencyKeyDigest.Must()); err != nil {
 			if _, ok := model.IsErrNotFound(err); !ok {
 				return nil, nil, nil, errors.Wrap(err, "failed to get deployment by idempotency key digest")
@@ -489,6 +491,8 @@ func CreateDeploymentWithOptions(
 		ModuleVersionRequestDigest:  requestDigest,
 		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
 		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
+		ExpectedBaseDeploymentID:    options.ExpectedBaseDeploymentID,
+		QueueItemID:                 options.QueueItemID,
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
@@ -529,6 +533,12 @@ func CreateDeploymentWithOptions(
 	)
 
 	return d, messages, &diff, nil
+}
+
+// digestIdempotencyKey is the only form in which an idempotency key is stored.
+func digestIdempotencyKey(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(digest[:])
 }
 
 func deploymentAdmissionLifecycleEvidence(mode model.DeploymentMode, activeDefinitions []string, artifacts []model.ModuleArtifactRequirement) (map[string]uuid.UUID, []uuid.UUID) {

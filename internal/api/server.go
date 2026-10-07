@@ -46,6 +46,9 @@ type Server struct {
 	RunnerLogsReader         RunnerLogsReader
 	ExternalDeployments      *ExternalDeploymentHTTPAdapter
 	DeploymentAdmissions     *OrdinaryDeploymentAdmissionService
+	DeploymentQueue          DeploymentQueueConfig
+
+	queueKicks deploymentQueueKicks
 }
 
 // SkipGeneratedOpenAPIValidation excludes only the manually registered generic

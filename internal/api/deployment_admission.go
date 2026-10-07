@@ -23,6 +23,8 @@ var (
 
 type deploymentAdmissionDeniedError struct {
 	statusCode int
+	// code is Core's stable error code, for example pin_protection, when it sent one.
+	code string
 }
 
 func (e *deploymentAdmissionDeniedError) Error() string { return ErrDeploymentAdmissionDenied.Error() }
@@ -205,8 +207,16 @@ func (a *OrdinaryDeploymentAdmissionAttempt) authorizeCore(ctx context.Context) 
 		return fmt.Errorf("%w: %v", ErrDeploymentAdmissionUnavailable, err)
 	}
 	if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+		if response.StatusCode() == http.StatusConflict && response.JSON409 != nil && response.JSON409.Error == model.CodeEnvironmentBusy {
+			// Core still guards an earlier admission or plugin dispatch of this Environment.
+			return model.NewErrCodedConflict(model.CodeEnvironmentBusy, "Core is still settling an earlier Deployment of the Environment")
+		}
 		if response.StatusCode() == http.StatusBadRequest || response.StatusCode() == http.StatusForbidden || response.StatusCode() == http.StatusNotFound || response.StatusCode() == http.StatusConflict {
-			return &deploymentAdmissionDeniedError{statusCode: response.StatusCode()}
+			denied := &deploymentAdmissionDeniedError{statusCode: response.StatusCode()}
+			if response.JSON409 != nil {
+				denied.code = response.JSON409.Error
+			}
+			return denied
 		}
 		return fmt.Errorf("%w: Core returned status %d", ErrDeploymentAdmissionUnavailable, response.StatusCode())
 	}

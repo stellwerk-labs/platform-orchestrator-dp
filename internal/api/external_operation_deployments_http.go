@@ -222,7 +222,11 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_deployment", Message: badRequest.Message})
 	}
 	if conflict, ok := model.IsErrConflict(err); ok {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "deployment_conflict", Message: conflict.Message})
+		code := conflict.Code
+		if code == "" {
+			code = "deployment_conflict"
+		}
+		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: code, Message: conflict.Message})
 	}
 	a.logger().Error("external deployment admission failed", zap.Error(err))
 	return c.JSON(http.StatusInternalServerError, externalDeploymentErrorResponse{Error: externalDeploymentFailedCode, Message: "external deployment admission failed"})

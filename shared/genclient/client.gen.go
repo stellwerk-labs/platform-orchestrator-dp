@@ -64,6 +64,24 @@ func (e DeploymentCreateBodyRunnerLogLevel) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentCreateBodyWhenBusy.
+const (
+	Queue  DeploymentCreateBodyWhenBusy = "queue"
+	Reject DeploymentCreateBodyWhenBusy = "reject"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentCreateBodyWhenBusy enum.
+func (e DeploymentCreateBodyWhenBusy) Valid() bool {
+	switch e {
+	case Queue:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentDiffChangeType.
 const (
 	DeploymentDiffChangeTypeAdded         DeploymentDiffChangeType = "added"
@@ -82,6 +100,51 @@ func (e DeploymentDiffChangeType) Valid() bool {
 	case DeploymentDiffChangeTypeParamsChanged:
 		return true
 	case DeploymentDiffChangeTypeRemoved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentQueueItemMode.
+const (
+	DeploymentQueueItemModeDeploy   DeploymentQueueItemMode = "deploy"
+	DeploymentQueueItemModeRollback DeploymentQueueItemMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemMode enum.
+func (e DeploymentQueueItemMode) Valid() bool {
+	switch e {
+	case DeploymentQueueItemModeDeploy:
+		return true
+	case DeploymentQueueItemModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentQueueItemState.
+const (
+	Cancelled  DeploymentQueueItemState = "cancelled"
+	Dispatched DeploymentQueueItemState = "dispatched"
+	Expired    DeploymentQueueItemState = "expired"
+	Queued     DeploymentQueueItemState = "queued"
+	Rejected   DeploymentQueueItemState = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemState enum.
+func (e DeploymentQueueItemState) Valid() bool {
+	switch e {
+	case Cancelled:
+		return true
+	case Dispatched:
+		return true
+	case Expired:
+		return true
+	case Queued:
+		return true
+	case Rejected:
 		return true
 	default:
 		return false
@@ -471,6 +534,11 @@ type DeploymentCreateBody struct {
 	// Example: development
 	EnvId string `json:"env_id"`
 
+	// ExpectedBaseDeploymentId The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`
+	// when the Environment's current Deployment differs at the moment the Deployment is created, also when a queued request
+	// is promoted. Dry runs do not check it.
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+
 	// IsDryRun Whether to just validate the request and not persist or execute it.
 	IsDryRun bool `json:"is_dry_run,omitempty"`
 
@@ -500,6 +568,10 @@ type DeploymentCreateBody struct {
 	// Example: my-project
 	ProjectId string `json:"project_id"`
 
+	// QueueTtlSeconds How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not
+	// exceed its configured maximum. Only valid with `when_busy` set to `queue`.
+	QueueTtlSeconds *int `json:"queue_ttl_seconds,omitempty"`
+
 	// RollbackToDeploymentId Optional ID to rollback to when the deployment mode is 'rollback' or 'rollback_plan'.
 	//
 	// Example: 01234567-89ab-cdef-0123-456789abcdef
@@ -509,6 +581,13 @@ type DeploymentCreateBody struct {
 	//
 	// Example: info
 	RunnerLogLevel *DeploymentCreateBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+
+	// WhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+	// or is still settling the previous Deployment with Core. `reject` (the default) answers 409 with the error code
+	// `environment_busy`. `queue` waits in the Environment's deployment queue and answers 202 with the queue item.
+	// A queued request is resolved like a new request when it reaches the head of the queue. Plan-only requests and
+	// dry runs are never queued.
+	WhenBusy *DeploymentCreateBodyWhenBusy `json:"when_busy,omitempty"`
 }
 
 // DeploymentCreateBodyMode The mode of the deployment. Defaults to 'deploy'. Can be set to 'rollback' to rollback to the graph used in
@@ -522,6 +601,13 @@ type DeploymentCreateBodyMode string
 //
 // Example: info
 type DeploymentCreateBodyRunnerLogLevel string
+
+// DeploymentCreateBodyWhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+// or is still settling the previous Deployment with Core. `reject` (the default) answers 409 with the error code
+// `environment_busy`. `queue` waits in the Environment's deployment queue and answers 202 with the queue item.
+// A queued request is resolved like a new request when it reaches the head of the queue. Plan-only requests and
+// dry runs are never queued.
+type DeploymentCreateBodyWhenBusy string
 
 // DeploymentDiff Describes a diff between the resource graphs of two deployments.
 type DeploymentDiff struct {
@@ -676,6 +762,68 @@ type DeploymentPage struct {
 	// NextPageToken The page token to use to request the next page of items
 	NextPageToken *string `json:"next_page_token,omitempty"`
 }
+
+// DeploymentQueueCancelBody defines model for DeploymentQueueCancelBody.
+type DeploymentQueueCancelBody struct {
+	// Reason Why the request is no longer wanted.
+	Reason *string `json:"reason,omitempty"`
+}
+
+// DeploymentQueueItem A deploy or rollback request waiting for its Environment, or the record of how its wait ended.
+type DeploymentQueueItem struct {
+	// Attempts Promotion attempts that failed transiently, for example while Core was unavailable.
+	Attempts  int                `json:"attempts"`
+	CreatedAt time.Time          `json:"created_at"`
+	CreatedBy openapi_types.UUID `json:"created_by"`
+
+	// DeploymentId The Deployment the item became once dispatched.
+	DeploymentId             *openapi_types.UUID `json:"deployment_id,omitempty"`
+	EnvId                    string              `json:"env_id"`
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+	ExpiresAt                time.Time           `json:"expires_at"`
+	Id                       openapi_types.UUID  `json:"id"`
+
+	// LastError The most recent transient promotion failure.
+	LastError *string `json:"last_error,omitempty"`
+
+	// Manifest The manifest associated with a deployment
+	Manifest *DeploymentManifest     `json:"manifest,omitempty"`
+	Mode     DeploymentQueueItemMode `json:"mode"`
+	OrgId    string                  `json:"org_id"`
+
+	// Position The 1-based position in the Environment's queue while queued, otherwise 0.
+	Position  int    `json:"position"`
+	ProjectId string `json:"project_id"`
+
+	// ReasonCode Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,
+	// `outcome_unreconciled`, `deployment_base_changed`, `pin_protection` or `actor_forbidden`.
+	ReasonCode             *string             `json:"reason_code,omitempty"`
+	ReasonMessage          *string             `json:"reason_message,omitempty"`
+	RollbackToDeploymentId *openapi_types.UUID `json:"rollback_to_deployment_id,omitempty"`
+	SettledAt              *time.Time          `json:"settled_at,omitempty"`
+
+	// SettledBy The user who cancelled the item.
+	SettledBy *openapi_types.UUID `json:"settled_by,omitempty"`
+
+	// State `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+	// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+	State DeploymentQueueItemState `json:"state"`
+}
+
+// DeploymentQueueItemMode defines model for DeploymentQueueItem.Mode.
+type DeploymentQueueItemMode string
+
+// DeploymentQueueItemPage A page of deployment queue items
+type DeploymentQueueItemPage struct {
+	Items []DeploymentQueueItem `json:"items"`
+
+	// NextPageToken The page token to use to request the next page of items
+	NextPageToken *string `json:"next_page_token,omitempty"`
+}
+
+// DeploymentQueueItemState `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+type DeploymentQueueItemState string
 
 // DeploymentResultMetadata The metadata produced by the resources involved in the deployment.
 type DeploymentResultMetadata = []DeploymentResultMetadataPerNode
@@ -1217,6 +1365,9 @@ type PluginIdPathParam = string
 // ProjectIdQueryParam defines model for projectIdQueryParam.
 type ProjectIdQueryParam = string
 
+// QueueItemIdPathParam defines model for queueItemIdPathParam.
+type QueueItemIdPathParam = openapi_types.UUID
+
 // N400BadRequest A standard error response
 type N400BadRequest = Error
 
@@ -1264,6 +1415,24 @@ type ListActiveResourceNodesParams struct {
 	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
 }
 
+// ListDeploymentQueueItemsParams defines parameters for ListDeploymentQueueItems.
+type ListDeploymentQueueItemsParams struct {
+	// ProjectId The Project ID
+	ProjectId *ProjectIdQueryParam `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// EnvId The Environment ID
+	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+
+	// PerPage The maximum number of items to return in a page of results
+	PerPage *PerPageQueryParam `form:"per_page,omitempty" json:"per_page,omitempty"`
+
+	// Page The page token to request from
+	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
+
+	// State Only return items in this state.
+	State *DeploymentQueueItemState `form:"state,omitempty" json:"state,omitempty"`
+}
+
 // ListDeploymentsParams defines parameters for ListDeployments.
 type ListDeploymentsParams struct {
 	// ProjectId The Project ID
@@ -1295,6 +1464,7 @@ type ListDeploymentsParamsByStatus string
 type CreateDeploymentParams struct {
 	// IdempotencyKey Ensures that the deployment request is only accepted once per idempotency key per 24 hours. A uuid or similar is recommended.
 	// When the key matches the key in last deployment and the environment and manifest is the same, this will return the last deployment.
+	// When the key matches a queued request, this returns its queue item until it is dispatched, and its Deployment afterwards.
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
@@ -1371,6 +1541,9 @@ type AdmitExternalDeploymentParams struct {
 
 // InternalAcknowledgeDeploymentOutcomeJSONRequestBody defines body for InternalAcknowledgeDeploymentOutcome for application/json ContentType.
 type InternalAcknowledgeDeploymentOutcomeJSONRequestBody = DeploymentOutcomeAcknowledgementBody
+
+// CancelDeploymentQueueItemJSONRequestBody defines body for CancelDeploymentQueueItem for application/json ContentType.
+type CancelDeploymentQueueItemJSONRequestBody = DeploymentQueueCancelBody
 
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
@@ -1533,6 +1706,38 @@ type ClientInterface interface {
 	// Corresponds with GET /orgs/{orgId}/active-resources (the `ListActiveResourceNodes` operationId).
 	ListActiveResourceNodes(ctx context.Context, orgId OrgIdPathParam, params *ListActiveResourceNodesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+	ListDeploymentQueueItems(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+	GetDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelDeploymentQueueItemWithBody Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithBody(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelDeploymentQueueItem Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListDeployments List deployments in the organization
 	//
 	// Corresponds with GET /orgs/{orgId}/deployments (the `ListDeployments` operationId).
@@ -1540,12 +1745,30 @@ type ClientInterface interface {
 
 	// CreateDeploymentWithBody Create a new deployment in the target project and environment.
 	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+	// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+	// strictly in order and resolved against the Environment state at promotion.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
 	CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, params *CreateDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateDeployment Create a new deployment in the target project and environment.
+	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+	// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+	// strictly in order and resolved against the Environment state at promotion.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1903,6 +2126,78 @@ func (c *Client) ListActiveResourceNodes(ctx context.Context, orgId OrgIdPathPar
 	return c.Client.Do(req)
 }
 
+// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+func (c *Client) ListDeploymentQueueItems(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDeploymentQueueItemsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+func (c *Client) GetDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDeploymentQueueItemRequest(c.Server, orgId, queueItemId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CancelDeploymentQueueItemWithBody Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *Client) CancelDeploymentQueueItemWithBody(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelDeploymentQueueItemRequestWithBody(c.Server, orgId, queueItemId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CancelDeploymentQueueItem Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *Client) CancelDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelDeploymentQueueItemRequest(c.Server, orgId, queueItemId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListDeployments List deployments in the organization
 //
 // Corresponds with GET /orgs/{orgId}/deployments (the `ListDeployments` operationId).
@@ -1920,6 +2215,15 @@ func (c *Client) ListDeployments(ctx context.Context, orgId OrgIdPathParam, para
 
 // CreateDeploymentWithBody Create a new deployment in the target project and environment.
 //
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+// strictly in order and resolved against the Environment state at promotion.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
@@ -1936,6 +2240,15 @@ func (c *Client) CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathPa
 }
 
 // CreateDeployment Create a new deployment in the target project and environment.
+//
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+// strictly in order and resolved against the Environment state at promotion.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2807,6 +3120,210 @@ func NewListActiveResourceNodesRequest(server string, orgId OrgIdPathParam, para
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListDeploymentQueueItemsRequest constructs an http.Request for the ListDeploymentQueueItems method
+func NewListDeploymentQueueItemsRequest(server string, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.ProjectId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "project_id", *params.ProjectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnvId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "env_id", *params.EnvId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PerPage != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "per_page", *params.PerPage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetDeploymentQueueItemRequest constructs an http.Request for the GetDeploymentQueueItem method
+func NewGetDeploymentQueueItemRequest(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "queueItemId", queueItemId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCancelDeploymentQueueItemRequest calls the generic CancelDeploymentQueueItem builder with application/json body
+func NewCancelDeploymentQueueItemRequest(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCancelDeploymentQueueItemRequestWithBody(server, orgId, queueItemId, "application/json", bodyReader)
+}
+
+// NewCancelDeploymentQueueItemRequestWithBody constructs an http.Request for the CancelDeploymentQueueItem method, with any body, and a specified content type
+func NewCancelDeploymentQueueItemRequestWithBody(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "queueItemId", queueItemId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue/%s/actions/cancel", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4407,6 +4924,42 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /orgs/{orgId}/active-resources (the `ListActiveResourceNodes` operationId).
 	ListActiveResourceNodesWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListActiveResourceNodesParams, reqEditors ...RequestEditorFn) (*ListActiveResourceNodesResponse, error)
 
+	// ListDeploymentQueueItemsWithResponse List deployment queue items in the organization in queue order.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+	ListDeploymentQueueItemsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*ListDeploymentQueueItemsResponse, error)
+
+	// GetDeploymentQueueItemWithResponse Get a deployment queue item, including the manifest it requested.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+	GetDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*GetDeploymentQueueItemResponse, error)
+
+	// CancelDeploymentQueueItemWithBodyWithResponse Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error)
+
+	// CancelDeploymentQueueItemWithResponse Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error)
+
 	// ListDeploymentsWithResponse List deployments in the organization
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -4416,12 +4969,30 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDeploymentWithBodyWithResponse Create a new deployment in the target project and environment.
 	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+	// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+	// strictly in order and resolved against the Environment state at promotion.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
 	CreateDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, params *CreateDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDeploymentResponse, error)
 
 	// CreateDeploymentWithResponse Create a new deployment in the target project and environment.
+	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+	// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+	// strictly in order and resolved against the Environment state at promotion.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -5043,6 +5614,164 @@ func (r ListActiveResourceNodesResponse) ContentType() string {
 	return ""
 }
 
+type ListDeploymentQueueItemsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItemPage
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDeploymentQueueItemsResponse) GetJSON200() *DeploymentQueueItemPage {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListDeploymentQueueItemsResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDeploymentQueueItemsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDeploymentQueueItemsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDeploymentQueueItemsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDeploymentQueueItemsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetDeploymentQueueItemResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItem
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetDeploymentQueueItemResponse) GetJSON200() *DeploymentQueueItem {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetDeploymentQueueItemResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetDeploymentQueueItemResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDeploymentQueueItemResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDeploymentQueueItemResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDeploymentQueueItemResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CancelDeploymentQueueItemResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItem
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON200() *DeploymentQueueItem {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r CancelDeploymentQueueItemResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelDeploymentQueueItemResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelDeploymentQueueItemResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CancelDeploymentQueueItemResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListDeploymentsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5105,6 +5834,8 @@ type CreateDeploymentResponse struct {
 	JSON200 *DeploymentDryRun
 	// JSON201 the response for an HTTP 201 `application/json` response
 	JSON201 *Deployment
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *DeploymentQueueItem
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *N400BadRequest
 	// JSON409 the response for an HTTP 409 `application/json` response
@@ -5119,6 +5850,11 @@ func (r CreateDeploymentResponse) GetJSON200() *DeploymentDryRun {
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
 func (r CreateDeploymentResponse) GetJSON201() *Deployment {
 	return r.JSON201
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r CreateDeploymentResponse) GetJSON202() *DeploymentQueueItem {
+	return r.JSON202
 }
 
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
@@ -6468,6 +7204,66 @@ func (c *ClientWithResponses) ListActiveResourceNodesWithResponse(ctx context.Co
 	return ParseListActiveResourceNodesResponse(rsp)
 }
 
+// ListDeploymentQueueItemsWithResponse List deployment queue items in the organization in queue order.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+func (c *ClientWithResponses) ListDeploymentQueueItemsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*ListDeploymentQueueItemsResponse, error) {
+	rsp, err := c.ListDeploymentQueueItems(ctx, orgId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDeploymentQueueItemsResponse(rsp)
+}
+
+// GetDeploymentQueueItemWithResponse Get a deployment queue item, including the manifest it requested.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) GetDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*GetDeploymentQueueItemResponse, error) {
+	rsp, err := c.GetDeploymentQueueItem(ctx, orgId, queueItemId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDeploymentQueueItemResponse(rsp)
+}
+
+// CancelDeploymentQueueItemWithBodyWithResponse Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) CancelDeploymentQueueItemWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error) {
+	rsp, err := c.CancelDeploymentQueueItemWithBody(ctx, orgId, queueItemId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelDeploymentQueueItemResponse(rsp)
+}
+
+// CancelDeploymentQueueItemWithResponse Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) CancelDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error) {
+	rsp, err := c.CancelDeploymentQueueItem(ctx, orgId, queueItemId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelDeploymentQueueItemResponse(rsp)
+}
+
 // ListDeploymentsWithResponse List deployments in the organization
 //
 // Returns a wrapper object for the known response body format(s).
@@ -6483,6 +7279,15 @@ func (c *ClientWithResponses) ListDeploymentsWithResponse(ctx context.Context, o
 
 // CreateDeploymentWithBodyWithResponse Create a new deployment in the target project and environment.
 //
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+// strictly in order and resolved against the Environment state at promotion.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
@@ -6495,6 +7300,15 @@ func (c *ClientWithResponses) CreateDeploymentWithBodyWithResponse(ctx context.C
 }
 
 // CreateDeploymentWithResponse Create a new deployment in the target project and environment.
+//
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits
+// in the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted
+// strictly in order and resolved against the Environment state at promotion.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -7187,6 +8001,119 @@ func ParseListActiveResourceNodesResponse(rsp *http.Response) (*ListActiveResour
 	return response, nil
 }
 
+// ParseListDeploymentQueueItemsResponse parses an HTTP response from a ListDeploymentQueueItemsWithResponse call
+func ParseListDeploymentQueueItemsResponse(rsp *http.Response) (*ListDeploymentQueueItemsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDeploymentQueueItemsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItemPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDeploymentQueueItemResponse parses an HTTP response from a GetDeploymentQueueItemWithResponse call
+func ParseGetDeploymentQueueItemResponse(rsp *http.Response) (*GetDeploymentQueueItemResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDeploymentQueueItemResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelDeploymentQueueItemResponse parses an HTTP response from a CancelDeploymentQueueItemWithResponse call
+func ParseCancelDeploymentQueueItemResponse(rsp *http.Response) (*CancelDeploymentQueueItemResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelDeploymentQueueItemResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListDeploymentsResponse parses an HTTP response from a ListDeploymentsWithResponse call
 func ParseListDeploymentsResponse(rsp *http.Response) (*ListDeploymentsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -7254,6 +8181,13 @@ func ParseCreateDeploymentResponse(rsp *http.Response) (*CreateDeploymentRespons
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest N400BadRequest

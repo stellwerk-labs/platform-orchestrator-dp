@@ -281,90 +281,179 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response(fmt.Sprintf("invalid mode '%s'", request.Body.Mode))}, nil
 	}
 
-	if tx, err := s.Database.BeginTx(ctx, nil); err != nil {
-		return nil, errors.Wrap(err, "failed to begin transaction")
-	} else {
-		defer func() {
-			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				logger.Error("failed to rollback transaction", zap.Error(err))
-			}
-		}()
-
-		options := DeploymentOptions{
-			ExplicitModuleVersions:  request.Body.ModuleVersions,
-			RestrictedConfirmations: request.Body.ConfirmRestrictedModuleVersionUuids,
-		}
-		if !request.Body.IsDryRun && model.RequiresEnvironmentLease(modelMode) {
-			options.Admission = s.DeploymentAdmissions.NewAttempt(
-				request.OrgId, ref.DerefOr(env.ProjectUuid, uuid.Nil), env.Uuid, uid, modelMode,
-				ref.DerefOr(request.Params.IdempotencyKey, ""),
-			)
-		}
-		needsModuleVersionAuthorization := len(request.Body.ModuleVersions) > 0 || len(request.Body.ConfirmRestrictedModuleVersionUuids) > 0
-		if needsModuleVersionAuthorization {
-			options.AuthorizeModuleVersion = func(_ string, explicitlySelected bool, artifact catalogueArtifact) error {
-				switch artifact.Status {
-				case "proposed":
-					if explicitlySelected {
-						return s.checkEnvAuthorization(ctx, uid, request.OrgId, env.Uuid, PermissionModuleVersionUseProposed)
-					}
-				case "defective":
-					if artifact.VersionUUID == uuid.Nil || !slices.Contains(request.Body.ConfirmRestrictedModuleVersionUuids, artifact.VersionUUID) {
-						return model.NewErrBadRequest("Defective Module Version requires explicit confirmation of its exact Version UUID")
-					}
-					permission := PermissionModuleVersionPinDefective
-					if modelMode == model.DeploymentModeRollback || modelMode == model.DeploymentModeRollbackPlan {
-						permission = PermissionModuleVersionRollbackRestricted
-					}
-					return s.checkEnvAuthorization(ctx, uid, request.OrgId, env.Uuid, permission)
-				}
-				return nil
-			}
-		}
-
-		dep, messages, diff, err := CreateDeploymentWithOptions(
-			ctx, logger, uid,
-			request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, opt.OfRef(request.Body.RollbackToDeploymentId),
-			ref.DerefOr(request.Body.Manifest, DeploymentManifest{}), request.Body.EncryptedOutputsRecipient, request.Body.EncryptedLogsRecipient, request.Params.IdempotencyKey, request.Body.IsDryRun,
-			request.Body.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx, options,
-		)
-		if err != nil {
-			_ = tx.Rollback()
-			if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
-				return nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission")
-			}
-			var denied *deploymentAdmissionDeniedError
-			if errors.As(err, &denied) {
-				return deploymentAdmissionDeniedResponse(denied.statusCode)
-			}
-			if e, ok := model.IsErrBadRequest(err); ok {
-				return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400FromModelErr(e)}, nil
-			} else if e, ok := model.IsErrConflict(err); ok {
-				return CreateDeployment409JSONResponse{N409ConflictJSONResponse: Generate409FromModelErr(e)}, nil
-			} else if e, ok := model.IsErrNotFound(err); ok {
-				return CreateDeployment409JSONResponse{N409ConflictJSONResponse: Generate409Response(e.Message)}, nil
-			}
-			return nil, errors.Wrap(err, "failed to create deployment")
-		}
-
-		if request.Body.IsDryRun {
-			return CreateDeployment200JSONResponse{RunnerId: dep.RunnerId, Diff: *diff}, nil
-		}
-
-		if err := tx.Commit(); err != nil {
-			_ = tx.Rollback()
-			if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
-				return nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission after commit failure")
-			}
-			return nil, errors.Wrap(err, "failed to commit transaction")
-		}
-		ids.DeployId = dep.Id.String()
-		logger.Info("Created deployment")
-
-		rawManifest, _ := json.Marshal(request.Body.Manifest)
-		reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
-		return CreateDeployment201JSONResponse(apiDepFromModel(*dep, rawManifest)), nil
+	whenBusy := ref.DerefOr(request.Body.WhenBusy, Reject)
+	queueable := !request.Body.IsDryRun && (modelMode == model.DeploymentModeDeploy || modelMode == model.DeploymentModeRollback)
+	if whenBusy == Queue && !queueable {
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("plan-only requests and dry runs are never queued")}, nil
 	}
+	queueTTL := s.deploymentQueueConfig().DefaultTTL
+	if request.Body.QueueTtlSeconds != nil {
+		if whenBusy != Queue {
+			return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("queue_ttl_seconds requires when_busy to be queue")}, nil
+		}
+		queueTTL = time.Duration(*request.Body.QueueTtlSeconds) * time.Second
+		if maxTTL := s.deploymentQueueConfig().MaxTTL; queueTTL > maxTTL {
+			return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response(fmt.Sprintf("queue_ttl_seconds must not exceed %d", int64(maxTTL/time.Second)))}, nil
+		}
+	}
+
+	deploymentRequest := deploymentRequest{
+		Manifest:                  request.Body.Manifest,
+		RollbackToDeploymentID:    request.Body.RollbackToDeploymentId,
+		ModuleVersions:            request.Body.ModuleVersions,
+		RestrictedConfirmations:   request.Body.ConfirmRestrictedModuleVersionUuids,
+		EncryptedOutputsRecipient: request.Body.EncryptedOutputsRecipient,
+		EncryptedLogsRecipient:    request.Body.EncryptedLogsRecipient,
+		RunnerLogLevel:            request.Body.RunnerLogLevel,
+	}
+	expectedBase := opt.OfRef(request.Body.ExpectedBaseDeploymentId)
+	var queued model.NewDeploymentQueueItem
+	if queueable && (whenBusy == Queue || request.Params.IdempotencyKey != nil) {
+		var err error
+		queued, err = newDeploymentQueueItem(uid, request.OrgId, request.Body.ProjectId, request.Body.EnvId, env.Uuid, modelMode, deploymentRequest, request.Params.IdempotencyKey, expectedBase, queueTTL)
+		if err != nil {
+			return nil, err
+		}
+		dispatched := false
+		if request.Params.IdempotencyKey != nil {
+			replay, err := s.findQueuedReplay(ctx, queued)
+			if err != nil {
+				return createDeploymentErrorResponse(err)
+			} else if replay != nil && replay.State != model.DeploymentQueueDispatched {
+				return CreateDeployment202JSONResponse(apiQueueItemFromModel(*replay, false)), nil
+			}
+			// A dispatched replay is answered by its Deployment's own idempotent replay below.
+			dispatched = replay != nil
+		}
+		if whenBusy == Queue && !dispatched {
+			if env.Status == platformorchestratorcp.EnvironmentStatusDeleting {
+				return createDeploymentErrorResponse(model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status)))
+			}
+			// Keep requests for a busy Environment away from Core admission entirely.
+			if err := s.checkEnvironmentAvailable(ctx, queued); errors.Is(err, model.ErrEnvironmentBusy) {
+				return s.enqueueDeployment(ctx, queued)
+			} else if err != nil {
+				return createDeploymentErrorResponse(err)
+			}
+		}
+	}
+
+	dep, messages, diff, createErr := s.createRequestedDeployment(ctx, logger, uid, request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, deploymentRequest, request.Params.IdempotencyKey, request.Body.IsDryRun, expectedBase)
+	if errors.Is(createErr, model.ErrEnvironmentBusy) {
+		if whenBusy == Queue {
+			return s.enqueueDeployment(ctx, queued)
+		}
+		// The refused attempt may have held Core's admission guard while the queue head tried; let it retry now.
+		s.KickDeploymentQueue(env.Uuid) //nolint:contextcheck // promotion must not inherit request authority
+	}
+	if createErr != nil {
+		return createDeploymentErrorResponse(createErr)
+	}
+	if request.Body.IsDryRun {
+		return CreateDeployment200JSONResponse{RunnerId: dep.RunnerId, Diff: *diff}, nil
+	}
+	ids.DeployId = dep.Id.String()
+	logger.Info("Created deployment")
+
+	rawManifest, _ := json.Marshal(request.Body.Manifest)
+	reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
+	return CreateDeployment201JSONResponse(apiDepFromModel(*dep, rawManifest)), nil
+}
+
+// createRequestedDeployment resolves and creates one Deployment in its own
+// transaction and seals the Core admission when nothing was committed.
+func (s *Server) createRequestedDeployment(
+	ctx context.Context, logger *zap.Logger, actor uuid.UUID, orgID, projectID, envID string, env platformorchestratorcp.Environment,
+	mode model.DeploymentMode, request deploymentRequest, idempotencyKey *string, dryRun bool, expectedBase opt.Opt[uuid.UUID],
+) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
+	tx, err := s.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to begin transaction")
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			logger.Error("failed to rollback transaction", zap.Error(err))
+		}
+	}()
+
+	options := s.deploymentOptions(ctx, actor, orgID, env, mode, request, ref.DerefOr(idempotencyKey, ""), dryRun)
+	options.ExpectedBaseDeploymentID = expectedBase
+	dep, messages, diff, err := CreateDeploymentWithOptions(
+		ctx, logger, actor, orgID, projectID, envID, env, mode, opt.OfRef(request.RollbackToDeploymentID),
+		ref.DerefOr(request.Manifest, DeploymentManifest{}), request.EncryptedOutputsRecipient, request.EncryptedLogsRecipient, idempotencyKey, dryRun,
+		request.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx, options,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
+			return nil, nil, nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission")
+		}
+		return nil, nil, nil, err
+	}
+	if dryRun {
+		return dep, nil, diff, nil
+	}
+	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
+			return nil, nil, nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission after commit failure")
+		}
+		return nil, nil, nil, errors.Wrap(err, "failed to commit transaction")
+	}
+	return dep, messages, diff, nil
+}
+
+// deploymentOptions carries a request's Module Version selection, its scoped
+// authorization and, for mutating runs, a fresh Core admission attempt.
+func (s *Server) deploymentOptions(ctx context.Context, actor uuid.UUID, orgID string, env platformorchestratorcp.Environment, mode model.DeploymentMode, request deploymentRequest, admissionKey string, dryRun bool) DeploymentOptions {
+	options := DeploymentOptions{
+		ExplicitModuleVersions:  request.ModuleVersions,
+		RestrictedConfirmations: request.RestrictedConfirmations,
+	}
+	if !dryRun && model.RequiresEnvironmentLease(mode) {
+		options.Admission = s.DeploymentAdmissions.NewAttempt(orgID, ref.DerefOr(env.ProjectUuid, uuid.Nil), env.Uuid, actor, mode, admissionKey)
+	}
+	if len(request.ModuleVersions) > 0 || len(request.RestrictedConfirmations) > 0 {
+		options.AuthorizeModuleVersion = func(_ string, explicitlySelected bool, artifact catalogueArtifact) error {
+			switch artifact.Status {
+			case "proposed":
+				if explicitlySelected {
+					return s.checkEnvAuthorization(ctx, actor, orgID, env.Uuid, PermissionModuleVersionUseProposed)
+				}
+			case "defective":
+				if artifact.VersionUUID == uuid.Nil || !slices.Contains(request.RestrictedConfirmations, artifact.VersionUUID) {
+					return model.NewErrBadRequest("Defective Module Version requires explicit confirmation of its exact Version UUID")
+				}
+				permission := PermissionModuleVersionPinDefective
+				if mode == model.DeploymentModeRollback || mode == model.DeploymentModeRollbackPlan {
+					permission = PermissionModuleVersionRollbackRestricted
+				}
+				return s.checkEnvAuthorization(ctx, actor, orgID, env.Uuid, permission)
+			}
+			return nil
+		}
+	}
+	return options
+}
+
+func createDeploymentErrorResponse(err error) (CreateDeploymentResponseObject, error) {
+	var denied *deploymentAdmissionDeniedError
+	if errors.As(err, &denied) {
+		response, err := deploymentAdmissionDeniedResponse(denied.statusCode)
+		if conflict, ok := response.(CreateDeployment409JSONResponse); ok && denied.code != "" {
+			conflict.Error = denied.code
+			return conflict, nil
+		}
+		return response, err
+	}
+	if e, ok := model.IsErrBadRequest(err); ok {
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400FromModelErr(e)}, nil
+	} else if e, ok := model.IsErrConflict(err); ok {
+		return CreateDeployment409JSONResponse{N409ConflictJSONResponse: Generate409FromModelErr(e)}, nil
+	} else if e, ok := model.IsErrNotFound(err); ok {
+		return CreateDeployment409JSONResponse{N409ConflictJSONResponse: Generate409Response(e.Message)}, nil
+	}
+	return nil, errors.Wrap(err, "failed to create deployment")
 }
 
 func deploymentAdmissionDeniedResponse(statusCode int) (CreateDeploymentResponseObject, error) {

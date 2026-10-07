@@ -47,7 +47,11 @@ func Generate404FromModelErr(e model.ErrNotFound) N404NotFoundJSONResponse {
 }
 
 func Generate409FromModelErr(e model.ErrConflict) N409ConflictJSONResponse {
-	return Generate409Response(e.Message)
+	response := Generate409Response(e.Message)
+	if e.Code != "" {
+		response.Error = e.Code
+	}
+	return response
 }
 
 func checkIfOrganizationExists(ctx context.Context, client platformorchestratorcp.ClientWithResponsesInterface, orgId string) (bool, error) {
