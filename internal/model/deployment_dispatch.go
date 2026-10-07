@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 const RunnerExecutionBudget = time.Hour
@@ -138,6 +140,44 @@ func DeploymentOutcomeUnreconciled(ctx context.Context, tx Tx, deploymentID uuid
 		return false, err
 	}
 	return evidence.OutcomeUnreconciled(), nil
+}
+
+// EnvironmentFence names the failed plugin-dispatched Deployment whose
+// unreconciled outcome refuses every new Deployment of its Environment.
+type EnvironmentFence struct {
+	DeploymentID uuid.UUID
+	// Since is when the fencing Deployment failed.
+	Since time.Time
+	// RemedyAvailableAt is the end of the Runner dispatch window, before which
+	// acknowledge-outcome is refused. Unset when no deadline was recorded.
+	RemedyAvailableAt opt.Opt[time.Time]
+}
+
+// ReadEnvironmentFence reports whether stateHead, the current state Deployment
+// of an Environment, fences it. CreateDeployment refuses on exactly this answer,
+// so what clients read and what they are refused cannot disagree.
+func ReadEnvironmentFence(ctx context.Context, tx Tx, stateHead uuid.UUID) (opt.Opt[EnvironmentFence], error) {
+	if stateHead == uuid.Nil {
+		return opt.Empty[EnvironmentFence](), nil
+	}
+	evidence, err := ReadDeploymentStopEvidence(ctx, tx, stateHead)
+	if err != nil || !evidence.BlocksReplacement() {
+		return opt.Empty[EnvironmentFence](), err
+	}
+	fence := EnvironmentFence{DeploymentID: stateHead}
+	// Every status write stamps completed_at; created_at only keeps this read
+	// total for a row that somehow lacks it.
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(completed_at, created_at) FROM deployments WHERE id=$1`, stateHead).Scan(&fence.Since); err != nil {
+		return opt.Empty[EnvironmentFence](), err
+	}
+	budget, err := ReadDeploymentDispatchBudget(ctx, tx, stateHead)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return opt.Empty[EnvironmentFence](), err
+	}
+	if budget.Deadline.Valid {
+		fence.RemedyAvailableAt = opt.Of(budget.Deadline.Time)
+	}
+	return opt.Of(fence), nil
 }
 
 func RecordDeploymentCompletion(ctx context.Context, tx Tx, deploymentID uuid.UUID) error {

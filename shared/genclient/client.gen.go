@@ -169,6 +169,36 @@ func (e DeploymentResultsUpdateBodyStatus) Valid() bool {
 	}
 }
 
+// Defines values for EnvironmentFenceCode.
+const (
+	OutcomeUnreconciled EnvironmentFenceCode = "outcome_unreconciled"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceCode enum.
+func (e EnvironmentFenceCode) Valid() bool {
+	switch e {
+	case OutcomeUnreconciled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EnvironmentFenceRemedy.
+const (
+	AcknowledgeOutcome EnvironmentFenceRemedy = "acknowledge-outcome"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceRemedy enum.
+func (e EnvironmentFenceRemedy) Valid() bool {
+	switch e {
+	case AcknowledgeOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalDeploymentAdmissionBodyMode.
 const (
 	ExternalDeploymentAdmissionBodyModeDeploy   ExternalDeploymentAdmissionBodyMode = "deploy"
@@ -455,6 +485,14 @@ type Deployment struct {
 	//
 	// Example: development-01
 	EnvId string `json:"env_id"`
+
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
 
 	// Id The unique deployment id
 	//
@@ -882,6 +920,14 @@ type DeploymentSummary struct {
 	// Example: development-01
 	EnvId string `json:"env_id"`
 
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
+
 	// Id The unique deployment id
 	//
 	// Example: 01234567-89ab-cdef-0123-4566789abcdef
@@ -940,6 +986,54 @@ type DeploymentTFResourceCounts struct {
 	// NumResourcesRemoved Number of Terraform resources removed by this deployment run.
 	NumResourcesRemoved int `json:"num_resources_removed"`
 }
+
+// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+// that waited in the deployment queue are rejected and must be submitted again.
+type EnvironmentFence struct {
+	// Code The conflict code new Deployments of this Environment are refused with.
+	//
+	// Example: outcome_unreconciled
+	Code EnvironmentFenceCode `json:"code"`
+
+	// DeploymentId The failed plugin-dispatched Deployment that fences the Environment.
+	//
+	// Example: 01234567-89ab-cdef-0123-456789abcdef
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+
+	// Remedy The operator action that lifts the fence:
+	// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+	//
+	//
+	// Example: acknowledge-outcome
+	Remedy EnvironmentFenceRemedy `json:"remedy"`
+
+	// RemedyAvailableAt The end of the Runner dispatch window. `acknowledge-outcome` is refused with 409 before this time. Absent when
+	// no window was recorded, then it is accepted at once.
+	//
+	//
+	// Example: 2025-01-02T04:04:05Z
+	RemedyAvailableAt *time.Time `json:"remedy_available_at,omitempty"`
+
+	// Since When the fencing Deployment failed.
+	//
+	// Example: 2025-01-02T03:04:05Z
+	Since time.Time `json:"since"`
+}
+
+// EnvironmentFenceCode The conflict code new Deployments of this Environment are refused with.
+//
+// Example: outcome_unreconciled
+type EnvironmentFenceCode string
+
+// EnvironmentFenceRemedy The operator action that lifts the fence:
+// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+//
+// Example: acknowledge-outcome
+type EnvironmentFenceRemedy string
 
 // Error A standard error response
 type Error struct {

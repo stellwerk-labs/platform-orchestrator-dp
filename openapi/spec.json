@@ -2788,6 +2788,55 @@
           },
           "metrics": {
             "$ref": "#/components/schemas/DeploymentMetrics"
+          },
+          "environment_fence": {
+            "$ref": "#/components/schemas/EnvironmentFence"
+          }
+        }
+      },
+      "EnvironmentFence": {
+        "description": "Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current\nDeployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result\nproves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is\nrefused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator\nacknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests\nthat waited in the deployment queue are rejected and must be submitted again.\n",
+        "type": "object",
+        "required": [
+          "code",
+          "deployment_id",
+          "since",
+          "remedy"
+        ],
+        "properties": {
+          "code": {
+            "description": "The conflict code new Deployments of this Environment are refused with.",
+            "type": "string",
+            "enum": [
+              "outcome_unreconciled"
+            ],
+            "example": "outcome_unreconciled"
+          },
+          "deployment_id": {
+            "description": "The failed plugin-dispatched Deployment that fences the Environment.",
+            "type": "string",
+            "format": "uuid",
+            "example": "01234567-89ab-cdef-0123-456789abcdef"
+          },
+          "since": {
+            "description": "When the fencing Deployment failed.",
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-01-02T03:04:05Z"
+          },
+          "remedy": {
+            "description": "The operator action that lifts the fence:\n`POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.\n",
+            "type": "string",
+            "enum": [
+              "acknowledge-outcome"
+            ],
+            "example": "acknowledge-outcome"
+          },
+          "remedy_available_at": {
+            "description": "The end of the Runner dispatch window. `acknowledge-outcome` is refused with 409 before this time. Absent when\nno window was recorded, then it is accepted at once.\n",
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-01-02T04:04:05Z"
           }
         }
       },

@@ -162,14 +162,11 @@ func CheckEnvironmentAvailable(ctx context.Context, tx Tx, orgID, projectID, env
 }
 
 func requireReplaceableStateHead(ctx context.Context, tx Tx, stateHead uuid.UUID) error {
-	if stateHead == uuid.Nil {
-		return nil
-	}
-	evidence, err := ReadDeploymentStopEvidence(ctx, tx, stateHead)
+	fence, err := ReadEnvironmentFence(ctx, tx, stateHead)
 	if err != nil {
 		return err
 	}
-	if evidence.BlocksReplacement() {
+	if fence.IsSet() {
 		return NewErrCodedConflict(CodeOutcomeUnreconciled, fmt.Sprintf("failed plugin-dispatched Deployment '%s' may still have an active Runner; outcome is unreconciled", stateHead))
 	}
 	return nil

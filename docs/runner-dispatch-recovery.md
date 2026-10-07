@@ -37,6 +37,25 @@ expired, and requests waiting in the Environment's deployment queue are
 rejected as well (see `deployment-queue.md`).
 External status inspection returns HTTP 409 `outcome_unreconciled` for it.
 
+Clients see the fence before they are refused. `GET /orgs/{orgId}/last-deployments`
+(with or without `state_change_only`) adds `environment_fence` to the item of a
+fenced Environment and omits it otherwise:
+
+```json
+"environment_fence": {
+  "code": "outcome_unreconciled",
+  "deployment_id": "<fencing Deployment>",
+  "since": "<when it failed>",
+  "remedy": "acknowledge-outcome",
+  "remedy_available_at": "<end of its Runner dispatch window>"
+}
+```
+
+The field is computed by the same check that refuses new Deployments, so it
+disappears exactly when they are accepted again: after an acknowledgement (see
+below) or a genuine late completion. `remedy_available_at` is absent when no
+dispatch window was recorded; before it, `acknowledge-outcome` answers 409.
+
 Ordinary Core Deployments keep their existing behaviour: a failed Deployment,
 with or without Runner stop proof, never blocks the next Deployment of its
 Environment. This includes legacy failures backfilled by migration 31, so an

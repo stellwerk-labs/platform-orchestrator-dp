@@ -174,7 +174,9 @@ that waited when the fence appeared are rejected by the next promotion, and at
 the latest by `acknowledge-outcome`, which rejects them in its own transaction.
 Acknowledging therefore never starts queued work: an operator incident is not
 followed by an automatic burst of Deployments. New requests work normally
-afterwards. The fence never applies to Core-only installations.
+afterwards. The fence never applies to Core-only installations. Clients read
+it as `environment_fence` on the Environment's `last-deployments` item (see
+`runner-dispatch-recovery.md`).
 
 ## Deletion and destroy
 

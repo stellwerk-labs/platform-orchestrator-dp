@@ -149,9 +149,24 @@ func apiDepSummaryFromModel(m model.DeploymentSummary) DeploymentSummary {
 		PlanOnly:               plan,
 		RollbackToDeploymentId: m.RollbackToId.Ref(),
 
-		Status:        string(m.Status),
-		StatusMessage: m.StatusMessage,
-		Metrics:       apiMetricsFromModel(m.Metrics, m.Status == model.DeploymentStatusSucceeded),
+		Status:           string(m.Status),
+		StatusMessage:    m.StatusMessage,
+		Metrics:          apiMetricsFromModel(m.Metrics, m.Status == model.DeploymentStatusSucceeded),
+		EnvironmentFence: apiEnvironmentFenceFromModel(m.EnvironmentFence),
+	}
+}
+
+func apiEnvironmentFenceFromModel(m opt.Opt[model.EnvironmentFence]) *EnvironmentFence {
+	if !m.IsSet() {
+		return nil
+	}
+	fence := m.Must()
+	return &EnvironmentFence{
+		Code:              OutcomeUnreconciled,
+		DeploymentId:      fence.DeploymentID,
+		Since:             fence.Since,
+		Remedy:            AcknowledgeOutcome,
+		RemedyAvailableAt: fence.RemedyAvailableAt.Ref(),
 	}
 }
 

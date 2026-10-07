@@ -58,18 +58,18 @@ func TestDispatchBudgetStartsBeforeEffectAndNeverRefreshes(t *testing.T) {
 	require.ErrorContains(t, err, "exhausted")
 }
 
-func dispatchedFailure(t *testing.T, ctx context.Context, store Databaser, params CreateDeploymentParams, pluginDispatched bool) *DeploymentSummary {
+func dispatchedFailure(t *testing.T, ctx context.Context, store Databaser, env string, params CreateDeploymentParams, pluginDispatched bool) *DeploymentSummary {
 	t.Helper()
 	tx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	dep, err := store.CreateDeployment(ctx, tx, "unknown-org", "p", "e", params)
+	dep, err := store.CreateDeployment(ctx, tx, "unknown-org", "p", env, params)
 	require.NoError(t, err)
 	if pluginDispatched {
 		_, err = CreateExternalOperationDeploymentReceipt(ctx, tx, ExternalOperationDeploymentReceipt{
 			ExternalOperationDeploymentKey: ExternalOperationDeploymentKey{OrgID: "unknown-org", PluginID: "dev.example.rollouts", RequestID: uuid.NewString()},
 			OperationRef:                   uuid.NewString(), Fence: 1, AssertionAction: "external-deployment.admit", ServiceAction: "external-deployment.admit",
-			RequestBodySHA256: strings.Repeat("a", 64), ActorID: params.CreatedBy.String(), ProjectID: "p", EnvID: "e",
+			RequestBodySHA256: strings.Repeat("a", 64), ActorID: params.CreatedBy.String(), ProjectID: "p", EnvID: env,
 			ProjectUUID: opt.Of(uuid.New()), EnvironmentUUID: opt.Of(params.DeploymentEnvUuid), DeploymentID: dep.Id,
 		})
 		require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestOrdinaryFailedDispatchWithoutRunnerProofDoesNotBlockReplacement(t *test
 	defer cancel()
 	store := dispatchTestStore(t, ctx)
 	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
-	dep := dispatchedFailure(t, ctx, store, params, false)
+	dep := dispatchedFailure(t, ctx, store, "e", params, false)
 	tx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	unknown, err := DeploymentOutcomeUnreconciled(ctx, tx, dep.Id)
@@ -141,7 +141,7 @@ func TestPluginDispatchedUnknownFailureBlocksReplacementAfterLeaseExpiry(t *test
 	defer cancel()
 	store := dispatchTestStore(t, ctx)
 	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
-	dep := dispatchedFailure(t, ctx, store, params, true)
+	dep := dispatchedFailure(t, ctx, store, "e", params, true)
 	_, err := store.(*databaser).ExecContext(ctx, `UPDATE environment_deployment_leases SET expires_at=now()-interval '1 second' WHERE deployment_id=$1`, dep.Id)
 	require.NoError(t, err)
 	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled")
@@ -155,7 +155,7 @@ func TestPluginDispatchedUnknownFailureBlocksUntilAcknowledgedExactlyOnce(t *tes
 	defer cancel()
 	store := dispatchTestStore(t, ctx)
 	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
-	first := dispatchedFailure(t, ctx, store, params, true)
+	first := dispatchedFailure(t, ctx, store, "e", params, true)
 	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled")
 
 	actor, reason := uuid.New(), "runner job deleted from the cluster"
@@ -179,7 +179,7 @@ func TestPluginDispatchedUnknownFailureBlocksUntilAcknowledgedExactlyOnce(t *tes
 	_, conflict := IsErrConflict(err)
 	require.True(t, conflict, "a different actor cannot rewrite the audit record")
 
-	second := dispatchedFailure(t, ctx, store, params, true)
+	second := dispatchedFailure(t, ctx, store, "e", params, true)
 	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled", "the acknowledgement covers exactly one Deployment")
 	_, replayed, err = acknowledge(ctx, store, first.Id, actor, reason)
 	require.NoError(t, err)

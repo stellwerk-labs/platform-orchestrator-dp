@@ -71,6 +71,9 @@ type DeploymentSummary struct {
 	ModuleVersionRequestDigest string
 	// Internal only: caps buffered Runner commands at the immutable first attempt budget.
 	DispatchDeadline time.Time
+	// EnvironmentFence is set by ListLastDeployments only, while the item's
+	// Environment refuses new Deployments behind an unreconciled plugin dispatch.
+	EnvironmentFence opt.Opt[EnvironmentFence]
 }
 
 type UpdateDeploymentStatusAndOutputsParams struct {
@@ -431,8 +434,6 @@ func (d *databaser) ListDeployments(ctx context.Context, optionalTx Tx, orgId st
 }
 
 func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgId string, pageToken string, perPage int, params ListLastDeploymentsParams) ([]DeploymentSummary, string, error) {
-	logger := hlogger.TraceScopedLoggerFromCtx(d.logger, ctx)
-
 	var afterProjectId, afterEnvId string
 	if pageToken != "" {
 		parts := strings.Split(pageToken, ",")
@@ -441,41 +442,63 @@ func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgI
 		}
 		afterProjectId, afterEnvId = parts[0], parts[1]
 	}
-	limitPlusOne := max(1, perPage) + 1
+	limit := max(1, perPage)
+	tx := d.txOrDb(optionalTx)
+	out, failedStateHeads, err := d.queryLastDeployments(ctx, tx, orgId, afterProjectId, afterEnvId, limit+1, params)
+	if err != nil {
+		return nil, "", err
+	}
+	var nextPageToken string
+	if len(out) > limit {
+		out, failedStateHeads = out[:limit], failedStateHeads[:limit]
+		nextPageToken = fmt.Sprintf("%s,%s", out[limit-1].ProjectId, out[limit-1].EnvId)
+	}
+	// The row set is closed by now, so these reads may share optionalTx's connection.
+	for i, head := range failedStateHeads {
+		if out[i].EnvironmentFence, err = ReadEnvironmentFence(ctx, tx, head.UUID); err != nil {
+			return nil, "", errors.Wrap(err, "failed to read environment fence")
+		}
+	}
+	return out, nextPageToken, nil
+}
 
-	if rs, err := d.txOrDb(optionalTx).QueryContext(
+// queryLastDeployments also returns each Environment's state head if it failed:
+// no other state head can fence its Environment.
+func (d *databaser) queryLastDeployments(ctx context.Context, tx Tx, orgId, afterProjectId, afterEnvId string, limit int, params ListLastDeploymentsParams) ([]DeploymentSummary, []uuid.NullUUID, error) {
+	rs, err := tx.QueryContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND 
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, head.id
+		 FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND
 		(CASE WHEN $7 THEN d.id = e.last_state_deployment_id ELSE d.id = e.last_executing_deployment_id END)
+		 LEFT JOIN deployments head ON head.id = e.last_state_deployment_id AND head.status = 'failed'
 		 WHERE e.org_id = $1 AND (e.project_id, e.env_id) > ($2, $3) AND ($5::text IS NULL OR e.project_id = $5) AND ($6::text IS NULL OR e.env_id = $6)
 		 ORDER BY e.org_id, e.project_id, e.env_id LIMIT $4`,
-		orgId, afterProjectId, afterEnvId, limitPlusOne, params.ProjectId, params.EnvId, params.StateChangeOnly,
-	); err != nil {
-		return nil, "", errors.Wrap(err, "failed to query rows")
-	} else {
-		defer func() {
-			if err := rs.Close(); err != nil {
-				logger.Error("failed to close row set")
-			}
-		}()
-		out := make([]DeploymentSummary, 0, limitPlusOne-1)
-		for rs.Next() {
-			next := DeploymentSummary{OrgId: orgId}
-			if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics),
-				&next.Revision, opt.Scan(&next.RollbackToId)); err != nil {
-				return nil, "", errors.Wrap(err, "failed to scan row")
-			}
-			if len(out) >= limitPlusOne-1 {
-				last := out[len(out)-1]
-				return out, fmt.Sprintf("%s,%s", last.ProjectId, last.EnvId), nil
-			}
-			out = append(out, next)
-		}
-		if rs.Err() != nil {
-			return nil, "", errors.Wrap(rs.Err(), "failed to iterate rows")
-		}
-		return out, "", nil
+		orgId, afterProjectId, afterEnvId, limit, params.ProjectId, params.EnvId, params.StateChangeOnly,
+	)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "failed to query rows")
 	}
+	defer func() {
+		if err := rs.Close(); err != nil {
+			hlogger.TraceScopedLoggerFromCtx(d.logger, ctx).Error("failed to close row set")
+		}
+	}()
+	out := make([]DeploymentSummary, 0, limit)
+	failedStateHeads := make([]uuid.NullUUID, 0, limit)
+	for rs.Next() {
+		next := DeploymentSummary{OrgId: orgId}
+		var failedStateHead uuid.NullUUID
+		if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics),
+			&next.Revision, opt.Scan(&next.RollbackToId), &failedStateHead); err != nil {
+			return nil, nil, errors.Wrap(err, "failed to scan row")
+		}
+		out = append(out, next)
+		failedStateHeads = append(failedStateHeads, failedStateHead)
+	}
+	if err := rs.Err(); err != nil {
+		return nil, nil, errors.Wrap(err, "failed to iterate rows")
+	}
+	return out, failedStateHeads, nil
 }
 
 func (d *databaser) GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error) {
