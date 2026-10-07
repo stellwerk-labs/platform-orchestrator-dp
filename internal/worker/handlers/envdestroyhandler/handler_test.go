@@ -2,9 +2,11 @@ package envdestroyhandler
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -35,6 +37,10 @@ func mockHandler(t *testing.T, logDel runners.RunnerLogsDeleter) (*EnvDestroyHan
 	db.EXPECT().BeginTx(gomock.Any(), gomock.Any()).Return(tx, nil).AnyTimes()
 	tx.EXPECT().Commit().Return(nil).AnyTimes()
 	tx.EXPECT().Rollback().Return(nil).AnyTimes()
+	// A deleting Environment first cancels its queued Deployments; nothing is queued here.
+	tx.EXPECT().ExecContext(gomock.Any(), gomock.Cond(func(query string) bool {
+		return strings.HasPrefix(query, "UPDATE environment_deployment_queue")
+	}), gomock.Any()).Return(driver.RowsAffected(0), nil).AnyTimes()
 	pub := new(hmessaging.RecordingPublisher)
 
 	store := new(reliableoutbox.InMemoryStorage[*hstandardoutbox.PendingEventMessage])

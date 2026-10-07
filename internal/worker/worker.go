@@ -64,6 +64,7 @@ type Worker struct {
 	RunnerBundleStore                  createdephandler.RunnerBundleStore
 	MetadataOutputKey                  string
 	DeploymentAdmissions               *api.OrdinaryDeploymentAdmissionService
+	DeploymentQueue                    deploymentadmissionhandler.DeploymentQueue
 }
 
 func (w *Worker) BuildRunnerStatusConsumer(ctx context.Context) (*hnats.Consumer, error) {
@@ -133,7 +134,7 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 			return nil
 		})},
 	})
-	inner := handlers.Handler(deploymentadmissionhandler.Handler{Admissions: w.DeploymentAdmissions, Next: branches})
+	inner := handlers.Handler(deploymentadmissionhandler.Handler{Admissions: w.DeploymentAdmissions, Queue: w.DeploymentQueue, Next: branches})
 	observed := middleware.WrapWithObserver(inner, "main-consumer")
 	consumer, err := hnats.EnsureDurableConsumer(ctx, w.JetStream, hnats.DurableConsumerConfig{
 		Stream:  hmessaging.EventsStreamName,

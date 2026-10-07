@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -29,6 +30,10 @@ import (
 
 	dpevents "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
 )
+
+// destroyRetryDelay paces redelivery while the Environment is busy. A running
+// Deployment also triggers the handler again through its completion event.
+const destroyRetryDelay = 10 * time.Second
 
 // BranchPattern is the branch match pattern for incoming events.
 var BranchPattern = regexp.MustCompile(regexp.QuoteMeta(string(cpevents.IoPlatformOrchestratorEnvironmentUpdated)) +
@@ -116,6 +121,10 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	if err := h.cancelQueuedDeployments(ctx, logger, envUuid); err != nil {
+		return err
+	}
+
 	// at this point we know the CP state indicates this env should be cleaned up, so we need to check our own DP state
 	// from inside a transaction.
 	tx, err := h.db.BeginTx(ctx, nil)
@@ -194,6 +203,12 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 		if sealErr := attempt.SealAbsent(ctx); sealErr != nil {
 			return errors.Wrap(sealErr, "failed to seal absent destroy admission")
 		}
+		if errors.Is(err, model.ErrEnvironmentBusy) {
+			// Destroy is never queued and never fails because another Deployment
+			// still runs or Core still settles one: it waits and tries again.
+			logger.Info("environment is busy, destroy waits", zap.Error(err))
+			return hmessaging.NewRetryErrorWithDelay(err, destroyRetryDelay)
+		}
 		if me, ok := model.IsErrBadRequest(err); ok {
 			return h.updateEnvStatus(ctx, logger, orgId, projectId, envId, platformorchestratorcp.InternalUpdateEnvironmentJSONRequestBody{
 				Status:        ref.Ref(platformorchestratorcp.EnvironmentStatusDeleteFailed),
@@ -222,6 +237,28 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 		Status:        ref.Ref(platformorchestratorcp.EnvironmentStatusDeleting),
 		StatusMessage: ref.Ref(fmt.Sprintf("Waiting for destroy deployment '%s' to complete", newDep.Id)),
 	})
+}
+
+// cancelQueuedDeployments withdraws every request still waiting for the
+// deleting Environment. Requests enqueued after this point are rejected when
+// promotion finds the Environment deleting.
+func (h *EnvDestroyHandler) cancelQueuedDeployments(ctx context.Context, logger *zap.Logger, envUuid uuid.UUID) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to begin transaction")
+	}
+	defer func() { _ = tx.Rollback() }()
+	count, err := model.SettleQueuedDeployments(ctx, tx, envUuid, model.DeploymentQueueCancelled, model.CodeEnvironmentDeleting, "the Environment is being deleted")
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "failed to commit queued deployment cancellation")
+	}
+	if count > 0 {
+		logger.Info("cancelled queued deployments of the deleting environment", zap.Int64("count", count))
+	}
+	return nil
 }
 
 func (h *EnvDestroyHandler) isEnvironmentDestroyed(ctx context.Context, tx model.Tx, logger *zap.Logger, orgId, projectId, envId string) (bool, model.DeploymentSummary, error) {

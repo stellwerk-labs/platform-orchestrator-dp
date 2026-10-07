@@ -228,6 +228,9 @@ func main() {
 		Vault:                    vlt,
 		OidcIssuerUrl:            cfg.OidcIssuerUrl,
 		IamClient:                iamClient,
+		DeploymentQueue: api.DeploymentQueueConfig{
+			MaxDepth: cfg.DeploymentQueueMaxDepth, DefaultTTL: cfg.DeploymentQueueDefaultTTL, MaxTTL: cfg.DeploymentQueueMaxTTL,
+		},
 	}
 	deploymentAdmissionConfigured, err := cfg.DeploymentAdmissionConfigured()
 	if err != nil {
@@ -313,6 +316,7 @@ func main() {
 			}
 		}()
 	}
+	go sweepDeploymentQueue(bgCtx, &server)
 	go func() {
 		zap.L().Info("Starting scheduled flush of pending messages")
 		reliableoutbox.ScheduledFlushPendingMessages(bgCtx, server.Database.AsReliableOutboxStore(), eventPublisher, reliableoutbox.DefaultScheduledFlushPeriodFunc)
@@ -392,6 +396,7 @@ func main() {
 		KubernetesRunnerPodSchedulingDelay: cfg.KubernetesRunnerPodSchedulingDelay,
 		MetadataOutputKey:                  cfg.MetadataOutputKey,
 		DeploymentAdmissions:               server.DeploymentAdmissions,
+		DeploymentQueue:                    &server,
 	}
 	wrkc, err := wrk.BuildMainConsumer(bgCtx)
 	if err != nil {
@@ -495,4 +500,21 @@ func main() {
 			zap.L().Error("Error received from background component", zap.Error(e))
 		}
 	}()
+}
+
+// sweepDeploymentQueue expires waiting Deployments and retries queue heads
+// that no event promoted, on every replica.
+func sweepDeploymentQueue(ctx context.Context, server *api.Server) {
+	ticker := time.NewTicker(api.DeploymentQueueSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := server.SweepDeploymentQueue(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				zap.L().Error("failed to sweep the deployment queue", zap.Error(err))
+			}
+		}
+	}
 }

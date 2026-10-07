@@ -45,6 +45,11 @@ type Configuration struct {
 	DeploymentAdmissionCoreURL       string `env:"DEPLOYMENT_ADMISSION_CORE_GATEWAY_URL"`
 	DeploymentAdmissionCoreTokenFile string `env:"DEPLOYMENT_ADMISSION_CORE_BEARER_TOKEN_FILE"`
 
+	// Bounds of each Environment's deployment queue. A request may shorten its TTL, never exceed the maximum.
+	DeploymentQueueMaxDepth   int           `env:"DEPLOYMENT_QUEUE_MAX_DEPTH, default=10"   validate:"gt=0"`
+	DeploymentQueueDefaultTTL time.Duration `env:"DEPLOYMENT_QUEUE_DEFAULT_TTL, default=2h" validate:"gt=0,ltefield=DeploymentQueueMaxTTL"`
+	DeploymentQueueMaxTTL     time.Duration `env:"DEPLOYMENT_QUEUE_MAX_TTL, default=24h"    validate:"gt=0"`
+
 	// IamUrl is the internal url for the platform-orchestrator-iam service
 	IamUrl string `env:"IAM_URL" validate:"required,url"`
 
