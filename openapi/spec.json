@@ -463,7 +463,7 @@
           "Deployment"
         ],
         "summary": "Create a new deployment in the target project and environment.",
-        "description": "Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment\nbusy fails with 409 and the error code `environment_busy`, unless it sets `when_busy` to `queue`: then it waits\nin the Environment's deployment queue and the response is 202 with the queue item. Queued requests are promoted\nstrictly in order and resolved against the Environment state at promotion.\n\nConflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed\nplugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and\n`deployment_base_changed`. Other conflicts keep the code `HTTP-409`.\n",
+        "description": "Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment\nbusy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets\n`when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an\norganization token cannot wait and always get that 409. Queued requests are promoted strictly in order and\nresolved against the Environment state at promotion.\n\nPlan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is\nanswered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not\nwhile a deploy, rollback, destroy or another plan runs, because their Runners would contend for the\nEnvironment's state lock; it then fails with 409 `environment_busy`.\n\nConflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed\nplugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and\n`deployment_base_changed`. Other conflicts keep the code `HTTP-409`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/orgIdPathParam"
@@ -3210,16 +3210,16 @@
             "default": "info"
           },
           "when_busy": {
-            "description": "What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests\nor is still settling the previous Deployment with Core. `reject` (the default) answers 409 with the error code\n`environment_busy`. `queue` waits in the Environment's deployment queue and answers 202 with the queue item.\nA queued request is resolved like a new request when it reaches the head of the queue. Plan-only requests and\ndry runs are never queued.\n",
+            "description": "What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests\nor is still settling the previous Deployment with Core. `queue` (the default) waits in the Environment's\ndeployment queue and answers 202 with the queue item. `reject` answers 409 with the error code\n`environment_busy`. A queued request is resolved like a new request when it reaches the head of the queue.\nRequests authorized by an organization token cannot wait and get 409 `environment_busy` either way. Plan-only\nrequests and dry runs are never queued and ignore this field.\n",
             "type": "string",
             "enum": [
               "reject",
               "queue"
             ],
-            "default": "reject"
+            "default": "queue"
           },
           "queue_ttl_seconds": {
-            "description": "How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not\nexceed its configured maximum. Only valid with `when_busy` set to `queue`.\n",
+            "description": "How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not\nexceed its configured maximum. Not valid with `when_busy` set to `reject`.\n",
             "type": "integer",
             "minimum": 1
           },

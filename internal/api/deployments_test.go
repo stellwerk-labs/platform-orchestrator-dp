@@ -48,6 +48,11 @@ import (
 const sampleLogs = "test log content"
 const orgId = "test-org"
 
+// withoutQueue makes a deploy or rollback request fail fast instead of
+// waiting: the mocked database cannot answer the queue's availability read.
+// The PostgreSQL suites cover the queue path.
+var withoutQueue = ref.Ref(Reject)
+
 func TestApplyRunnerErrorRecordsAndFailsDeploymentAtomically(t *testing.T) {
 	_, server, finish := MockServer(t)
 	defer finish()
@@ -355,7 +360,7 @@ output "two" {
 			OrgId: "my-org",
 			Body: &CreateDeploymentJSONRequestBody{
 				ProjectId: "my-project", EnvId: "my-env",
-				Mode: "deploy",
+				Mode: "deploy", WhenBusy: withoutQueue,
 				Manifest: &DeploymentManifest{
 					Workloads: map[string]DeploymentManifestWorkload{
 						"one": {
@@ -841,7 +846,7 @@ output "platform_orchestrator_metadata" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode:                      "rollback",
+			Mode: "rollback", WhenBusy: withoutQueue,
 			RollbackToDeploymentId:    &rollbackToId,
 			EncryptedOutputsRecipient: ref.Ref(encryptedOutputsRecipient),
 			EncryptedLogsRecipient:    ref.Ref(encryptedLogsRecipient),
@@ -1003,7 +1008,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1128,7 +1133,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1253,7 +1258,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1424,7 +1429,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1503,7 +1508,7 @@ func TestCreateDeployment_fail_graph_error(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1567,7 +1572,7 @@ func TestCreateDeployment_fail_missing_provider(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1622,7 +1627,7 @@ func TestCreateDeployment_catalogue_fail(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1807,7 +1812,7 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -2274,7 +2279,7 @@ func TestCreateDeployment_invalid_placeholder(t *testing.T) {
 				OrgId: "my-org",
 				Body: &CreateDeploymentJSONRequestBody{
 					ProjectId: "my-project", EnvId: "my-env",
-					Mode: "deploy",
+					Mode: "deploy", WhenBusy: withoutQueue,
 					Manifest: &DeploymentManifest{
 						Workloads: map[string]DeploymentManifestWorkload{
 							"one": {
@@ -2341,7 +2346,7 @@ func TestCreateDeployment_invalid_module_param(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {

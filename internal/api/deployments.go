@@ -296,11 +296,9 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response(fmt.Sprintf("invalid mode '%s'", request.Body.Mode))}, nil
 	}
 
-	whenBusy := ref.DerefOr(request.Body.WhenBusy, Reject)
+	// Plan-only requests and dry runs never wait in the queue, whatever when_busy says.
+	whenBusy := ref.DerefOr(request.Body.WhenBusy, Queue)
 	queueable := !request.Body.IsDryRun && (modelMode == model.DeploymentModeDeploy || modelMode == model.DeploymentModeRollback)
-	if whenBusy == Queue && !queueable {
-		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("plan-only requests and dry runs are never queued")}, nil
-	}
 	queueTTL := s.deploymentQueueConfig().DefaultTTL
 	if request.Body.QueueTtlSeconds != nil {
 		if whenBusy != Queue {
@@ -355,7 +353,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 
 	dep, messages, diff, createErr := s.createRequestedDeployment(ctx, logger, uid, request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, deploymentRequest, request.Params.IdempotencyKey, request.Body.IsDryRun, expectedBase)
 	if errors.Is(createErr, model.ErrEnvironmentBusy) {
-		if whenBusy == Queue {
+		if queueable && whenBusy == Queue {
 			return s.enqueueDeployment(ctx, queued)
 		}
 		// The refused attempt may have held Core's admission guard while the queue head tried; let it retry now.

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,12 +12,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stellwerk-labs/golib/hecho"
 	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 )
 
 var queueEverything = map[string]any{"when_busy": "queue"}
@@ -86,19 +89,68 @@ func TestDeploymentQueueIdleEnvironmentCreatesTheDeploymentAtOnce(t *testing.T) 
 	require.Zero(t, f.count(`SELECT count(*) FROM environment_deployment_queue`))
 }
 
+// Queueing is the default; an organization token's default request and an
+// explicit reject still fail fast.
 func TestDeploymentQueueDefaultRequestStillRejectsABusyEnvironment(t *testing.T) {
 	f := newQueueFixture(t, DeploymentQueueConfig{})
+	rejectEverything := map[string]any{"when_busy": "reject"}
+	organizationToken := func(body map[string]any) *http.Request {
+		request := f.request(http.MethodPost, "/orgs/"+queueOrg+"/deployments", body, f.actor, "")
+		request.Header.Set("Po-Org-Id", queueOrg)
+		return request
+	}
 	running := f.mustDeploy(queueBody(nil))
-	f.requireError(f.deploy(queueBody(nil)), http.StatusConflict, model.CodeEnvironmentBusy)
-	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "reject"})), http.StatusConflict, model.CodeEnvironmentBusy)
+	f.requireError(f.serve(organizationToken(queueBody(nil))), http.StatusConflict, model.CodeEnvironmentBusy)
+	f.requireError(f.deploy(queueBody(rejectEverything)), http.StatusConflict, model.CodeEnvironmentBusy)
+	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "reject", "manifest": nil, "mode": "rollback", "rollback_to_deployment_id": running.Id})),
+		http.StatusConflict, model.CodeEnvironmentBusy)
 
 	// Lease released, but Core still guards the finished admission until settlement.
 	f.complete(running.Id, model.DeploymentStatusSucceeded)
-	f.requireError(f.deploy(queueBody(nil)), http.StatusConflict, model.CodeEnvironmentBusy)
+	f.requireError(f.deploy(queueBody(rejectEverything)), http.StatusConflict, model.CodeEnvironmentBusy)
+	f.requireError(f.serve(organizationToken(queueBody(nil))), http.StatusConflict, model.CodeEnvironmentBusy)
 	require.Zero(t, f.count(`SELECT count(*) FROM environment_deployment_queue`))
 	f.settle(f.server, running.Id)
-	f.mustDeploy(queueBody(nil))
+	f.mustDeploy(queueBody(rejectEverything))
 	require.Len(t, f.core.unsettledGuards(), 1, "refused attempts sealed their admissions")
+}
+
+func TestDeploymentQueueIsTheDefaultForABusyEnvironment(t *testing.T) {
+	f := newQueueFixture(t, DeploymentQueueConfig{})
+	running := f.mustDeploy(queueBody(nil))
+	deploy := f.mustQueue(f.deploy(queueBody(nil)))
+	rollback := f.mustQueue(f.deploy(queueBody(map[string]any{"manifest": nil, "mode": "rollback", "rollback_to_deployment_id": running.Id})))
+	require.Equal(t, []int{1, 2}, []int{deploy.Position, rollback.Position})
+	// Request validation fills in the published default; the handler applies the same one without it.
+	direct, err := f.server.CreateDeployment(context.WithValue(f.ctx, hecho.ContextKeyUserID, f.actor.String()), CreateDeploymentRequestObject{
+		OrgId: queueOrg, Body: &CreateDeploymentJSONRequestBody{ProjectId: queueProject, EnvId: queueEnv, Mode: DeploymentCreateBodyModeDeploy,
+			Manifest: &DeploymentManifest{Workloads: map[string]DeploymentManifestWorkload{}}, RunnerLogLevel: ref.Ref(DeploymentCreateBodyRunnerLogLevelWarn)},
+	})
+	require.NoError(t, err)
+	require.IsType(t, CreateDeployment202JSONResponse{}, direct)
+	f.server.WaitDeploymentQueueKicks()
+	require.Len(t, f.queued(), 3)
+	cancelled := f.call(http.MethodPost, "/orgs/"+queueOrg+"/deployment-queue/"+direct.(CreateDeployment202JSONResponse).Id.String()+"/actions/cancel", nil, f.actor, "")
+	require.Equal(t, http.StatusOK, cancelled.Code, cancelled.Body.String())
+	require.Len(t, f.queued(), 2)
+
+	f.finish(running.Id, model.DeploymentStatusSucceeded)
+	first := f.item(deploy.Id)
+	require.Equal(t, model.DeploymentQueueDispatched, first.State)
+	f.finish(first.DeploymentID.Must(), model.DeploymentStatusSucceeded)
+	rolledBack := f.item(rollback.Id)
+	require.Equal(t, model.DeploymentQueueDispatched, rolledBack.State)
+	require.Empty(t, f.queued())
+
+	// The Data Plane is idle, Core is not: the direct attempt meets Core's guard and the default request waits.
+	f.complete(rolledBack.DeploymentID.Must(), model.DeploymentStatusSucceeded)
+	settling := f.mustQueue(f.deploy(queueBody(map[string]any{"runner_log_level": "debug"})))
+	require.Equal(t, 1, settling.Position)
+	f.settle(f.server, rolledBack.DeploymentID.Must())
+	settled := f.item(settling.Id)
+	require.Equal(t, model.DeploymentQueueDispatched, settled.State)
+	require.Len(t, f.deployments(), 4)
+	require.Empty(t, f.queued())
 }
 
 func TestDeploymentQueueReplaysIdempotentRequests(t *testing.T) {
@@ -147,10 +199,10 @@ func TestDeploymentQueueReplaysIdempotentRequests(t *testing.T) {
 
 func TestDeploymentQueueBoundsDepthAndExpiresAcrossRestarts(t *testing.T) {
 	f := newQueueFixture(t, DeploymentQueueConfig{MaxDepth: 2, DefaultTTL: time.Hour, MaxTTL: 3 * time.Hour})
-	f.requireError(f.deploy(queueBody(map[string]any{"queue_ttl_seconds": 60})), http.StatusBadRequest, "HTTP-400")
+	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "reject", "queue_ttl_seconds": 60})), http.StatusBadRequest, "HTTP-400")
 	running := f.mustDeploy(queueBody(nil))
 	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "queue", "queue_ttl_seconds": 3*3600 + 1})), http.StatusBadRequest, "HTTP-400")
-	first := f.mustQueue(f.deploy(queueBody(map[string]any{"when_busy": "queue", "queue_ttl_seconds": 3 * 3600})))
+	first := f.mustQueue(f.deploy(queueBody(map[string]any{"queue_ttl_seconds": 3 * 3600})))
 	require.WithinDuration(t, time.Now().Add(3*time.Hour), first.ExpiresAt, time.Minute)
 	second := f.mustQueue(f.deploy(queueBody(map[string]any{"when_busy": "queue", "runner_log_level": "debug"})))
 	require.WithinDuration(t, time.Now().Add(time.Hour), second.ExpiresAt, time.Minute)
@@ -486,11 +538,17 @@ func (f *queueFixture) markPluginDispatched(deploymentID uuid.UUID) {
 func TestDeploymentQueueWaitsBehindAPlanRunAndNeverQueuesPlans(t *testing.T) {
 	f := newQueueFixture(t, DeploymentQueueConfig{})
 	plan := f.mustDeploy(queueBody(map[string]any{"plan_only": true}))
-	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "queue", "plan_only": true})), http.StatusBadRequest, "HTTP-400")
-	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "queue", "mode": "plan_only"})), http.StatusBadRequest, "HTTP-400")
-	f.requireError(f.deploy(queueBody(map[string]any{"when_busy": "queue", "is_dry_run": true})), http.StatusBadRequest, "HTTP-400")
-	dryRun := f.deploy(queueBody(map[string]any{"is_dry_run": true}))
-	require.Equal(t, http.StatusOK, dryRun.Code, "dry runs still answer while a plan executes: %s", dryRun.Body.String())
+	// Never queued, whatever the request says; a second plan cannot start beside the first, both take the state lock.
+	for _, body := range []map[string]any{
+		{"when_busy": "queue", "plan_only": true}, {"when_busy": "queue", "mode": "plan_only"}, {"plan_only": true, "queue_ttl_seconds": 60},
+	} {
+		f.requireError(f.deploy(queueBody(body)), http.StatusConflict, model.CodeEnvironmentBusy)
+	}
+	for _, body := range []map[string]any{{"is_dry_run": true}, {"when_busy": "queue", "is_dry_run": true}} {
+		dryRun := f.deploy(queueBody(body))
+		require.Equal(t, http.StatusOK, dryRun.Code, "dry runs answer while a plan executes: %s", dryRun.Body.String())
+	}
+	require.Zero(t, f.count(`SELECT count(*) FROM environment_deployment_queue`))
 
 	item := f.mustQueue(f.deploy(queueBody(queueEverything)))
 	f.complete(plan.Id, model.DeploymentStatusSucceeded)
