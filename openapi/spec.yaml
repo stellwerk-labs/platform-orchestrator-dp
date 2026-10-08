@@ -210,11 +210,12 @@ paths:
         organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
         resolved against the Environment state at promotion.
 
-        Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-        answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-        while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-        Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-        when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+        Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+        `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+        requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+        would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+        carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+        diff may still change.
 
         Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
         plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -1710,6 +1711,7 @@ components:
         - mode
         - state
         - position
+        - halt_on_failure
         - created_by
         - created_at
         - expires_at
@@ -1740,6 +1742,11 @@ components:
         expected_base_deployment_id:
           type: string
           format: uuid
+        halt_on_failure:
+          type: boolean
+          description: |
+            The item is rejected with `previous_deployment_failed` instead of being promoted when the Deployment it waited
+            for failed.
         created_by:
           type: string
           format: uuid
@@ -1759,7 +1766,8 @@ components:
           type: string
           description: |
             Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,
-            `outcome_unreconciled`, `deployment_base_changed`, `pin_protection` or `actor_forbidden`.
+            `outcome_unreconciled`, `deployment_base_changed`, `previous_deployment_failed`, `pin_protection` or
+            `actor_forbidden`.
         reason_message:
           type: string
         settled_by:
@@ -2038,6 +2046,15 @@ components:
             exceed its configured maximum. Not valid with `when_busy` set to `reject`.
           type: integer
           minimum: 1
+        halt_on_failure:
+          description: |
+            Whether a queued request must not start when the Deployment it waited for failed. That Deployment is the
+            Environment's last deploy, rollback or destroy at promotion, provided it ended after the request was queued;
+            plan runs never count, and a later Deployment supersedes an earlier failure. The request then ends `rejected`
+            with the reason code `previous_deployment_failed` and the queue continues with the next request. A request that
+            starts at once, a plan-only request and a dry run never halt. Not valid with `when_busy` set to `reject`.
+          type: boolean
+          default: false
         expected_base_deployment_id:
           description: |
             The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`

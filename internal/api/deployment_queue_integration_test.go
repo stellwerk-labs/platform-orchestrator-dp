@@ -121,6 +121,7 @@ func TestDeploymentQueueIsTheDefaultForABusyEnvironment(t *testing.T) {
 	deploy := f.mustQueue(f.deploy(queueBody(nil)))
 	rollback := f.mustQueue(f.deploy(queueBody(map[string]any{"manifest": nil, "mode": "rollback", "rollback_to_deployment_id": running.Id})))
 	require.Equal(t, []int{1, 2}, []int{deploy.Position, rollback.Position})
+	require.False(t, deploy.HaltOnFailure, "halt_on_failure defaults to false")
 	// Request validation fills in the published default; the handler applies the same one without it.
 	direct, err := f.server.CreateDeployment(context.WithValue(f.ctx, hecho.ContextKeyUserID, f.actor.String()), CreateDeploymentRequestObject{
 		OrgId: queueOrg, Body: &CreateDeploymentJSONRequestBody{ProjectId: queueProject, EnvId: queueEnv, Mode: DeploymentCreateBodyModeDeploy,
@@ -544,7 +545,7 @@ func TestDeploymentQueueWaitsBehindAPlanRunAndNeverQueuesPlans(t *testing.T) {
 	plan := f.mustDeploy(queueBody(map[string]any{"plan_only": true}))
 	// Never queued, whatever the request says; a second plan cannot start beside the first, both take the state lock.
 	for _, body := range []map[string]any{
-		{"when_busy": "queue", "plan_only": true}, {"when_busy": "queue", "mode": "plan_only"}, {"plan_only": true, "queue_ttl_seconds": 60},
+		{"when_busy": "queue", "plan_only": true}, {"when_busy": "queue", "mode": "plan_only"}, {"plan_only": true, "halt_on_failure": true, "queue_ttl_seconds": 60},
 	} {
 		f.requireError(f.deploy(queueBody(body)), http.StatusConflict, model.CodeEnvironmentBusy)
 	}

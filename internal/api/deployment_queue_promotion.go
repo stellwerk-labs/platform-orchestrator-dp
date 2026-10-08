@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -100,6 +101,17 @@ func (s *Server) promoteDeploymentQueueHead(ctx context.Context, environmentUUID
 		return false, s.rejectQueuedDeployments(ctx, logger, tx, environmentUUID, err)
 	case err != nil:
 		return false, err
+	}
+	if failed, err := model.HaltingDeploymentQueuePredecessor(ctx, tx, item); err != nil {
+		return false, err
+	} else if failed.IsSet() {
+		logger.Info("halted queued deployment after its predecessor failed", zap.String("deployment_id", failed.Must().String()))
+		if err := model.SettleDeploymentQueueItem(ctx, tx, item.ID, model.DeploymentQueueRejected, model.DeploymentQueueSettlement{
+			ReasonCode: model.QueueReasonPreviousDeploymentFailed, ReasonMessage: fmt.Sprintf("the previous Deployment '%s' failed", failed.Must()),
+		}); err != nil {
+			return false, err
+		}
+		return true, errors.Wrap(tx.Commit(), "failed to commit queue halt")
 	}
 
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT queue_promotion`); err != nil {

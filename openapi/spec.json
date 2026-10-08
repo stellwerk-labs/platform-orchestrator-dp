@@ -463,7 +463,7 @@
           "Deployment"
         ],
         "summary": "Create a new deployment in the target project and environment.",
-        "description": "Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment\nbusy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets\n`when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an\norganization token cannot wait and always get that 409. Queued requests are promoted strictly in order and\nresolved against the Environment state at promotion.\n\nPlan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is\nanswered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not\nwhile a deploy, rollback, destroy or another plan runs, because their Runners would contend for the\nEnvironment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`\nwhen Deployments that run or wait will change the Environment first, so the plan or diff may still change.\n\nConflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed\nplugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and\n`deployment_base_changed`. Other conflicts keep the code `HTTP-409`.\n",
+        "description": "Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment\nbusy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets\n`when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an\norganization token cannot wait and always get that 409. Queued requests are promoted strictly in order and\nresolved against the Environment state at promotion.\n\nPlan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and\n`halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while\nrequests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners\nwould contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response\ncarries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or\ndiff may still change.\n\nConflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed\nplugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and\n`deployment_base_changed`. Other conflicts keep the code `HTTP-409`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/orgIdPathParam"
@@ -2862,6 +2862,7 @@
           "mode",
           "state",
           "position",
+          "halt_on_failure",
           "created_by",
           "created_at",
           "expires_at",
@@ -2903,6 +2904,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "halt_on_failure": {
+            "type": "boolean",
+            "description": "The item is rejected with `previous_deployment_failed` instead of being promoted when the Deployment it waited\nfor failed.\n"
+          },
           "created_by": {
             "type": "string",
             "format": "uuid"
@@ -2925,7 +2930,7 @@
           },
           "reason_code": {
             "type": "string",
-            "description": "Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,\n`outcome_unreconciled`, `deployment_base_changed`, `pin_protection` or `actor_forbidden`.\n"
+            "description": "Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,\n`outcome_unreconciled`, `deployment_base_changed`, `previous_deployment_failed`, `pin_protection` or\n`actor_forbidden`.\n"
           },
           "reason_message": {
             "type": "string"
@@ -3255,6 +3260,11 @@
             "description": "How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not\nexceed its configured maximum. Not valid with `when_busy` set to `reject`.\n",
             "type": "integer",
             "minimum": 1
+          },
+          "halt_on_failure": {
+            "description": "Whether a queued request must not start when the Deployment it waited for failed. That Deployment is the\nEnvironment's last deploy, rollback or destroy at promotion, provided it ended after the request was queued;\nplan runs never count, and a later Deployment supersedes an earlier failure. The request then ends `rejected`\nwith the reason code `previous_deployment_failed` and the queue continues with the next request. A request that\nstarts at once, a plan-only request and a dry run never halt. Not valid with `when_busy` set to `reject`.\n",
+            "type": "boolean",
+            "default": false
           },
           "expected_base_deployment_id": {
             "description": "The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`\nwhen the Environment's current Deployment differs at the moment the Deployment is created, also when a queued request\nis promoted. Dry runs do not check it.\n",

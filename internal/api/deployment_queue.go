@@ -251,7 +251,7 @@ func apiQueueItemFromModel(item model.DeploymentQueueItem, withManifest bool) De
 		Id: item.ID, OrgId: item.OrgID, ProjectId: item.ProjectID, EnvId: item.EnvID,
 		Mode: DeploymentQueueItemMode(item.Mode), State: DeploymentQueueItemState(item.State), Position: item.Position,
 		RollbackToDeploymentId: request.RollbackToDeploymentID, ExpectedBaseDeploymentId: item.ExpectedBaseDeploymentID.Ref(),
-		CreatedBy: item.CreatedBy, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt, Attempts: item.Attempts,
+		HaltOnFailure: item.HaltOnFailure, CreatedBy: item.CreatedBy, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt, Attempts: item.Attempts,
 		LastError: item.LastError.Ref(), ReasonCode: item.ReasonCode.Ref(), ReasonMessage: item.ReasonMessage.Ref(),
 		SettledBy: item.SettledBy.Ref(), SettledAt: item.SettledAt.Ref(), DeploymentId: item.DeploymentID.Ref(),
 	}

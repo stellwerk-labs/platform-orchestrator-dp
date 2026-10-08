@@ -598,6 +598,13 @@ type DeploymentCreateBody struct {
 	// is promoted. Dry runs do not check it.
 	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
 
+	// HaltOnFailure Whether a queued request must not start when the Deployment it waited for failed. That Deployment is the
+	// Environment's last deploy, rollback or destroy at promotion, provided it ended after the request was queued;
+	// plan runs never count, and a later Deployment supersedes an earlier failure. The request then ends `rejected`
+	// with the reason code `previous_deployment_failed` and the queue continues with the next request. A request that
+	// starts at once, a plan-only request and a dry run never halt. Not valid with `when_busy` set to `reject`.
+	HaltOnFailure *bool `json:"halt_on_failure,omitempty"`
+
 	// IsDryRun Whether to just validate the request and not persist or execute it.
 	IsDryRun bool `json:"is_dry_run,omitempty"`
 
@@ -848,7 +855,11 @@ type DeploymentQueueItem struct {
 	EnvId                    string              `json:"env_id"`
 	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
 	ExpiresAt                time.Time           `json:"expires_at"`
-	Id                       openapi_types.UUID  `json:"id"`
+
+	// HaltOnFailure The item is rejected with `previous_deployment_failed` instead of being promoted when the Deployment it waited
+	// for failed.
+	HaltOnFailure bool               `json:"halt_on_failure"`
+	Id            openapi_types.UUID `json:"id"`
 
 	// LastError The most recent transient promotion failure.
 	LastError *string `json:"last_error,omitempty"`
@@ -863,7 +874,8 @@ type DeploymentQueueItem struct {
 	ProjectId string `json:"project_id"`
 
 	// ReasonCode Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,
-	// `outcome_unreconciled`, `deployment_base_changed`, `pin_protection` or `actor_forbidden`.
+	// `outcome_unreconciled`, `deployment_base_changed`, `previous_deployment_failed`, `pin_protection` or
+	// `actor_forbidden`.
 	ReasonCode             *string             `json:"reason_code,omitempty"`
 	ReasonMessage          *string             `json:"reason_message,omitempty"`
 	RollbackToDeploymentId *openapi_types.UUID `json:"rollback_to_deployment_id,omitempty"`
@@ -1896,11 +1908,12 @@ type ClientInterface interface {
 	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 	// resolved against the Environment state at promotion.
 	//
-	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -1919,11 +1932,12 @@ type ClientInterface interface {
 	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 	// resolved against the Environment state at promotion.
 	//
-	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -2380,11 +2394,12 @@ func (c *Client) ListDeployments(ctx context.Context, orgId OrgIdPathParam, para
 // organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 // resolved against the Environment state at promotion.
 //
-// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -2413,11 +2428,12 @@ func (c *Client) CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathPa
 // organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 // resolved against the Environment state at promotion.
 //
-// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -5148,11 +5164,12 @@ type ClientWithResponsesInterface interface {
 	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 	// resolved against the Environment state at promotion.
 	//
-	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -5171,11 +5188,12 @@ type ClientWithResponsesInterface interface {
 	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 	// resolved against the Environment state at promotion.
 	//
-	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -7472,11 +7490,12 @@ func (c *ClientWithResponses) ListDeploymentsWithResponse(ctx context.Context, o
 // organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 // resolved against the Environment state at promotion.
 //
-// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -7501,11 +7520,12 @@ func (c *ClientWithResponses) CreateDeploymentWithBodyWithResponse(ctx context.C
 // organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
 // resolved against the Environment state at promotion.
 //
-// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
-// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
-// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
-// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and

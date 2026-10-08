@@ -299,6 +299,10 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 	// Plan-only requests and dry runs never wait in the queue, whatever when_busy says.
 	whenBusy := ref.DerefOr(request.Body.WhenBusy, Queue)
 	queueable := !request.Body.IsDryRun && (modelMode == model.DeploymentModeDeploy || modelMode == model.DeploymentModeRollback)
+	haltOnFailure := ref.DerefOr(request.Body.HaltOnFailure, false)
+	if haltOnFailure && whenBusy != Queue {
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("halt_on_failure requires when_busy to be queue")}, nil
+	}
 	queueTTL := s.deploymentQueueConfig().DefaultTTL
 	if request.Body.QueueTtlSeconds != nil {
 		if whenBusy != Queue {
@@ -327,6 +331,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		if err != nil {
 			return nil, err
 		}
+		queued.HaltOnFailure = haltOnFailure
 		deploymentReplay := false
 		if request.Params.IdempotencyKey != nil {
 			replay, replaysDeployment, err := s.findReplay(ctx, queued)

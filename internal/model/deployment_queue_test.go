@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -36,9 +38,19 @@ func TestQueueIntentDigestIdentifiesTheRequestNotTheRequester(t *testing.T) {
 		func(r *NewDeploymentQueueItem) { r.Mode = DeploymentModeRollback },
 		func(r *NewDeploymentQueueItem) { r.Intent = json.RawMessage(`{"manifest":{"workloads":{"api":{}}}}`) },
 		func(r *NewDeploymentQueueItem) { r.ExpectedBaseDeploymentID = opt.Of(uuid.New()) },
+		func(r *NewDeploymentQueueItem) { r.HaltOnFailure = true },
 	} {
 		changed := request
 		change(&changed)
 		require.NotEqual(t, digest, changed.IntentSHA256())
 	}
+}
+
+// Items queued before halt_on_failure existed must still match their replays.
+func TestQueueIntentDigestOfARequestWithoutHaltIsUnchanged(t *testing.T) {
+	expectedBase := uuid.MustParse("01234567-89ab-cdef-0123-456789abcdef")
+	request := NewDeploymentQueueItem{ProjectID: "p", EnvID: "e", Mode: DeploymentModeRollback,
+		Intent: json.RawMessage(`{"rollback_to_deployment_id":"76543210-89ab-cdef-0123-456789abcdef"}`), ExpectedBaseDeploymentID: opt.Of(expectedBase)}
+	legacy := sha256.Sum256([]byte(`{"project_id":"p","env_id":"e","mode":"rollback","intent":{"rollback_to_deployment_id":"76543210-89ab-cdef-0123-456789abcdef"},"expected_base_deployment_id":"01234567-89ab-cdef-0123-456789abcdef"}`))
+	require.Equal(t, hex.EncodeToString(legacy[:]), request.IntentSHA256())
 }

@@ -22,7 +22,7 @@ func TestDeploymentQueueAnswersPlansAndDryRunsWithTheirPendingChanges(t *testing
 
 	whileRunning := map[string]any{"code": "result_may_change", "running": 1.0, "queued": 2.0}
 	require.Equal(t, whileRunning, f.dryRunPendingChanges(nil))
-	require.Equal(t, whileRunning, f.dryRunPendingChanges(map[string]any{"when_busy": "queue", "queue_ttl_seconds": 60}))
+	require.Equal(t, whileRunning, f.dryRunPendingChanges(map[string]any{"when_busy": "queue", "queue_ttl_seconds": 60, "halt_on_failure": true}))
 	require.Equal(t, whileRunning, f.dryRunPendingChanges(map[string]any{"manifest": nil, "mode": "rollback", "rollback_to_deployment_id": running.Id}))
 	for _, body := range []map[string]any{{"plan_only": true}, {"mode": "plan_only", "when_busy": "queue"}} {
 		f.requireError(f.deploy(queueBody(body)), http.StatusConflict, model.CodeEnvironmentBusy)

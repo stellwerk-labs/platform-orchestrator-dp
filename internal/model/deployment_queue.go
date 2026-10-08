@@ -23,7 +23,7 @@ import (
 //	enqueue --> [queued] --cancel--> [cancelled]
 //	              |  \----TTL------> [expired]
 //	              +--promote--> [dispatched]  (the Deployment owns everything after this)
-//	              +--promote--> [rejected]    (permanent failure, reason_code)
+//	              +--promote--> [rejected]    (permanent failure or halt_on_failure, reason_code)
 
 type DeploymentQueueState string
 
@@ -41,6 +41,8 @@ const (
 
 	QueueReasonCancelled = "cancelled"
 	QueueReasonExpired   = "expired"
+	// QueueReasonPreviousDeploymentFailed rejects a halt_on_failure item whose predecessor failed.
+	QueueReasonPreviousDeploymentFailed = "previous_deployment_failed"
 )
 
 type DeploymentQueueItem struct {
@@ -55,6 +57,7 @@ type DeploymentQueueItem struct {
 	IntentSHA256             string
 	IdempotencyKeyDigest     opt.Opt[string]
 	ExpectedBaseDeploymentID opt.Opt[uuid.UUID]
+	HaltOnFailure            bool
 	CreatedBy                uuid.UUID
 	CreatedAt                time.Time
 	ExpiresAt                time.Time
@@ -69,6 +72,10 @@ type DeploymentQueueItem struct {
 	DeploymentID             opt.Opt[uuid.UUID]
 	// Position is the 1-based place in the Environment's queue while queued, otherwise 0.
 	Position int
+
+	// EnqueuedAfterDeploymentID is the Environment's current Deployment when a
+	// halt_on_failure item was enqueued, if it had already ended.
+	EnqueuedAfterDeploymentID opt.Opt[uuid.UUID]
 }
 
 type NewDeploymentQueueItem struct {
@@ -80,20 +87,24 @@ type NewDeploymentQueueItem struct {
 	Intent                   json.RawMessage
 	IdempotencyKeyDigest     opt.Opt[string]
 	ExpectedBaseDeploymentID opt.Opt[uuid.UUID]
+	HaltOnFailure            bool
 	CreatedBy                uuid.UUID
 	TTL                      time.Duration
 }
 
 // IntentSHA256 identifies the request for idempotent replay. The requesting
 // actor is deliberately not part of it, as for Deployment idempotency.
+// halt_on_failure is omitted while false, so items enqueued before it existed
+// keep their digest.
 func (n NewDeploymentQueueItem) IntentSHA256() string {
 	encoded, _ := json.Marshal(struct {
-		ProjectID    string             `json:"project_id"`
-		EnvID        string             `json:"env_id"`
-		Mode         DeploymentMode     `json:"mode"`
-		Intent       json.RawMessage    `json:"intent"`
-		ExpectedBase opt.Opt[uuid.UUID] `json:"expected_base_deployment_id"`
-	}{n.ProjectID, n.EnvID, n.Mode, n.Intent, n.ExpectedBaseDeploymentID})
+		ProjectID     string             `json:"project_id"`
+		EnvID         string             `json:"env_id"`
+		Mode          DeploymentMode     `json:"mode"`
+		Intent        json.RawMessage    `json:"intent"`
+		ExpectedBase  opt.Opt[uuid.UUID] `json:"expected_base_deployment_id"`
+		HaltOnFailure bool               `json:"halt_on_failure,omitempty"`
+	}{n.ProjectID, n.EnvID, n.Mode, n.Intent, n.ExpectedBaseDeploymentID, n.HaltOnFailure})
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }
@@ -112,8 +123,8 @@ type ListDeploymentQueueParams struct {
 }
 
 const deploymentQueueColumns = `q.id, q.seq, q.org_id, q.project_id, q.env_id, q.environment_uuid, q.mode, q.intent,
-	q.intent_sha256, q.idempotency_key_digest, q.expected_base_deployment_id, q.created_by, q.created_at, q.expires_at,
-	q.state, q.attempts, q.next_attempt_at, q.last_error, q.reason_code, q.reason_message, q.settled_by, q.settled_at,
+	q.intent_sha256, q.idempotency_key_digest, q.expected_base_deployment_id, q.halt_on_failure, q.enqueued_after_deployment_id,
+	q.created_by, q.created_at, q.expires_at, q.state, q.attempts, q.next_attempt_at, q.last_error, q.reason_code, q.reason_message, q.settled_by, q.settled_at,
 	q.deployment_id,
 	CASE WHEN q.state = 'queued' THEN (SELECT count(*) FROM environment_deployment_queue ahead
 		WHERE ahead.environment_uuid = q.environment_uuid AND ahead.state = 'queued' AND ahead.seq <= q.seq) ELSE 0 END`
@@ -122,8 +133,8 @@ func scanDeploymentQueueItem(row interface{ Scan(...any) error }) (*DeploymentQu
 	var item DeploymentQueueItem
 	var intent []byte
 	if err := row.Scan(&item.ID, &item.Seq, &item.OrgID, &item.ProjectID, &item.EnvID, &item.EnvironmentUUID, &item.Mode, &intent,
-		&item.IntentSHA256, opt.Scan(&item.IdempotencyKeyDigest), opt.Scan(&item.ExpectedBaseDeploymentID), &item.CreatedBy,
-		&item.CreatedAt, &item.ExpiresAt, &item.State, &item.Attempts, &item.NextAttemptAt, opt.Scan(&item.LastError),
+		&item.IntentSHA256, opt.Scan(&item.IdempotencyKeyDigest), opt.Scan(&item.ExpectedBaseDeploymentID), &item.HaltOnFailure,
+		opt.Scan(&item.EnqueuedAfterDeploymentID), &item.CreatedBy, &item.CreatedAt, &item.ExpiresAt, &item.State, &item.Attempts, &item.NextAttemptAt, opt.Scan(&item.LastError),
 		opt.Scan(&item.ReasonCode), opt.Scan(&item.ReasonMessage), opt.Scan(&item.SettledBy), opt.Scan(&item.SettledAt),
 		opt.Scan(&item.DeploymentID), &item.Position); err != nil {
 		return nil, err
@@ -192,6 +203,36 @@ func requireQueueHead(ctx context.Context, tx Tx, environmentUUID, queueItem uui
 	return nil
 }
 
+// HaltingDeploymentQueuePredecessor returns the failed Deployment that stops a
+// halt_on_failure item from being promoted, if any. The predecessor is the
+// Environment's latest deploy, rollback or destroy Deployment, because those
+// run strictly one after another; plan runs never count. It halts the item
+// only when it ended failed after the item was enqueued, that is when the
+// item waited for it, whether it came from an earlier queue item, a direct
+// request or a plugin dispatch. Queue items that never became a Deployment
+// are not predecessors, and a later Deployment supersedes an earlier failure.
+// Callers hold the queue head, and the Environment is not busy.
+func HaltingDeploymentQueuePredecessor(ctx context.Context, tx Tx, item *DeploymentQueueItem) (opt.Opt[uuid.UUID], error) {
+	if !item.HaltOnFailure {
+		return opt.Empty[uuid.UUID](), nil
+	}
+	var predecessor uuid.UUID
+	var status DeploymentStatus
+	err := tx.QueryRowContext(ctx, `SELECT d.id, d.status FROM deployment_environments e
+		JOIN deployments d ON d.de_id = e.id AND d.id = e.last_state_deployment_id
+		WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 AND d.mode IN ('deploy', 'rollback', 'destroy')`,
+		item.OrgID, item.ProjectID, item.EnvID).Scan(&predecessor, &status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return opt.Empty[uuid.UUID](), nil
+	case err != nil:
+		return opt.Empty[uuid.UUID](), errors.Wrap(err, "failed to read the queue item's predecessor")
+	case status != DeploymentStatusFailed || item.EnqueuedAfterDeploymentID == opt.Of(predecessor):
+		return opt.Empty[uuid.UUID](), nil
+	}
+	return opt.Of(predecessor), nil
+}
+
 // PendingEnvironmentChanges counts the Deployments that will change an
 // Environment before anything requested now: the running deploy, rollback or
 // destroy and the requests waiting in its queue.
@@ -243,12 +284,19 @@ func EnqueueDeployment(ctx context.Context, tx Tx, request NewDeploymentQueueIte
 		}
 	}
 	var stateHead uuid.NullUUID
-	if err := tx.QueryRowContext(ctx, `SELECT last_state_deployment_id FROM deployment_environments
-		WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, request.OrgID, request.ProjectID, request.EnvID).Scan(&stateHead); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var stateHeadStatus sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT e.last_state_deployment_id, d.status FROM deployment_environments e
+		LEFT JOIN deployments d ON d.id = e.last_state_deployment_id
+		WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3`, request.OrgID, request.ProjectID, request.EnvID).Scan(&stateHead, &stateHeadStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, errors.Wrap(err, "failed to read environment state head")
 	}
 	if err := requireReplaceableStateHead(ctx, tx, stateHead.UUID); err != nil {
 		return nil, false, err
+	}
+	// A Deployment that already ended is not one this item waits for.
+	var enqueuedAfter opt.Opt[uuid.UUID]
+	if request.HaltOnFailure && stateHead.Valid && stateHeadStatus.String != string(DeploymentStatusExecuting) {
+		enqueuedAfter = opt.Of(stateHead.UUID)
 	}
 	var depth int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM environment_deployment_queue
@@ -260,11 +308,12 @@ func EnqueueDeployment(ctx context.Context, tx Tx, request NewDeploymentQueueIte
 	}
 	item, err := scanDeploymentQueueItem(tx.QueryRowContext(ctx, `INSERT INTO environment_deployment_queue AS q
 		(id, org_id, project_id, env_id, environment_uuid, mode, intent, intent_sha256, idempotency_key_digest,
-		 expected_base_deployment_id, created_by, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now() + $12::interval)
+		 expected_base_deployment_id, halt_on_failure, enqueued_after_deployment_id, created_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now() + $14::interval)
 		RETURNING `+deploymentQueueColumns,
 		uuid.New(), request.OrgID, request.ProjectID, request.EnvID, request.EnvironmentUUID, request.Mode, []byte(request.Intent),
-		intentSHA256, request.IdempotencyKeyDigest.Ref(), request.ExpectedBaseDeploymentID.Ref(), request.CreatedBy, request.TTL.String()))
+		intentSHA256, request.IdempotencyKeyDigest.Ref(), request.ExpectedBaseDeploymentID.Ref(), request.HaltOnFailure, enqueuedAfter.Ref(),
+		request.CreatedBy, request.TTL.String()))
 	if err != nil {
 		return nil, false, errors.Wrap(err, "failed to enqueue deployment")
 	}

@@ -183,6 +183,13 @@ func (c *queueCore) unsettledGuards() []uuid.UUID {
 	return out
 }
 
+// admissions counts every admission Core recorded, settled or not.
+func (c *queueCore) admissions() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.guards)
+}
+
 func (c *queueCore) set(update func(*queueCore)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
