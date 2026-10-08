@@ -22,7 +22,7 @@ RUNNER_CONFIGURATION := runner_config.json
 # output_schema). CI overrides this with CORE_CP_INTEGRATION_IMAGE.
 CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:d3ba43fea96d28fa4d80adb5ff5d1d726ea3593b49da85f2ebef03ffd131a3f9
 IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.4.0@sha256:0fb4b3645ae2d7ccf366921c8d9490a6862cce111bdcb683ef6afcc852b40331
-RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90
+RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.1.0@sha256:6a18787b33aa1c4173982ac5876a62b1cde49307fe1f7a4e86b52f1519134d43
 # Docker tags and kind imports cannot use a registry digest as a tag. Keep the
 # immutable source in RUNNER_IMAGE and use a digest-derived alias only locally.
 RUNNER_TEST_IMAGE = $(if $(findstring @sha256:,$(RUNNER_IMAGE)),stellwerk-runner-integration:sha256-$(lastword $(subst :, ,$(RUNNER_IMAGE))),$(RUNNER_IMAGE))
@@ -37,7 +37,7 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 	score-compose init --no-sample --project $(COMPOSE_PROJECT_NAME)
 	cp score.provisioners.yaml .score-compose/
 	cp score.cp.yaml score.iam.yaml .score-compose/
-	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90"; "$(RUNNER_TEST_IMAGE)")' .score-compose/score.provisioners.yaml
+	yq -i '(.[] | select(.uri == "template://env").outputs) |= sub("ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.1.0@sha256:6a18787b33aa1c4173982ac5876a62b1cde49307fe1f7a4e86b52f1519134d43"; "$(RUNNER_TEST_IMAGE)")' .score-compose/score.provisioners.yaml
 	yq -i '.containers.platform-orchestrator-cp.image = "$(CP_IMAGE)"' .score-compose/score.cp.yaml
 	yq -i '.containers.platform-orchestrator-iam.image = "$(IAM_IMAGE)"' .score-compose/score.iam.yaml
 	score-compose --quiet generate ../score.yaml --build 'platform-orchestrator-dp=$(BUILD_ARGS)'

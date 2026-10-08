@@ -5,7 +5,7 @@
     DATADOG_ENV: ""
     RUNNER_TOKEN_SALT: vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=
     VAULT_URL: "http://vault:8200"
-    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90"
+    RUNNER_IMAGE: "ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.1.0@sha256:6a18787b33aa1c4173982ac5876a62b1cde49307fe1f7a4e86b52f1519134d43"
     RUNNER_GATEWAY_URL: "http://runner-gateway:8080/runner-gateway"
     RUNNER_GATEWAY_INTERNAL_URL: "http://runner-gateway:8080/runner-gateway"
     OIDC_ISSUER_URL: https://oidc.platform-orchestrator.io

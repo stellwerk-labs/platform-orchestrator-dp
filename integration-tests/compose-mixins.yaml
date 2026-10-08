@@ -48,7 +48,7 @@ services:
       platform-orchestrator-dp-platform-orchestrator-dp:
         condition: service_started
   runner-gateway:
-    image: ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.0.0@sha256:903bf766765223036da021e380059aeb46884cedbef4c896ff9a95de4cae5b90
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.1.0@sha256:6a18787b33aa1c4173982ac5876a62b1cde49307fe1f7a4e86b52f1519134d43
     command: ["gateway"]
     environment:
       NATS_URL: nats://nats:4222
