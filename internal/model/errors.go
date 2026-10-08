@@ -3,7 +3,10 @@ package model
 import (
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
+
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 // NewErrBadRequest constructs a new bad request error. Use this when the arguments are invalid or malformed.
@@ -60,6 +63,16 @@ func IsErrBadRequest(err error) (ErrBadRequest, bool) {
 type ErrConflict struct {
 	Message string
 	Code    string
+	// DeploymentID is the Deployment the conflict is about, if it is about one.
+	DeploymentID opt.Opt[uuid.UUID]
+}
+
+// AboutDeployment names the Deployment the conflict is about; uuid.Nil names none.
+func (e ErrConflict) AboutDeployment(id uuid.UUID) ErrConflict {
+	if id != uuid.Nil {
+		e.DeploymentID = opt.Of(id)
+	}
+	return e
 }
 
 func (e ErrConflict) Error() string {

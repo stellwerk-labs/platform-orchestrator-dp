@@ -249,9 +249,17 @@ func TestDeploymentQueueDepthListingCancellationExpiryAndRetention(t *testing.T)
 		pruned, err := PruneDeploymentQueue(f.ctx, tx, time.Now().Add(time.Minute))
 		require.NoError(t, err)
 		require.Equal(t, int64(2), pruned, "only settled items are pruned")
-		count, err := SettleQueuedDeployments(f.ctx, tx, f.env, DeploymentQueueCancelled, CodeEnvironmentDeleting, "deleting")
+		_, err = SettleQueuedDeployments(f.ctx, tx, f.env, DeploymentQueueRejected, DeploymentQueueSettlement{ReasonCode: CodeOutcomeUnreconciled, DeploymentID: opt.Of(uuid.New())})
+		require.Error(t, err, "no single Deployment is what every waiting item became")
+		count, err := SettleQueuedDeployments(f.ctx, tx, f.env, DeploymentQueueCancelled, DeploymentQueueSettlement{ReasonCode: CodeEnvironmentDeleting, ReasonMessage: "deleting"})
 		require.NoError(t, err)
 		require.Equal(t, int64(1), count)
+		cancelled, err := GetDeploymentQueueItem(f.ctx, tx, "queue-org", items[1].ID)
+		require.NoError(t, err)
+		require.Equal(t, DeploymentQueueCancelled, cancelled.State)
+		require.Equal(t, opt.Of(CodeEnvironmentDeleting), cancelled.ReasonCode)
+		require.Equal(t, opt.Of("deleting"), cancelled.ReasonMessage)
+		require.False(t, cancelled.ReasonDeploymentID.IsSet(), "deletion refers to no Deployment")
 	})
 	f.inTx(t, func(tx TxWithCommit) {
 		require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, "queue-org", "p", "e", true))
@@ -313,6 +321,57 @@ func TestDeploymentQueueMigrationIsAdditiveAndDownRefusesQueuedRows(t *testing.T
 	var present bool
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('environment_deployment_queue') IS NOT NULL`).Scan(&present))
 	require.False(t, present)
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
+}
+
+func TestDeploymentQueueReasonDeploymentMigrationIsAdditive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
+	require.NotEmpty(t, connection)
+	_, _, scoped := migrationTestDatabase(t, ctx, connection)
+	db, err := sql.Open("postgres", scoped)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	defer func() { require.NoError(t, db.Close()) }()
+	source, err := fs.Sub(embedMigrations, "migrations")
+	require.NoError(t, err)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true), goose.WithGoMigrations(goose.NewGoMigration(2, &goose.GoFunc{RunTx: hstandardoutbox.MigrateUp01}, &goose.GoFunc{RunTx: hstandardoutbox.MigrateDown01})))
+	require.NoError(t, err)
+	_, err = provider.UpTo(ctx, 34)
+	require.NoError(t, err)
+	env, waiting, halted := uuid.New(), uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{waiting, halted} {
+		_, err = db.ExecContext(ctx, `INSERT INTO environment_deployment_queue (id, org_id, project_id, env_id, environment_uuid, mode, intent, intent_sha256, created_by, expires_at, halt_on_failure)
+			VALUES ($1, 'legacy', 'p', 'e', $2, 'deploy', '{}', 'digest', $3, now() + interval '1 hour', true)`, id, env, uuid.New())
+		require.NoError(t, err)
+	}
+	_, err = db.ExecContext(ctx, `UPDATE environment_deployment_queue SET state='rejected', reason_code='previous_deployment_failed',
+		reason_message='the previous Deployment failed', settled_at=now() WHERE id=$1`, halted)
+	require.NoError(t, err)
+
+	_, err = provider.UpTo(ctx, 35)
+	require.NoError(t, err)
+	var reasonDeployment uuid.NullUUID
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT reason_deployment_id FROM environment_deployment_queue WHERE id=$1`, halted).Scan(&reasonDeployment))
+	require.False(t, reasonDeployment.Valid, "items settled before the upgrade keep only their reason message")
+	_, err = db.ExecContext(ctx, `UPDATE environment_deployment_queue SET reason_deployment_id=$2 WHERE id=$1`, waiting, uuid.New())
+	require.Error(t, err, "only an item with a reason refers to a Deployment")
+	_, err = db.ExecContext(ctx, `UPDATE environment_deployment_queue SET reason_deployment_id=$2 WHERE id=$1`, halted, uuid.New())
+	require.NoError(t, err)
+
+	_, err = provider.DownTo(ctx, 34)
+	require.NoError(t, err, "only settled items carry the column, so a waiting item does not block the Down migration")
+	var columns int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'environment_deployment_queue' AND column_name = 'reason_deployment_id'`).Scan(&columns))
+	require.Zero(t, columns)
+	for id, want := range map[uuid.UUID]string{waiting: "queued", halted: "rejected"} {
+		var state string
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT state FROM environment_deployment_queue WHERE id=$1`, id).Scan(&state))
+		require.Equal(t, want, state, "the Down migration keeps every item")
+	}
 	_, err = provider.Up(ctx)
 	require.NoError(t, err)
 }

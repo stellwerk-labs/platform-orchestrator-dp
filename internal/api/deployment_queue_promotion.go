@@ -108,6 +108,7 @@ func (s *Server) promoteDeploymentQueueHead(ctx context.Context, environmentUUID
 		logger.Info("halted queued deployment after its predecessor failed", zap.String("deployment_id", failed.Must().String()))
 		if err := model.SettleDeploymentQueueItem(ctx, tx, item.ID, model.DeploymentQueueRejected, model.DeploymentQueueSettlement{
 			ReasonCode: model.QueueReasonPreviousDeploymentFailed, ReasonMessage: fmt.Sprintf("the previous Deployment '%s' failed", failed.Must()),
+			ReasonDeploymentID: failed,
 		}); err != nil {
 			return false, err
 		}
@@ -144,8 +145,9 @@ func (s *Server) promoteDeploymentQueueHead(ctx context.Context, environmentUUID
 		return false, s.rejectQueuedDeployments(ctx, logger, tx, environmentUUID, err)
 	case queueRejectItem:
 		logger.Info("rejected queued deployment", zap.String("reason", reason), zap.Error(err))
+		conflict, _ := model.IsErrConflict(err)
 		if err := model.SettleDeploymentQueueItem(ctx, tx, item.ID, model.DeploymentQueueRejected, model.DeploymentQueueSettlement{
-			ReasonCode: reason, ReasonMessage: err.Error(),
+			ReasonCode: reason, ReasonMessage: err.Error(), ReasonDeploymentID: conflict.DeploymentID,
 		}); err != nil {
 			return false, err
 		}
@@ -195,7 +197,10 @@ func (s *Server) createQueuedDeployment(ctx context.Context, logger *zap.Logger,
 }
 
 func (s *Server) rejectQueuedDeployments(ctx context.Context, logger *zap.Logger, tx model.TxWithCommit, environmentUUID uuid.UUID, cause error) error {
-	count, err := model.SettleQueuedDeployments(ctx, tx, environmentUUID, model.DeploymentQueueRejected, model.CodeOutcomeUnreconciled, cause.Error())
+	fence, _ := model.IsErrConflict(cause)
+	count, err := model.SettleQueuedDeployments(ctx, tx, environmentUUID, model.DeploymentQueueRejected, model.DeploymentQueueSettlement{
+		ReasonCode: model.CodeOutcomeUnreconciled, ReasonMessage: cause.Error(), ReasonDeploymentID: fence.DeploymentID,
+	})
 	if err != nil {
 		return err
 	}

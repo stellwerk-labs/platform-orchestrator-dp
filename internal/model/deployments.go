@@ -281,7 +281,8 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 			}
 		}
 		if params.ExpectedBaseDeploymentID.IsSet() && params.ExpectedBaseDeploymentID.Must() != lastStateDeploymentID {
-			return nil, NewErrCodedConflict(CodeDeploymentBaseChanged, "the Environment's current Deployment is no longer the expected base")
+			return nil, NewErrCodedConflict(CodeDeploymentBaseChanged, "the Environment's current Deployment is no longer the expected base").
+				AboutDeployment(lastStateDeploymentID)
 		}
 		if params.ExpectedCurrentDeploymentID.IsSet() {
 			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {

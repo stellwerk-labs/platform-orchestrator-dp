@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 // DeploymentOutcomeAcknowledgement is the audit record of an operator who
@@ -90,8 +92,11 @@ func AcknowledgeDeploymentOutcome(ctx context.Context, tx Tx, orgID string, depl
 	}
 	// Requests that waited behind the fenced Deployment never start by themselves
 	// once an operator acknowledges it; the operator deploys again on purpose.
-	if _, err := SettleQueuedDeployments(ctx, tx, environmentID, DeploymentQueueRejected, CodeOutcomeUnreconciled,
-		fmt.Sprintf("plugin-dispatched Deployment '%s' failed with an unreconciled outcome", deploymentID)); err != nil {
+	if _, err := SettleQueuedDeployments(ctx, tx, environmentID, DeploymentQueueRejected, DeploymentQueueSettlement{
+		ReasonCode:         CodeOutcomeUnreconciled,
+		ReasonMessage:      fmt.Sprintf("plugin-dispatched Deployment '%s' failed with an unreconciled outcome", deploymentID),
+		ReasonDeploymentID: opt.Of(deploymentID),
+	}); err != nil {
 		return nil, false, err
 	}
 	return ack, false, nil

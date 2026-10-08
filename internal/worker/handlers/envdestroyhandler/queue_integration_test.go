@@ -152,6 +152,7 @@ func TestDeletionCancelsQueuedDeploymentsAndDestroyWaitsInsteadOfFailing(t *test
 		require.NoError(t, tx.Rollback())
 		require.Equal(t, model.DeploymentQueueCancelled, item.State)
 		require.Equal(t, opt.Of(model.CodeEnvironmentDeleting), item.ReasonCode)
+		require.False(t, item.ReasonDeploymentID.IsSet(), "deletion refers to no Deployment")
 	}
 
 	// The running Deployment ends while another one starts: its lease must make destroy wait, not fail.

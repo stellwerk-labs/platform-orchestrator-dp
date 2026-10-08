@@ -253,7 +253,7 @@ func apiQueueItemFromModel(item model.DeploymentQueueItem, withManifest bool) De
 		RollbackToDeploymentId: request.RollbackToDeploymentID, ExpectedBaseDeploymentId: item.ExpectedBaseDeploymentID.Ref(),
 		HaltOnFailure: item.HaltOnFailure, CreatedBy: item.CreatedBy, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt, Attempts: item.Attempts,
 		LastError: item.LastError.Ref(), ReasonCode: item.ReasonCode.Ref(), ReasonMessage: item.ReasonMessage.Ref(),
-		SettledBy: item.SettledBy.Ref(), SettledAt: item.SettledAt.Ref(), DeploymentId: item.DeploymentID.Ref(),
+		ReasonDeploymentId: item.ReasonDeploymentID.Ref(), SettledBy: item.SettledBy.Ref(), SettledAt: item.SettledAt.Ref(), DeploymentId: item.DeploymentID.Ref(),
 	}
 	if withManifest {
 		out.Manifest = request.Manifest

@@ -24,6 +24,18 @@ func TestCodedConflictsMatchTheirSentinelThroughWrapping(t *testing.T) {
 	require.NotErrorIs(t, NewErrConflict("plain"), ErrConflict{}, "an uncoded conflict is no sentinel")
 }
 
+func TestConflictsNameTheDeploymentTheyAreAboutThroughWrapping(t *testing.T) {
+	failed := uuid.New()
+	fenced := errors.Wrap(NewErrCodedConflict(CodeOutcomeUnreconciled, "fenced").AboutDeployment(failed), "failed to create deployment")
+	require.ErrorIs(t, fenced, ErrOutcomeUnreconciled, "naming a Deployment keeps the sentinel match")
+	conflict, ok := IsErrConflict(fenced)
+	require.True(t, ok)
+	require.Equal(t, opt.Of(failed), conflict.DeploymentID)
+	require.False(t, NewErrCodedConflict(CodeDeploymentBaseChanged, "no current Deployment").AboutDeployment(uuid.Nil).DeploymentID.IsSet(),
+		"uuid.Nil names no Deployment")
+	require.False(t, NewErrConflict("plain").DeploymentID.IsSet())
+}
+
 func TestQueueIntentDigestIdentifiesTheRequestNotTheRequester(t *testing.T) {
 	request := NewDeploymentQueueItem{OrgID: "org", ProjectID: "p", EnvID: "e", EnvironmentUUID: uuid.New(), Mode: DeploymentModeDeploy,
 		Intent: json.RawMessage(`{"manifest":{"workloads":{}}}`), CreatedBy: uuid.New()}

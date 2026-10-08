@@ -3,7 +3,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -19,7 +18,8 @@ func (f *queueFixture) requireHalted(id, predecessor uuid.UUID) {
 	item := f.item(id)
 	require.Equal(f.t, model.DeploymentQueueRejected, item.State)
 	require.Equal(f.t, opt.Of(model.QueueReasonPreviousDeploymentFailed), item.ReasonCode)
-	require.Contains(f.t, item.ReasonMessage.Must(), predecessor.String(), "the reason names the failed Deployment")
+	require.Equal(f.t, opt.Of(predecessor), item.ReasonDeploymentID, "the reason names the failed Deployment")
+	require.Contains(f.t, item.ReasonMessage.Must(), predecessor.String())
 	require.False(f.t, item.DeploymentID.IsSet())
 }
 
@@ -57,13 +57,12 @@ func TestDeploymentQueueHaltsAnItemWhoseAwaitedDeploymentFailed(t *testing.T) {
 	f.requireHalted(second.Id, dispatched.DeploymentID.Must())
 	require.Equal(t, model.DeploymentQueueDispatched, f.item(plain.Id).State)
 
-	get := f.call(http.MethodGet, "/orgs/"+queueOrg+"/deployment-queue/"+first.Id.String(), nil, f.actor, "")
-	require.Equal(t, http.StatusOK, get.Code, get.Body.String())
-	var detail DeploymentQueueItem
-	require.NoError(t, json.Unmarshal(get.Body.Bytes(), &detail))
+	detail := f.apiItem(first.Id)
 	require.True(t, detail.HaltOnFailure)
 	require.Equal(t, Rejected, detail.State)
 	require.Equal(t, model.QueueReasonPreviousDeploymentFailed, *detail.ReasonCode)
+	require.Equal(t, dispatched.DeploymentID.Must(), *detail.ReasonDeploymentId)
+	require.Nil(t, f.apiItem(plain.Id).ReasonDeploymentId, "a dispatched item has no reason")
 	require.Len(t, f.deployments(), 4)
 	require.Equal(t, len(f.deployments()), f.core.admissions(), "halted items never reach Core")
 	require.Empty(t, f.queued())
@@ -105,5 +104,6 @@ func TestDeploymentQueueHaltCountsOnlyTheDeploymentTheItemWaitedFor(t *testing.T
 		rejected := f.item(item.Id)
 		require.Equal(t, model.DeploymentQueueRejected, rejected.State)
 		require.Equal(t, opt.Of(model.CodeOutcomeUnreconciled), rejected.ReasonCode)
+		require.Equal(t, opt.Of(plugin.Id), rejected.ReasonDeploymentID, "the reason names the fencing Deployment")
 	})
 }

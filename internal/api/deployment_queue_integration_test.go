@@ -462,24 +462,25 @@ func TestDeploymentQueuePermanentRejectionsSkipOnlyTheirItem(t *testing.T) {
 	f.iam.deny(forbidden, true)
 
 	f.finish(running.Id, model.DeploymentStatusSucceeded)
+	// Only the changed base refers to a Deployment: the Environment's current one, which replaced the expected base.
+	reasonDeployments := map[uuid.UUID]opt.Opt[uuid.UUID]{baseItem.Id: opt.Of(running.Id)}
 	for id, reason := range map[uuid.UUID]string{pinItem.Id: "pin_protection", prunedItem.Id: deploymentQueueReasonNotFound,
 		forbiddenItem.Id: deploymentQueueReasonForbidden, baseItem.Id: model.CodeDeploymentBaseChanged} {
 		rejected := f.item(id)
 		require.Equal(t, model.DeploymentQueueRejected, rejected.State, reason)
 		require.Equal(t, opt.Of(reason), rejected.ReasonCode)
 		require.NotEmpty(t, rejected.ReasonMessage.Must())
+		require.Equal(t, reasonDeployments[id], rejected.ReasonDeploymentID, reason)
 		require.False(t, rejected.DeploymentID.IsSet())
 	}
 	valid := f.item(validItem.Id)
 	require.Equal(t, model.DeploymentQueueDispatched, valid.State)
 	require.Len(t, f.deployments(), 2)
 	require.Len(t, f.core.unsettledGuards(), 1, "every rejected attempt sealed its Core admission")
-	get := f.call(http.MethodGet, "/orgs/"+queueOrg+"/deployment-queue/"+baseItem.Id.String(), nil, f.actor, "")
-	require.Equal(t, http.StatusOK, get.Code, get.Body.String())
-	var detail DeploymentQueueItem
-	require.NoError(t, json.Unmarshal(get.Body.Bytes(), &detail))
+	detail := f.apiItem(baseItem.Id)
 	require.Equal(t, Rejected, detail.State)
 	require.Equal(t, model.CodeDeploymentBaseChanged, *detail.ReasonCode)
+	require.Equal(t, running.Id, *detail.ReasonDeploymentId)
 	require.NotNil(t, detail.Manifest, "a single item shows its requested manifest")
 }
 
@@ -503,10 +504,13 @@ func TestDeploymentQueueUnreconciledPluginFailureRejectsWaitingWorkAndAcknowledg
 			f.exec(`UPDATE deployment_dispatch_budgets SET first_attempt_at=now()-interval '2 hours', deadline=now()-interval '1 hour' WHERE deployment_id=$1`, plugin.Id)
 			acknowledged := f.call(http.MethodPost, "/internal/orgs/"+queueOrg+"/deployments/"+plugin.Id.String()+"/actions/acknowledge-outcome", map[string]any{"reason": "runner job removed"}, f.actor, "")
 			require.Equal(t, http.StatusCreated, acknowledged.Code, acknowledged.Body.String())
+			rejectedBy := map[string]string{"promotion": "may still have an active Runner", "acknowledgement": "failed with an unreconciled outcome"}[path]
 			for _, id := range []uuid.UUID{first.Id, second.Id} {
 				rejected := f.item(id)
 				require.Equal(t, model.DeploymentQueueRejected, rejected.State)
 				require.Equal(t, opt.Of(model.CodeOutcomeUnreconciled), rejected.ReasonCode)
+				require.Contains(t, rejected.ReasonMessage.Must(), rejectedBy)
+				require.Equal(t, opt.Of(plugin.Id), rejected.ReasonDeploymentID, "the reason names the fencing Deployment")
 			}
 			f.promote(f.server)
 			require.NoError(t, f.server.SweepDeploymentQueue(f.ctx))

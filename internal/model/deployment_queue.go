@@ -67,9 +67,11 @@ type DeploymentQueueItem struct {
 	LastError                opt.Opt[string]
 	ReasonCode               opt.Opt[string]
 	ReasonMessage            opt.Opt[string]
-	SettledBy                opt.Opt[uuid.UUID]
-	SettledAt                opt.Opt[time.Time]
-	DeploymentID             opt.Opt[uuid.UUID]
+	// ReasonDeploymentID is the Deployment the reason refers to, if it refers to one.
+	ReasonDeploymentID opt.Opt[uuid.UUID]
+	SettledBy          opt.Opt[uuid.UUID]
+	SettledAt          opt.Opt[time.Time]
+	DeploymentID       opt.Opt[uuid.UUID]
 	// Position is the 1-based place in the Environment's queue while queued, otherwise 0.
 	Position int
 
@@ -112,8 +114,10 @@ func (n NewDeploymentQueueItem) IntentSHA256() string {
 type DeploymentQueueSettlement struct {
 	ReasonCode    string
 	ReasonMessage string
-	SettledBy     opt.Opt[uuid.UUID]
-	DeploymentID  opt.Opt[uuid.UUID]
+	// ReasonDeploymentID is the Deployment the reason refers to, if it refers to one.
+	ReasonDeploymentID opt.Opt[uuid.UUID]
+	SettledBy          opt.Opt[uuid.UUID]
+	DeploymentID       opt.Opt[uuid.UUID]
 }
 
 type ListDeploymentQueueParams struct {
@@ -124,8 +128,8 @@ type ListDeploymentQueueParams struct {
 
 const deploymentQueueColumns = `q.id, q.seq, q.org_id, q.project_id, q.env_id, q.environment_uuid, q.mode, q.intent,
 	q.intent_sha256, q.idempotency_key_digest, q.expected_base_deployment_id, q.halt_on_failure, q.enqueued_after_deployment_id,
-	q.created_by, q.created_at, q.expires_at, q.state, q.attempts, q.next_attempt_at, q.last_error, q.reason_code, q.reason_message, q.settled_by, q.settled_at,
-	q.deployment_id,
+	q.created_by, q.created_at, q.expires_at, q.state, q.attempts, q.next_attempt_at, q.last_error, q.reason_code, q.reason_message, q.reason_deployment_id,
+	q.settled_by, q.settled_at, q.deployment_id,
 	CASE WHEN q.state = 'queued' THEN (SELECT count(*) FROM environment_deployment_queue ahead
 		WHERE ahead.environment_uuid = q.environment_uuid AND ahead.state = 'queued' AND ahead.seq <= q.seq) ELSE 0 END`
 
@@ -135,7 +139,7 @@ func scanDeploymentQueueItem(row interface{ Scan(...any) error }) (*DeploymentQu
 	if err := row.Scan(&item.ID, &item.Seq, &item.OrgID, &item.ProjectID, &item.EnvID, &item.EnvironmentUUID, &item.Mode, &intent,
 		&item.IntentSHA256, opt.Scan(&item.IdempotencyKeyDigest), opt.Scan(&item.ExpectedBaseDeploymentID), &item.HaltOnFailure,
 		opt.Scan(&item.EnqueuedAfterDeploymentID), &item.CreatedBy, &item.CreatedAt, &item.ExpiresAt, &item.State, &item.Attempts, &item.NextAttemptAt, opt.Scan(&item.LastError),
-		opt.Scan(&item.ReasonCode), opt.Scan(&item.ReasonMessage), opt.Scan(&item.SettledBy), opt.Scan(&item.SettledAt),
+		opt.Scan(&item.ReasonCode), opt.Scan(&item.ReasonMessage), opt.Scan(&item.ReasonDeploymentID), opt.Scan(&item.SettledBy), opt.Scan(&item.SettledAt),
 		opt.Scan(&item.DeploymentID), &item.Position); err != nil {
 		return nil, err
 	}
@@ -178,7 +182,8 @@ func requireReplaceableStateHead(ctx context.Context, tx Tx, stateHead uuid.UUID
 		return err
 	}
 	if fence.IsSet() {
-		return NewErrCodedConflict(CodeOutcomeUnreconciled, fmt.Sprintf("failed plugin-dispatched Deployment '%s' may still have an active Runner; outcome is unreconciled", stateHead))
+		return NewErrCodedConflict(CodeOutcomeUnreconciled, fmt.Sprintf("failed plugin-dispatched Deployment '%s' may still have an active Runner; outcome is unreconciled", stateHead)).
+			AboutDeployment(stateHead)
 	}
 	return nil
 }
@@ -413,10 +418,10 @@ func SettleDeploymentQueueItem(ctx context.Context, tx Tx, id uuid.UUID, state D
 		return errors.New("a settled queue item cannot be queued")
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE environment_deployment_queue
-		SET state = $2, reason_code = NULLIF($3, ''), reason_message = NULLIF($4, ''), settled_by = $5,
-		    deployment_id = $6, settled_at = now()
+		SET state = $2, reason_code = NULLIF($3, ''), reason_message = NULLIF($4, ''), reason_deployment_id = $5,
+		    settled_by = $6, deployment_id = $7, settled_at = now()
 		WHERE id = $1 AND state = 'queued'`, id, state, settlement.ReasonCode, settlement.ReasonMessage,
-		settlement.SettledBy.Ref(), settlement.DeploymentID.Ref())
+		settlement.ReasonDeploymentID.Ref(), settlement.SettledBy.Ref(), settlement.DeploymentID.Ref())
 	if err != nil {
 		return errors.Wrap(err, "failed to settle deployment queue item")
 	}
@@ -429,13 +434,15 @@ func SettleDeploymentQueueItem(ctx context.Context, tx Tx, id uuid.UUID, state D
 }
 
 // SettleQueuedDeployments settles every waiting item of an Environment at once.
-func SettleQueuedDeployments(ctx context.Context, tx Tx, environmentUUID uuid.UUID, state DeploymentQueueState, reasonCode, reasonMessage string) (int64, error) {
-	if state == DeploymentQueueQueued || state == DeploymentQueueDispatched || reasonCode == "" {
+// No single Deployment can be what all of them became, so the settlement names none.
+func SettleQueuedDeployments(ctx context.Context, tx Tx, environmentUUID uuid.UUID, state DeploymentQueueState, settlement DeploymentQueueSettlement) (int64, error) {
+	if state == DeploymentQueueQueued || state == DeploymentQueueDispatched || settlement.ReasonCode == "" || settlement.DeploymentID.IsSet() {
 		return 0, errors.New("bulk queue settlement requires a terminal state without a Deployment and a reason")
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE environment_deployment_queue
-		SET state = $2, reason_code = $3, reason_message = NULLIF($4, ''), settled_at = now()
-		WHERE environment_uuid = $1 AND state = 'queued'`, environmentUUID, state, reasonCode, reasonMessage)
+		SET state = $2, reason_code = $3, reason_message = NULLIF($4, ''), reason_deployment_id = $5, settled_by = $6, settled_at = now()
+		WHERE environment_uuid = $1 AND state = 'queued'`, environmentUUID, state, settlement.ReasonCode, settlement.ReasonMessage,
+		settlement.ReasonDeploymentID.Ref(), settlement.SettledBy.Ref())
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to settle queued deployments")
 	}

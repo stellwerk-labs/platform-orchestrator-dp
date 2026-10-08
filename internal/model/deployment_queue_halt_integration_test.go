@@ -58,7 +58,7 @@ func TestHaltingDeploymentQueuePredecessorIsTheFailureTheItemWaitedFor(t *testin
 	f.end(t, plan.Id, DeploymentStatusFailed)
 	require.False(t, f.haltingPredecessor(t, behindPlan).IsSet())
 	f.inTx(t, func(tx TxWithCommit) {
-		_, err := SettleQueuedDeployments(f.ctx, tx, f.env, DeploymentQueueCancelled, QueueReasonCancelled, "")
+		_, err := SettleQueuedDeployments(f.ctx, tx, f.env, DeploymentQueueCancelled, DeploymentQueueSettlement{ReasonCode: QueueReasonCancelled})
 		require.NoError(t, err)
 	})
 

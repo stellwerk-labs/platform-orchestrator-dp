@@ -404,6 +404,16 @@ func (f *queueFixture) item(id uuid.UUID) *model.DeploymentQueueItem {
 	return item
 }
 
+// apiItem reads one queue item through the API, with its requested manifest.
+func (f *queueFixture) apiItem(id uuid.UUID) DeploymentQueueItem {
+	f.t.Helper()
+	response := f.call(http.MethodGet, "/orgs/"+queueOrg+"/deployment-queue/"+id.String(), nil, f.actor, "")
+	require.Equal(f.t, http.StatusOK, response.Code, response.Body.String())
+	var item DeploymentQueueItem
+	require.NoError(f.t, json.Unmarshal(response.Body.Bytes(), &item))
+	return item
+}
+
 func (f *queueFixture) queued() []model.DeploymentQueueItem {
 	f.t.Helper()
 	tx, err := f.store.BeginTx(f.ctx, nil)

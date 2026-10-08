@@ -248,7 +248,9 @@ func (h *EnvDestroyHandler) cancelQueuedDeployments(ctx context.Context, logger 
 		return errors.Wrap(err, "failed to begin transaction")
 	}
 	defer func() { _ = tx.Rollback() }()
-	count, err := model.SettleQueuedDeployments(ctx, tx, envUuid, model.DeploymentQueueCancelled, model.CodeEnvironmentDeleting, "the Environment is being deleted")
+	count, err := model.SettleQueuedDeployments(ctx, tx, envUuid, model.DeploymentQueueCancelled, model.DeploymentQueueSettlement{
+		ReasonCode: model.CodeEnvironmentDeleting, ReasonMessage: "the Environment is being deleted",
+	})
 	if err != nil {
 		return err
 	}
