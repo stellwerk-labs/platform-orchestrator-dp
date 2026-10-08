@@ -80,24 +80,37 @@ func newDeploymentQueueItem(
 	return item, nil
 }
 
-// findQueuedReplay returns the queue item an identical keyed request created
-// within the idempotency window, and refuses a different request on that key.
-func (s *Server) findQueuedReplay(ctx context.Context, request model.NewDeploymentQueueItem) (*model.DeploymentQueueItem, error) {
+// findReplay looks for an earlier request on the same idempotency key within
+// the idempotency window. It returns the queue item while that request has not
+// become a Deployment, and refuses a different request on the key. When a
+// Deployment carries the key, it reports deploymentReplay: that Deployment's
+// own replay answers, also while it still runs and keeps the Environment busy.
+func (s *Server) findReplay(ctx context.Context, request model.NewDeploymentQueueItem) (*model.DeploymentQueueItem, bool, error) {
 	var replay *model.DeploymentQueueItem
+	var deploymentReplay bool
 	err := s.inTx(ctx, func(tx model.Tx) error {
 		item, err := model.FindDeploymentQueueItemByIdempotencyKey(ctx, tx, request.OrgID, request.EnvironmentUUID, request.IdempotencyKeyDigest.Must())
 		if _, missing := model.IsErrNotFound(err); missing {
-			return nil
+			_, _, err = s.Database.GetDeploymentByIdempotencyKeyDigest(ctx, tx, request.OrgID, request.ProjectID, request.EnvID, request.IdempotencyKeyDigest.Must())
+			if _, missing := model.IsErrNotFound(err); missing {
+				return nil
+			}
+			deploymentReplay = err == nil
+			return err
 		} else if err != nil {
 			return err
 		}
 		if item.IntentSHA256 != request.IntentSHA256() {
 			return model.NewErrConflict("incorrect request for this idempotency key")
 		}
-		replay = item
+		if item.State == model.DeploymentQueueDispatched {
+			deploymentReplay = true
+		} else {
+			replay = item
+		}
 		return nil
 	})
-	return replay, err
+	return replay, deploymentReplay, err
 }
 
 func (s *Server) checkEnvironmentAvailable(ctx context.Context, request model.NewDeploymentQueueItem) error {

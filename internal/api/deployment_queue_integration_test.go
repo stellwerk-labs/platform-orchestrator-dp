@@ -125,6 +125,24 @@ func TestDeploymentQueueReplaysIdempotentRequests(t *testing.T) {
 	}
 	require.Equal(t, http.StatusConflict, f.call(http.MethodPost, path, queueBody(map[string]any{"when_busy": "queue", "runner_log_level": "debug"}), f.actor, "release-42").Code)
 	require.Len(t, f.deployments(), 2)
+
+	// A Deployment created at once answers its replays while it runs and keeps the Environment busy.
+	f.finish(item.DeploymentID.Must(), model.DeploymentStatusSucceeded)
+	direct := f.call(http.MethodPost, path, queueBody(map[string]any{"runner_log_level": "warn"}), f.actor, "hotfix-7")
+	require.Equal(t, http.StatusCreated, direct.Code, direct.Body.String())
+	var created Deployment
+	require.NoError(t, json.Unmarshal(direct.Body.Bytes(), &created))
+	for _, whenBusy := range []any{nil, "queue", "reject"} {
+		response := f.call(http.MethodPost, path, queueBody(map[string]any{"runner_log_level": "warn", "when_busy": whenBusy}), f.actor, "hotfix-7")
+		require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+		var replayed Deployment
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &replayed))
+		require.Equal(t, created.Id, replayed.Id, "the running Deployment answers, nothing is queued")
+	}
+	changed := queueBody(map[string]any{"manifest": map[string]any{"workloads": map[string]any{"api": map[string]any{}}}})
+	require.Equal(t, http.StatusConflict, f.call(http.MethodPost, path, changed, f.actor, "hotfix-7").Code)
+	require.Equal(t, 1, f.count(`SELECT count(*) FROM environment_deployment_queue`))
+	require.Len(t, f.deployments(), 3)
 }
 
 func TestDeploymentQueueBoundsDepthAndExpiresAcrossRestarts(t *testing.T) {

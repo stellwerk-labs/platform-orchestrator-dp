@@ -329,18 +329,18 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		if err != nil {
 			return nil, err
 		}
-		dispatched := false
+		deploymentReplay := false
 		if request.Params.IdempotencyKey != nil {
-			replay, err := s.findQueuedReplay(ctx, queued)
+			replay, replaysDeployment, err := s.findReplay(ctx, queued)
 			if err != nil {
 				return createDeploymentErrorResponse(err)
-			} else if replay != nil && replay.State != model.DeploymentQueueDispatched {
+			} else if replay != nil {
 				return CreateDeployment202JSONResponse(apiQueueItemFromModel(*replay, false)), nil
 			}
-			// A dispatched replay is answered by its Deployment's own idempotent replay below.
-			dispatched = replay != nil
+			// The Deployment that carries the key answers through its own idempotent replay below.
+			deploymentReplay = replaysDeployment
 		}
-		if whenBusy == Queue && !dispatched {
+		if whenBusy == Queue && !deploymentReplay {
 			if env.Status == platformorchestratorcp.EnvironmentStatusDeleting {
 				return createDeploymentErrorResponse(model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status)))
 			}
