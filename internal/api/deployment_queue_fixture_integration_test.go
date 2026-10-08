@@ -352,6 +352,25 @@ func (f *queueFixture) mustDeploy(body map[string]any) Deployment {
 	return deployment
 }
 
+// dryRunPendingChanges answers a dry run, checks the answer against the
+// published schema and returns its pending_changes, nil when absent.
+func (f *queueFixture) dryRunPendingChanges(fields map[string]any) any {
+	f.t.Helper()
+	body := map[string]any{"is_dry_run": true}
+	for key, value := range fields {
+		body[key] = value
+	}
+	response := f.deploy(queueBody(body))
+	require.Equal(f.t, http.StatusOK, response.Code, response.Body.String())
+	var decoded map[string]any
+	require.NoError(f.t, json.Unmarshal(response.Body.Bytes(), &decoded))
+	spec, err := GetSwagger()
+	require.NoError(f.t, err)
+	require.NoError(f.t, spec.Components.Schemas["DeploymentDryRun"].Value.VisitJSON(decoded), "the dry run conforms to the published schema")
+	require.Contains(f.t, decoded, "diff")
+	return decoded["pending_changes"]
+}
+
 func (f *queueFixture) mustQueue(response *httptest.ResponseRecorder) DeploymentQueueItem {
 	f.t.Helper()
 	require.Equal(f.t, http.StatusAccepted, response.Code, response.Body.String())

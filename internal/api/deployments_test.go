@@ -428,6 +428,8 @@ output "two" {
 		t.Run("second deployment", func(t *testing.T) {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
+			mdb.EXPECT().ReadPendingEnvironmentChanges(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", envUuid).
+				Return(model.PendingEnvironmentChanges{Queued: 2}, nil)
 
 			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}, gomock.Any()).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
@@ -580,6 +582,7 @@ output "one" {
 			r201 := r.(CreateDeployment201JSONResponse)
 			if assert.NotNil(t, r201) {
 				assert.Equal(t, dep2Id, r201.Id)
+				assert.Equal(t, &PendingEnvironmentChanges{Code: ResultMayChange, Running: 0, Queued: 2}, r201.PendingChanges, "a plan that queued work will change says so")
 			}
 
 			// assert that we published the message

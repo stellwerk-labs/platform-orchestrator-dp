@@ -111,6 +111,7 @@ type Databaser interface {
 	GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error)
 	GetLastDeployment(ctx context.Context, optionalTx Tx, orgId string, projectId, envId string, params GetLastDeploymentParams) (*DeploymentSummary, EncodedDeploymentManifest, RawTofu, EncodedDeploymentGraph, error)
 	GetEnvironmentDeploymentReadiness(ctx context.Context, optionalTx Tx, orgID string, refs []EnvironmentRef) ([]EnvironmentDeploymentReadiness, error)
+	ReadPendingEnvironmentChanges(ctx context.Context, optionalTx Tx, orgID, projectID, envID string, environmentUUID uuid.UUID) (PendingEnvironmentChanges, error)
 	DeleteDeploymentsForEnv(ctx context.Context, optionalTx Tx, orgId, projectId, envId string, force bool) error
 	UpdateDeploymentStatusAndOutputs(ctx context.Context, optionalTx Tx, deploymentId uuid.UUID, params UpdateDeploymentStatusAndOutputsParams) (*DeploymentSummary, error)
 	DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error)

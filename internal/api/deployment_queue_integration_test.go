@@ -151,6 +151,10 @@ func TestDeploymentQueueIsTheDefaultForABusyEnvironment(t *testing.T) {
 	require.Equal(t, model.DeploymentQueueDispatched, settled.State)
 	require.Len(t, f.deployments(), 4)
 	require.Empty(t, f.queued())
+
+	f.finish(settled.DeploymentID.Must(), model.DeploymentStatusSucceeded)
+	idle := f.mustDeploy(queueBody(nil))
+	require.Nil(t, idle.PendingChanges, "only plans and dry runs report pending changes")
 }
 
 func TestDeploymentQueueReplaysIdempotentRequests(t *testing.T) {
@@ -545,8 +549,7 @@ func TestDeploymentQueueWaitsBehindAPlanRunAndNeverQueuesPlans(t *testing.T) {
 		f.requireError(f.deploy(queueBody(body)), http.StatusConflict, model.CodeEnvironmentBusy)
 	}
 	for _, body := range []map[string]any{{"is_dry_run": true}, {"when_busy": "queue", "is_dry_run": true}} {
-		dryRun := f.deploy(queueBody(body))
-		require.Equal(t, http.StatusOK, dryRun.Code, "dry runs answer while a plan executes: %s", dryRun.Body.String())
+		require.Nil(t, f.dryRunPendingChanges(body), "dry runs answer while a plan executes, which changes nothing")
 	}
 	require.Zero(t, f.count(`SELECT count(*) FROM environment_deployment_queue`))
 

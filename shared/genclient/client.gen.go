@@ -361,6 +361,21 @@ func (e MetadataKeySchemaType) Valid() bool {
 	}
 }
 
+// Defines values for PendingEnvironmentChangesCode.
+const (
+	ResultMayChange PendingEnvironmentChangesCode = "result_may_change"
+)
+
+// Valid indicates whether the value is a known member of the PendingEnvironmentChangesCode enum.
+func (e PendingEnvironmentChangesCode) Valid() bool {
+	switch e {
+	case ResultMayChange:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateMetadataKeySchemaType.
 const (
 	UpdateMetadataKeySchemaTypeString UpdateMetadataKeySchemaType = "string"
@@ -514,6 +529,12 @@ type Deployment struct {
 	//
 	// Example: my-org
 	OrgId OrganizationId `json:"org_id"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// PlanOnly Whether the deployment is executed in plan mode.
 	//
@@ -695,6 +716,12 @@ type DeploymentDiffChangeType string
 type DeploymentDryRun struct {
 	// Diff Describes a diff between the resource graphs of two deployments.
 	Diff DeploymentDiff `json:"diff"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// RunnerId The Runner ID that this deployment would have executed on
 	//
@@ -1389,6 +1416,28 @@ type OpenidConfiguration struct {
 // Example: my-org
 type OrganizationId = string
 
+// PendingEnvironmentChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+// never queued.
+type PendingEnvironmentChanges struct {
+	// Code Example: result_may_change
+	Code PendingEnvironmentChangesCode `json:"code"`
+
+	// Queued Deploy and rollback requests waiting in the Environment's deployment queue.
+	//
+	// Example: 2
+	Queued int `json:"queued"`
+
+	// Running Deploy, rollback or destroy Deployments changing the Environment now.
+	//
+	// Example: 1
+	Running int `json:"running"`
+}
+
+// PendingEnvironmentChangesCode Example: result_may_change
+type PendingEnvironmentChangesCode string
+
 // ResourceClass A resource class requested by the resource graph. 'default' is the default value.
 //
 // Example: classic
@@ -1850,7 +1899,8 @@ type ClientInterface interface {
 	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`.
+	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -1872,7 +1922,8 @@ type ClientInterface interface {
 	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`.
+	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -2332,7 +2383,8 @@ func (c *Client) ListDeployments(ctx context.Context, orgId OrgIdPathParam, para
 // Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 // answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 // while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`.
+// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -2364,7 +2416,8 @@ func (c *Client) CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathPa
 // Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 // answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 // while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`.
+// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -5098,7 +5151,8 @@ type ClientWithResponsesInterface interface {
 	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`.
+	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -5120,7 +5174,8 @@ type ClientWithResponsesInterface interface {
 	// Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 	// answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 	// while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-	// Environment's state lock; it then fails with 409 `environment_busy`.
+	// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+	// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 	//
 	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -7420,7 +7475,8 @@ func (c *ClientWithResponses) ListDeploymentsWithResponse(ctx context.Context, o
 // Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 // answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 // while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`.
+// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -7448,7 +7504,8 @@ func (c *ClientWithResponses) CreateDeploymentWithBodyWithResponse(ctx context.C
 // Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
 // answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
 // while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-// Environment's state lock; it then fails with 409 `environment_busy`.
+// Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+// when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 //
 // Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
 // plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and

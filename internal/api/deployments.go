@@ -351,7 +351,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		}
 	}
 
-	dep, messages, diff, createErr := s.createRequestedDeployment(ctx, logger, uid, request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, deploymentRequest, request.Params.IdempotencyKey, request.Body.IsDryRun, expectedBase)
+	created, createErr := s.createRequestedDeployment(ctx, logger, uid, request.OrgId, request.Body.ProjectId, request.Body.EnvId, env, modelMode, deploymentRequest, request.Params.IdempotencyKey, request.Body.IsDryRun, expectedBase)
 	if errors.Is(createErr, model.ErrEnvironmentBusy) {
 		if queueable && whenBusy == Queue {
 			return s.enqueueDeployment(ctx, queued)
@@ -363,14 +363,33 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 		return createDeploymentErrorResponse(createErr)
 	}
 	if request.Body.IsDryRun {
-		return CreateDeployment200JSONResponse{RunnerId: dep.RunnerId, Diff: *diff}, nil
+		return CreateDeployment200JSONResponse{RunnerId: created.deployment.RunnerId, Diff: *created.diff, PendingChanges: apiPendingChangesFromModel(created.pending)}, nil
 	}
-	ids.DeployId = dep.Id.String()
+	ids.DeployId = created.deployment.Id.String()
 	logger.Info("Created deployment")
 
 	rawManifest, _ := json.Marshal(request.Body.Manifest)
-	reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
-	return CreateDeployment201JSONResponse(apiDepFromModel(*dep, rawManifest)), nil
+	reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, created.messages)
+	deployment := apiDepFromModel(*created.deployment, rawManifest)
+	deployment.PendingChanges = apiPendingChangesFromModel(created.pending)
+	return CreateDeployment201JSONResponse(deployment), nil
+}
+
+func apiPendingChangesFromModel(pending model.PendingEnvironmentChanges) *PendingEnvironmentChanges {
+	if !pending.Any() {
+		return nil
+	}
+	return &PendingEnvironmentChanges{Code: ResultMayChange, Running: pending.Running, Queued: pending.Queued}
+}
+
+// requestedDeployment is a created Deployment, or a dry run's answer, with
+// what the caller must learn about it.
+type requestedDeployment struct {
+	deployment *model.DeploymentSummary
+	messages   []*hstandardoutbox.PendingEventMessage
+	diff       *DeploymentDiff
+	// pending is reported for plan-only Deployments and dry runs only.
+	pending model.PendingEnvironmentChanges
 }
 
 // createRequestedDeployment resolves and creates one Deployment in its own
@@ -378,10 +397,10 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 func (s *Server) createRequestedDeployment(
 	ctx context.Context, logger *zap.Logger, actor uuid.UUID, orgID, projectID, envID string, env platformorchestratorcp.Environment,
 	mode model.DeploymentMode, request deploymentRequest, idempotencyKey *string, dryRun bool, expectedBase opt.Opt[uuid.UUID],
-) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
+) (requestedDeployment, error) {
 	tx, err := s.Database.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to begin transaction")
+		return requestedDeployment{}, errors.Wrap(err, "failed to begin transaction")
 	}
 	defer func() {
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
@@ -391,29 +410,34 @@ func (s *Server) createRequestedDeployment(
 
 	options := s.deploymentOptions(ctx, actor, orgID, env, mode, request, ref.DerefOr(idempotencyKey, ""), dryRun)
 	options.ExpectedBaseDeploymentID = expectedBase
-	dep, messages, diff, err := CreateDeploymentWithOptions(
+	var created requestedDeployment
+	created.deployment, created.messages, created.diff, err = CreateDeploymentWithOptions(
 		ctx, logger, actor, orgID, projectID, envID, env, mode, opt.OfRef(request.RollbackToDeploymentID),
 		ref.DerefOr(request.Manifest, DeploymentManifest{}), request.EncryptedOutputsRecipient, request.EncryptedLogsRecipient, idempotencyKey, dryRun,
 		request.RunnerLogLevel, s.ControlPlaneClient, s.Database, tx, options,
 	)
+	// A plan or dry run does not wait for the Deployments that change the Environment first; tell the caller.
+	if err == nil && (dryRun || !model.RequiresEnvironmentLease(mode)) {
+		created.pending, err = s.Database.ReadPendingEnvironmentChanges(ctx, tx, orgID, projectID, envID, env.Uuid)
+	}
 	if err != nil {
 		_ = tx.Rollback()
 		if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
-			return nil, nil, nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission")
+			return requestedDeployment{}, errors.Wrap(sealErr, "failed to seal absent Deployment admission")
 		}
-		return nil, nil, nil, err
+		return requestedDeployment{}, err
 	}
 	if dryRun {
-		return dep, nil, diff, nil
+		return created, nil
 	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
 		if sealErr := options.Admission.SealAbsent(ctx); sealErr != nil {
-			return nil, nil, nil, errors.Wrap(sealErr, "failed to seal absent Deployment admission after commit failure")
+			return requestedDeployment{}, errors.Wrap(sealErr, "failed to seal absent Deployment admission after commit failure")
 		}
-		return nil, nil, nil, errors.Wrap(err, "failed to commit transaction")
+		return requestedDeployment{}, errors.Wrap(err, "failed to commit transaction")
 	}
-	return dep, messages, diff, nil
+	return created, nil
 }
 
 // deploymentOptions carries a request's Module Version selection, its scoped

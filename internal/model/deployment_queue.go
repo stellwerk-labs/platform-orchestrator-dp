@@ -192,6 +192,28 @@ func requireQueueHead(ctx context.Context, tx Tx, environmentUUID, queueItem uui
 	return nil
 }
 
+// PendingEnvironmentChanges counts the Deployments that will change an
+// Environment before anything requested now: the running deploy, rollback or
+// destroy and the requests waiting in its queue.
+type PendingEnvironmentChanges struct {
+	Running int
+	Queued  int
+}
+
+func (p PendingEnvironmentChanges) Any() bool {
+	return p.Running > 0 || p.Queued > 0
+}
+
+func (d *databaser) ReadPendingEnvironmentChanges(ctx context.Context, optionalTx Tx, orgID, projectID, envID string, environmentUUID uuid.UUID) (PendingEnvironmentChanges, error) {
+	var pending PendingEnvironmentChanges
+	err := d.txOrDb(optionalTx).QueryRowContext(ctx, `SELECT
+		(SELECT count(*) FROM deployment_environments e JOIN deployments d ON d.de_id = e.id AND d.id = e.last_state_deployment_id
+			WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 AND d.status = 'executing' AND d.mode IN ('deploy', 'rollback', 'destroy')),
+		(SELECT count(*) FROM environment_deployment_queue WHERE environment_uuid = $4 AND state = 'queued')`,
+		orgID, projectID, envID, environmentUUID).Scan(&pending.Running, &pending.Queued)
+	return pending, errors.Wrap(err, "failed to read pending environment changes")
+}
+
 // EnqueueDeployment appends a request to its Environment's queue, or replays
 // the item an identical keyed request created within the idempotency window.
 func EnqueueDeployment(ctx context.Context, tx Tx, request NewDeploymentQueueItem, maxDepth int) (*DeploymentQueueItem, bool, error) {

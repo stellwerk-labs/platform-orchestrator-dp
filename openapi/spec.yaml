@@ -213,7 +213,8 @@ paths:
         Plan-only requests and dry runs are never queued and ignore `when_busy` and `queue_ttl_seconds`. A dry run is
         answered while Deployments run or wait. A plan-only request starts while requests wait in the queue, but not
         while a deploy, rollback, destroy or another plan runs, because their Runners would contend for the
-        Environment's state lock; it then fails with 409 `environment_busy`.
+        Environment's state lock; it then fails with 409 `environment_busy`. Either response carries `pending_changes`
+        when Deployments that run or wait will change the Environment first, so the plan or diff may still change.
 
         Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
         plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
@@ -1897,6 +1898,36 @@ components:
               description: The Runner ID that this deployment executes on
               type: string
               example: my-runner
+            pending_changes:
+              $ref: "#/components/schemas/PendingEnvironmentChanges"
+
+    PendingEnvironmentChanges:
+      description: |
+        Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+        that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+        is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+        never queued.
+      type: object
+      required:
+        - code
+        - running
+        - queued
+      properties:
+        code:
+          type: string
+          enum:
+            - result_may_change
+          example: result_may_change
+        running:
+          description: Deploy, rollback or destroy Deployments changing the Environment now.
+          type: integer
+          minimum: 0
+          example: 1
+        queued:
+          description: Deploy and rollback requests waiting in the Environment's deployment queue.
+          type: integer
+          minimum: 0
+          example: 2
 
     DeploymentCreateBody:
       type: object
@@ -2027,6 +2058,8 @@ components:
           example: my-runner
         diff:
           $ref: "#/components/schemas/DeploymentDiff"
+        pending_changes:
+          $ref: "#/components/schemas/PendingEnvironmentChanges"
 
     DeploymentEncryptedOutputs:
       type: object
