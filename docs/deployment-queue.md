@@ -1,4 +1,4 @@
-# Environment deployment queue (schemas 33 and 34)
+# Environment deployment queue (schemas 33 to 35)
 
 Deploy and rollback Deployments change their Environment and therefore run one
 at a time. Until schema 33, a request that found its Environment busy failed
@@ -44,6 +44,20 @@ The check applies to direct requests and promoted items alike, not to dry runs.
 
 Only `queued` items change. Every transition is a compare-and-set on
 `state = 'queued'`, so an item settles exactly once.
+
+A cancelled, expired or rejected item records why in `reason_code` and
+`reason_message`. When the reason refers to a Deployment,
+`reason_deployment_id` names it, so clients never parse the message:
+
+| `reason_code` | `reason_deployment_id` |
+|---|---|
+| `previous_deployment_failed` | the failed Deployment the item waited for |
+| `outcome_unreconciled` | the failed plugin-dispatched Deployment that fences the Environment |
+| `deployment_base_changed` | the Environment's current Deployment, which replaced the expected base (absent when the Environment has none) |
+| any other | absent |
+
+A dispatched item has no reason; `deployment_id` names the Deployment it
+became.
 
 ## Request handling
 
@@ -186,9 +200,10 @@ never blocks the next one, unless that item asked to halt.
 
 A request may set `halt_on_failure: true` (default `false`). The item is then
 not promoted when the Deployment it waited for failed; it ends `rejected` with
-the reason code `previous_deployment_failed` and a message naming that
-Deployment, and the queue continues with the next item. Only the item that
-asked halts; items without the flag behave as before.
+the reason code `previous_deployment_failed` and that Deployment in
+`reason_deployment_id` (and in the message), and the queue continues with the
+next item. Only the item that asked halts; items without the flag behave as
+before.
 
 The predecessor is the Environment's latest deploy, rollback or destroy
 Deployment when the item reaches the head of the queue. Those run strictly one
@@ -304,7 +319,10 @@ items settle first. Schema 34 adds `halt_on_failure` (default `false`, so items
 that waited during the upgrade keep going after a failure, as before) and
 `enqueued_after_deployment_id`. Its Down migration refuses to run while a
 `queued` item has `halt_on_failure`, because dropping the flag would let that
-item start after a failure it asked to halt on.
+item start after a failure it asked to halt on. Schema 35 adds
+`reason_deployment_id`; items settled before it have none and keep naming the
+Deployment only in `reason_message`. Its Down migration drops the column
+without a check, because only settled items carry it.
 
 Behaviour change for clients that omit `when_busy`: a busy Environment now
 answers 202 with a queue item instead of 409 `environment_busy`, and the
