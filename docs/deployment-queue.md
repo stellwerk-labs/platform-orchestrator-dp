@@ -1,4 +1,4 @@
-# Environment deployment queue (schema 33)
+# Environment deployment queue (schemas 33 and 34)
 
 Deploy and rollback Deployments change their Environment and therefore run one
 at a time. Until schema 33, a request that found its Environment busy failed
@@ -6,16 +6,20 @@ with 409 and the client had to retry. The deployment queue lets the request
 wait instead: it is stored as a queue item and becomes a Deployment when the
 Environment is free and the item is at the head of the Environment's queue.
 
-The raw API default is unchanged. A request without `when_busy`, or with
-`when_busy: reject`, still answers 409 with the error code `environment_busy`.
-Only `when_busy: queue` stores the request and answers 202 with the item.
+Waiting is the default. A deploy or rollback request without `when_busy`, or
+with `when_busy: queue`, that finds its Environment busy is stored and answered
+with 202 and the item. Only `when_busy: reject` keeps the fail-fast answer: 409
+with the error code `environment_busy`. Requests authorized by an organization
+token cannot wait (see below) and get that 409 either way. Plan-only requests
+and dry runs are never queued.
 
 ## What is stored
 
 A queue item stores the request as the client sent it: manifest, rollback
 target, explicit Module Versions, restricted-version confirmations, output and
-log recipients, Runner log level, the idempotency key digest and an optional
-`expected_base_deployment_id`. It never stores a resolved graph.
+log recipients, Runner log level, the idempotency key digest, an optional
+`expected_base_deployment_id` and `halt_on_failure`. It never stores a resolved
+graph.
 
 The item is resolved like a new request when it is promoted, as the requesting
 user and against the Environment as it is then: base graph, Pins, catalogue
@@ -35,7 +39,7 @@ The check applies to direct requests and promoted items alike, not to dry runs.
  enqueue --> [queued] --cancel--------> [cancelled]   actor and reason recorded
                |  \----TTL / deletion--> [expired] / [cancelled]
                +--promote--> [dispatched]  deployment_id; the Deployment owns everything after this
-               +--promote--> [rejected]    permanent failure, reason_code and reason_message
+               +--promote--> [rejected]    permanent failure or halt_on_failure, reason_code and reason_message
 ```
 
 Only `queued` items change. Every transition is a compare-and-set on
@@ -43,14 +47,19 @@ Only `queued` items change. Every transition is a compare-and-set on
 
 ## Request handling
 
-`POST /orgs/{orgId}/deployments` with `when_busy: queue`:
+`POST /orgs/{orgId}/deployments` for a deploy or rollback, unless it sets
+`when_busy: reject`:
 
-1. Validation and permissions are unchanged. Plan-only requests and dry runs
-   are never queued (400). `queue_ttl_seconds` requires `when_busy: queue` and
-   must not exceed the configured maximum.
+1. Validation and permissions are unchanged. `queue_ttl_seconds` and
+   `halt_on_failure: true` are refused (400) together with `when_busy: reject`;
+   `queue_ttl_seconds` must not exceed the configured maximum. Plan-only
+   requests and dry runs are never queued and ignore all three fields (see
+   "Plan-only requests and dry runs").
 2. A keyed request that matches a waiting, cancelled, expired or rejected item
    returns that item (202); a different request on the same key returns 409.
-   After dispatch the Deployment's own idempotent replay answers.
+   When a Deployment carries the key, because the item was dispatched or the
+   request was created at once, that Deployment's own idempotent replay
+   answers, also while it still runs and keeps the Environment busy.
 3. A deleting Environment answers 409 `environment_deleting`. An Environment
    fenced by an unreconciled plugin-dispatched Deployment answers 409
    `outcome_unreconciled`.
@@ -64,8 +73,11 @@ Only `queued` items change. Every transition is a compare-and-set on
    `expires_at = now() + TTL`.
 
 A request authorized by a deprecated organization token is never queued: there
-is no user whose authority promotion could re-check. It answers 409
-`environment_busy` instead.
+is no user whose authority promotion could re-check. Whether it omits
+`when_busy` or sets `queue`, a busy Environment answers 409 `environment_busy`
+with the message "the Environment is busy; queueing a Deployment requires an
+attributable user, not an organization token"; with `reject` it gets the
+ordinary busy message.
 
 Queue endpoints:
 
@@ -79,6 +91,55 @@ Any writer of the Environment may cancel obsolete work. Repeating the identical
 cancellation returns the cancelled item; another cancellation of a settled item
 answers 409 `queue_item_settled`. A cancellation that meets a promotion in
 progress answers 409 `queue_item_dispatching`; the caller reads the item again.
+
+## Plan-only requests and dry runs
+
+Plan-only requests (`mode: plan_only` or `plan_only: true`, also rollback
+plans) and dry runs (`is_dry_run: true`) change nothing. They are never queued
+and ignore `when_busy`, `queue_ttl_seconds` and `halt_on_failure`, so a client
+may send its usual queue settings with them.
+
+- A dry run resolves the request and answers 200 with the diff, also while a
+  Deployment runs or requests wait. It takes no lease, no Core admission and no
+  queue position, and it never starts a Runner.
+- A plan-only request creates a Deployment that runs a Runner in plan mode. It
+  takes no lease and no queue position. It starts while requests wait in the
+  queue, and the head then waits for the plan run to finish. It does not start
+  while a deploy, rollback or destroy runs (or another plan run): that answers
+  409 `environment_busy`, whatever `when_busy` says. See "State lock" below.
+
+Both answers carry `pending_changes` when Deployments will change the
+Environment before anything requested now:
+
+```json
+"pending_changes": {"code": "result_may_change", "running": 1, "queued": 2}
+```
+
+`running` counts the deploy, rollback or destroy that changes the Environment
+now (0 or 1), `queued` the requests waiting in its queue. The plan or diff
+describes the Environment as it is now, so it may still change. The field is
+absent when neither runs or waits, and it only appears on the response that
+created the plan-only Deployment or answered the dry run, never on later reads.
+
+### State lock
+
+Every mode of an Environment uses the same Terraform/OpenTofu state: the
+backend block that `internal/graphs/tofu.go` generates is keyed by the
+Environment UUID (Kubernetes `secret_suffix`, S3 `key`, GCS `prefix`, AzureRM
+`key`). The Runner (v3.1.0) runs `init`, then `plan -out plan.tfplan` in every
+mode, then `apply plan.tfplan` in deploy mode, without `-lock=false` or
+`-lock-timeout`. Each step therefore takes the backend's state lock and fails
+at once when another process holds it (Kubernetes Lease, GCS lock file, AzureRM
+blob lease; the S3 backend as generated has no lock at all). A plan run beside
+a deploy would make whichever step locks second fail, including the deploy's
+own plan or apply. The Data Plane therefore keeps plan runs apart from every
+other Runner of the Environment: a running plan counts as busy for the queue,
+and a plan does not start while another Runner runs. A plan that runs beside a
+deploy needs the Runner to plan without the lock (`plan -lock=false` in
+plan-only mode; a plan persists no state) and to wait briefly for the lock in
+the other modes (`-lock-timeout`), because the Kubernetes, GCS and AzureRM
+backends still lock once to create an empty state for an Environment that has
+none.
 
 ## Promotion
 
@@ -100,13 +161,16 @@ promoter never jumps to the next item. Inside the claim:
    triggers promotion again. If it is fenced by an unreconciled
    plugin-dispatched Deployment, every waiting item is rejected
    (`outcome_unreconciled`).
-3. The Environment is read from Core, the requester's `deployment_write`
+3. A `halt_on_failure` head whose predecessor failed is settled `rejected` with
+   `previous_deployment_failed` and the next item is tried at once, without
+   contacting Core (see "Halt on failure").
+4. The Environment is read from Core, the requester's `deployment_write`
    permission is checked again, and the stored request is created through the
    unchanged Deployment path with a fresh Core admission attempt, inside a
    savepoint. `CreateDeployment` lets only this head pass the queue check.
-4. Success settles the item `dispatched` with the new Deployment in the same
+5. Success settles the item `dispatched` with the new Deployment in the same
    transaction; the `deployment.created` outbox message follows the commit.
-5. Failure rolls back to the savepoint, seals the Core admission absent and
+6. Failure rolls back to the savepoint, seals the Core admission absent and
    classifies the error:
 
 | Class | Errors | Effect |
@@ -116,7 +180,42 @@ promoter never jumps to the next item. Inside the claim:
 | fence | `outcome_unreconciled` | every waiting item of the Environment is rejected |
 
 A failed predecessor does not stop the queue: an ordinary failed Deployment
-never blocks the next one.
+never blocks the next one, unless that item asked to halt.
+
+### Halt on failure
+
+A request may set `halt_on_failure: true` (default `false`). The item is then
+not promoted when the Deployment it waited for failed; it ends `rejected` with
+the reason code `previous_deployment_failed` and a message naming that
+Deployment, and the queue continues with the next item. Only the item that
+asked halts; items without the flag behave as before.
+
+The predecessor is the Environment's latest deploy, rollback or destroy
+Deployment when the item reaches the head of the queue. Those run strictly one
+after another, so it is the Deployment that ran immediately before the item,
+whether it came from an earlier queue item, a direct request or a plugin
+dispatch. It counts only when the item waited for it, that is when it had not
+ended yet when the item was enqueued:
+
+| Situation at promotion | Result |
+|---|---|
+| Predecessor ended failed after the item was enqueued | `rejected`, `previous_deployment_failed` |
+| Predecessor succeeded | promoted |
+| Predecessor had already ended when the item was enqueued (the item waited only for Core to settle it, for a plan run or for items ahead) | promoted, even if it failed |
+| No deploy, rollback or destroy ever ran in the Environment | promoted |
+| Several Deployments ran while the item waited | only the last counts: a later success supersedes an earlier failure, a later failure halts |
+| Items ahead were cancelled, expired or rejected | they never became Deployments and are not predecessors; the item looks past them |
+| Predecessor force-failed by an operator | it is `failed` and counts as a failure (Deployments have no cancelled state) |
+| Predecessor is a failed plugin-dispatched Deployment with an unreconciled outcome | the fence wins: every waiting item is rejected `outcome_unreconciled`, as before |
+
+Plan runs never count, neither as predecessor nor as "ran while waiting". One
+failure halts every waiting item with the flag, because none of them can be
+preceded by anything else. To decide "had not ended yet", enqueueing a
+`halt_on_failure` item records the Environment's current Deployment in
+`enqueued_after_deployment_id` when it had already ended, under the
+Environment lock. Promotion checks the flag before
+Core admission, so a halted item never reaches Core. A request that starts at
+once never halts, because it waited for nothing.
 
 ### Triggers
 
@@ -201,7 +300,15 @@ Environment's Deployment data also deletes its queue history.
 
 Schema 33 is additive. Its Down migration refuses to run while any item is
 `queued`, so accepted work is never dropped silently; cancel or let waiting
-items settle first. Old clients see no change: without `when_busy` they get the
-same 409, now with the stable code `environment_busy` instead of `HTTP-409`.
-Conflicts caused by Core admission keep their HTTP status and carry Core's
-code when Core sends one.
+items settle first. Schema 34 adds `halt_on_failure` (default `false`, so items
+that waited during the upgrade keep going after a failure, as before) and
+`enqueued_after_deployment_id`. Its Down migration refuses to run while a
+`queued` item has `halt_on_failure`, because dropping the flag would let that
+item start after a failure it asked to halt on.
+
+Behaviour change for clients that omit `when_busy`: a busy Environment now
+answers 202 with a queue item instead of 409 `environment_busy`, and the
+request runs later. Clients that must fail fast send `when_busy: reject`.
+Plan-only requests and dry runs with `when_busy: queue` are no longer refused
+with 400. Conflicts caused by Core admission keep their HTTP status and carry
+Core's code when Core sends one.
