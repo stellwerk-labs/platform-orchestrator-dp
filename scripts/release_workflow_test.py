@@ -65,6 +65,17 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("./cmd/authorization-migrate", build)
             self.assertIn("opt/server/authorization-migrate", (ROOT / "scripts/check-server-artifact.sh").read_text())
 
+    def test_installer_actual_version_expression_is_strict(self):
+        import subprocess
+        installer = (ROOT / "scripts/install-oras.sh").read_text()
+        patterns = re.findall(r"grep -E '([^']+)'", installer)
+        self.assertEqual(len(patterns), 1)
+        for version, accepted in (("1.3.4", True), ("1x3x4", False), ("1.3.5", False),
+                                  ("1.3.4+Homebrew", False), ("11.3.4", False)):
+            result = subprocess.run(["grep", "-E", patterns[0]], input="Version:\t" + version + "\n",
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode == 0, accepted, version)
+
     def test_neutral_checkout_directory_preserves_component_contracts(self):
         with tempfile.TemporaryDirectory() as temporary:
             checkout = Path(temporary) / "source"

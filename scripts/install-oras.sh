@@ -14,4 +14,4 @@ curl --fail --silent --show-error --location --max-time 120 \
   "https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_linux_$arch.tar.gz" -o "$archive"
 test "$(sha256sum "$archive" | awk '{print $1}')" = "$checksum"
 tar -xzf "$archive" -C "$output" oras
-"$output/oras" version | grep -E '^Version:[[:space:]]+1\\.3\\.4$' >/dev/null
+"$output/oras" version | grep -E '^Version:[[:space:]]+1\.3\.4$' >/dev/null

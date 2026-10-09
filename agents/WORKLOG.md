@@ -1,5 +1,9 @@
 # Worklog
 
+## Exact ORAS installer version validation
+
+- Corrected shell ERE escaping in the Linux ORAS1.3.4 installer. The regression executes the actual installer expression with valid and invalid version output, rejecting wildcard dots and version suffixes without changing approved tool/version/archive checksums.
+
 ## Server artifact foundation
 
 - Added pinned image bases, deterministic Go build settings, architecture-specific /licenses collection, exact SDK source-license provenance, and safe OCI payload inspection/scanning.
