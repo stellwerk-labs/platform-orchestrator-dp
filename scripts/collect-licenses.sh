@@ -17,7 +17,7 @@ work="$(mktemp -d)"
 trap 'rm -r -- "$work"' EXIT HUP INT TERM
 # Only this application's own module is covered by its root license. All
 # external dependencies, including replaced SDKs, must have actual notices.
-go list -deps -f '{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}|{{with .Replace}}{{if not .Version}}local{{end}}{{end}}{{end}}' "$@" > "$work/modules"
+go list -deps -f '{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}|{{with .Replace}}{{if .Version}}remote{{else}}local{{end}}{{end}}{{end}}' "$@" > "$work/modules"
 sort -u "$work/modules" | sed '/^$/d' > "$work/unique"
 ignore="$module"
 mkdir "$work/declared"
@@ -28,6 +28,16 @@ while IFS='|' read -r dependency version module_dir replacement; do
       test "$module_dir" = "$root/shared" || { echo "own SDK must be the source checkout snapshot" >&2; exit 1; }
       continue ;;
     "$module"*) echo "external module collides with application ignore prefix" >&2; exit 1 ;;
+  esac
+  case "$dependency" in
+    github.com/oapi-codegen/nullable)
+      test "$version" = v1.2.0 && test -z "$replacement"
+      metadata="$(go mod download -json "$dependency@$version")"
+      module_sum="$(printf '%s\n' "$metadata" | sed -n 's/^[[:space:]]*"Sum": "\(h1:[^"]*\)"[,]*$/\1/p')"
+      sh "$root/scripts/verify-nullable-notice.sh" "$dependency" "$version" "$replacement" "$module_dir" "$module_sum" "$work/nullable"
+      ignore="$ignore,$dependency"
+      continue ;;
+    github.com/oapi-codegen/nullable*) echo "module collides with exact nullable notice correction" >&2; exit 1 ;;
   esac
   declaration="$(awk -F '|' -v module="$dependency" '$1 == module {print}' "$root/scripts/declared-licenses.tsv")"
   test -n "$declaration" || continue
@@ -67,6 +77,10 @@ done < "$work/unique"
 # Prefixes are limited to this repository and byte-verified, explicitly declared
 # SDK modules. Dependencies of ignored packages remain checked by go-licenses.
 go-licenses save "$@" --ignore "$ignore" --save_path "$output"
+if test -d "$work/nullable"; then
+  mkdir -p "$output/github.com/oapi-codegen/nullable"
+  cp "$work/nullable/"* "$output/github.com/oapi-codegen/nullable/"
+fi
 mkdir -p "$output/application" "$output/go"
 cp "$root/LICENSE" "$output/application/LICENSE"
 goroot="$(go env GOROOT)"

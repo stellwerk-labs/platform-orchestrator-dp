@@ -17,3 +17,8 @@
 
 - Restricted the application-prefix exception to its root module and exact same-checkout shared SDK, shipping the actual own SDK license explicitly. Similarly prefixed external modules fail closed. Mandatory helper tests and shell checks passed.
 - Made workflow contracts identify the exact component module from go.mod rather than checkout directory name. Added a neutral source-checkout regression and unknown-module rejection, preserving DP publisher and IAM migrator assertions in isolated private CI.
+
+## Exact nullable legal-notice correction
+
+- Reused the reviewed client collector's exact nullable v1.2.0 module checksum, original header hash and authoritative Apache-2.0 supplement hash. Preserve original bytes and record the supplemental source separately; reject replacements, different versions, hash changes and prefix collisions. Other unknown licenses remain fatal.
+- The native IAM production graph does not include nullable. DP production does, and CP uses the DP SDK. No exception is silently extended to nullable v1.1.0.

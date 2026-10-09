@@ -32,6 +32,13 @@ SDKs require the actual module-cache LICENSE plus checksum-database module
 identity and source commit from Go's download metadata. This is an explicit
 provenance declaration, not a wildcard exemption for an organization.
 
+The exact unreplaced nullable v1.2.0 module has a header-only Apache-2.0
+LICENSE that this classifier rejects. Its approved correction requires the
+compiled module identity/version, module checksum and original header hash.
+It preserves that original and adds the hash-pinned authoritative Apache-2.0
+text with separate source provenance. Different versions, replacements, changed
+bytes and prefix collisions fail; other unknown libraries remain fatal.
+
 ## Inspection and reproducibility
 
 scripts/check-server-artifact.sh OCI_LAYOUT NEW_OUTPUT [amd64,arm64] validates

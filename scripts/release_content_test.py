@@ -278,5 +278,58 @@ class ContentTests(unittest.TestCase):
             helper.prepare(repo, sha, "shared", repo / "shared")
 
 
+
+    def test_nullable_correction_requires_every_exact_boundary(self):
+        directory = self.root / "nullable"
+        directory.mkdir()
+        header = (ROOT / "scripts/release-notices/nullable-header.txt").read_bytes()
+        (directory / "LICENSE").write_bytes(header)
+        root = self.root / "collector"
+        (root / "scripts/release-notices").mkdir(parents=True)
+        helper = root / "scripts/verify-nullable-notice.sh"
+        helper.write_bytes((ROOT / "scripts/verify-nullable-notice.sh").read_bytes())
+        supplement = root / "scripts/release-notices/apache-2.0.txt"
+        original_supplement = (ROOT / "scripts/release-notices/apache-2.0.txt").read_bytes()
+        supplement.write_bytes(original_supplement)
+        arguments = ["github.com/oapi-codegen/nullable", "v1.2.0", "", str(directory),
+                     "h1:VflFkDW980KhBPiFF7nWSyjg+r4Obqj8lXipV0UkP5w="]
+        def invoke(args, name):
+            return subprocess.run(["sh", str(helper), *args, str(self.root / name)],
+                                  capture_output=True, timeout=10)
+        self.assertEqual(invoke(arguments, "valid").returncode, 0)
+        self.assertEqual((self.root / "valid/LICENSE").read_bytes(), header)
+        self.assertEqual((self.root / "valid/LICENSE-2.0.txt").read_bytes(), original_supplement)
+        for index, value in ((0, arguments[0] + "-fork"), (0, arguments[0] + "/v2"),
+                             (1, "v1.1.0"), (2, "local"), (2, "remote"), (4, "wrong-sum")):
+            changed = list(arguments)
+            changed[index] = value
+            self.assertNotEqual(invoke(changed, "wrong-" + str(index)).returncode, 0)
+        (directory / "LICENSE").write_bytes(header + b"changed")
+        self.assertNotEqual(invoke(arguments, "wrong-header").returncode, 0)
+        (directory / "LICENSE").write_bytes(header)
+        supplement.write_bytes(original_supplement + b"changed")
+        self.assertNotEqual(invoke(arguments, "wrong-supplement").returncode, 0)
+
+
+
+
+    def test_real_nullable_production_graph_keeps_original_and_supplement(self):
+        application = self.root / "application"
+        application.mkdir()
+        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.2\n\nrequire github.com/oapi-codegen/nullable v1.2.0\n")
+        (application / "go.sum").write_text("github.com/oapi-codegen/nullable v1.2.0 h1:VflFkDW980KhBPiFF7nWSyjg+r4Obqj8lXipV0UkP5w=\n"
+                                           "github.com/oapi-codegen/nullable v1.2.0/go.mod h1:KUZ3vUzkmEKY90ksAmit2+5juDIhIZhfDl+0PwOQlFY=\n")
+        (application / "main.go").write_text('package main\nimport _ "github.com/oapi-codegen/nullable"\nfunc main() {}\n')
+        output = self.root / "notices"
+        result = subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"), str(output), "./..."],
+                                cwd=application, env=dict(os.environ, GOARCH="amd64"), capture_output=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual((output / "github.com/oapi-codegen/nullable/LICENSE").read_bytes(),
+                         (ROOT / "scripts/release-notices/nullable-header.txt").read_bytes())
+        self.assertEqual((output / "github.com/oapi-codegen/nullable/LICENSE-2.0.txt").read_bytes(),
+                         (ROOT / "scripts/release-notices/apache-2.0.txt").read_bytes())
+
+
+
 if __name__ == "__main__":
     unittest.main()
