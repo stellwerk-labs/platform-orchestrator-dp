@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Fail-closed publication wiring contracts, without invoking a publisher."""
+from pathlib import Path
+import re
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_every_image_publisher_validates_complete_local_layout_first(self):
+        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        publishers = 0
+        for job in re.split(r"(?m)^  [a-z][a-z0-9-]+:\n", workflow)[1:]:
+            if "oras cp --no-tty --from-oci-layout" not in job:
+                continue
+            publishers += 1
+            self.assertIn("github.repository == 'stellwerk-labs/", job)
+            self.assertIn("persist-credentials: false", job)
+            self.assertNotIn("          push: true", job)
+            self.assertEqual(job.count("          push: false"), 2)
+            self.assertEqual(job.count("          sbom: true"), 2)
+            self.assertEqual(job.count("          provenance: mode=max"), 2)
+            self.assertEqual(job.count("rewrite-timestamp=true"), 2)
+            self.assertEqual(job.count("SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}"), 2)
+            self.assertIn("no-cache: true", job)
+            gate = job.index("bash scripts/check-server-artifact.sh")
+            sbom = job.index("bash scripts/generate-server-sbom.sh")
+            comparison = job.index("python3 scripts/release_content.py compare")
+            publication = job.index("oras cp --no-tty --from-oci-layout")
+            self.assertLess(gate, comparison)
+            self.assertLess(comparison, sbom)
+            self.assertLess(sbom, publication)
+            evidence_scan = job.index('bash scripts/scan-release-content.sh "$RUNNER_TEMP/server-evidence"')
+            self.assertLess(sbom, evidence_scan)
+            self.assertLess(evidence_scan, publication)
+            self.assertIn("server-evidence/", job)
+            self.assertIn('test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"', job)
+            self.assertIn("moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea", job)
+        expected = 3 if ROOT.name.startswith("platform-orchestrator-dp") else 2
+        self.assertEqual(publishers, expected)
+
+    def test_production_dockerfile_carries_notices_and_all_executables(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertEqual(len(re.findall(r"(?m)^FROM .*@sha256:[0-9a-f]{64}", dockerfile)), 2)
+        self.assertIn("/opt/licenses /licenses", dockerfile)
+        self.assertNotIn("apk add", dockerfile)
+        build = (ROOT / "scripts/build-server-artifact.sh").read_text()
+        self.assertIn("-trimpath -buildvcs=false", build)
+        self.assertIn("GOAMD64=v1 GOARM64=v8.0", build)
+        if ROOT.name.startswith("platform-orchestrator-iam"):
+            self.assertIn("./cmd/authorization-migrate", build)
+            self.assertIn("opt/server/authorization-migrate", (ROOT / "scripts/check-server-artifact.sh").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

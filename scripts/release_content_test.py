@@ -32,6 +32,7 @@ def layer(entries):
     with tarfile.open(fileobj=raw, mode="w") as archive:
         for name, data in entries.items():
             entry = tarfile.TarInfo(name)
+            entry.mode = 0o755 if name.startswith("opt/server/") else 0o644
             if isinstance(data, tuple):
                 entry.type, entry.linkname = data
             else:
@@ -56,7 +57,7 @@ def license_bundle(arch):
     return {"licenses/" + name: data for name, data in files.items()}
 
 
-def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/server",)):
+def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/server",), missing_provenance=False):
     root.mkdir()
     (root / "oci-layout").write_bytes(encoded({"imageLayoutVersion": "1.0.0"}))
     blobroot = root / "blobs/sha256"
@@ -85,6 +86,8 @@ def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/
         manifests.append(descriptor)
         statements = [{"_type": "https://in-toto.io/Statement/v0.1", "subject": [{"digest": {"sha256": descriptor["digest"][7:]}}],
                        "predicateType": kind, "predicate": {}} for kind in ("https://spdx.dev/Document", "https://slsa.dev/provenance/v0.2")]
+        if missing_provenance:
+            statements.pop()
         attestation = {"schemaVersion": 2, "config": store(b"{}", "application/vnd.oci.image.config.v1+json"),
                        "layers": [store(encoded(statement), "application/vnd.in-toto+json") for statement in statements]}
         attestation_descriptor = store(encoded(attestation), "application/vnd.oci.image.manifest.v1+json")
@@ -132,6 +135,14 @@ class ContentTests(unittest.TestCase):
     def test_traversal_fails(self):
         with self.assertRaises(ValueError):
             self.export(extra={"../escape": b"no"})
+
+    def test_required_payload_link_ancestor_fails(self):
+        with self.assertRaises(ValueError):
+            self.export(extra={"opt": (tarfile.SYMTYPE, "/other")})
+
+    def test_missing_buildkit_provenance_fails(self):
+        with self.assertRaises(ValueError):
+            self.export(missing_provenance=True)
 
     def test_corrupt_blob_fails(self):
         image = self.root / "image"
@@ -191,6 +202,14 @@ class ContentTests(unittest.TestCase):
         directory.mkdir()
         (directory / "link").symlink_to(self.root / "elsewhere")
         self.assertNotEqual(self.scanner(directory).returncode, 0)
+
+    def test_private_reference_in_relative_path_fails_without_echo(self):
+        directory = self.root / "scan"
+        nested = directory / "seeded-private-owner-fixture"
+        nested.mkdir(parents=True)
+        (nested / "NOTICE").write_text("Harmless content.\\n")
+        with self.assertRaises(ValueError):
+            content.scan(directory, ["seeded-private-owner-fixture"])
 
     def test_real_per_architecture_license_collection(self):
         if not shutil.which("go-licenses"):

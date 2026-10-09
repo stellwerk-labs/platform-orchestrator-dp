@@ -19,7 +19,7 @@ def blob(layout, descriptor):
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", value) or type(size) is not int or size < 0:
         raise ValueError("invalid OCI descriptor")
     path = layout / "blobs" / "sha256" / value[7:]
-    if path.is_symlink() or not path.is_file():
+    if (layout / "blobs").is_symlink() or path.parent.is_symlink() or path.is_symlink() or not path.is_file():
         raise ValueError("missing or symlinked OCI blob")
     data = path.read_bytes()
     if len(data) != size or digest(data) != value:
@@ -73,6 +73,8 @@ def export(layout, output, architectures, own_module, binaries):
     layout, output = Path(layout), Path(output)
     if output.exists() or layout.is_symlink():
         raise ValueError("inspection output must be new")
+    if (layout / "oci-layout").is_symlink() or (layout / "index.json").is_symlink():
+        raise ValueError("symlinked OCI metadata")
     if json.loads((layout / "oci-layout").read_text()) != {"imageLayoutVersion": "1.0.0"}:
         raise ValueError("unsupported OCI layout")
     index = json.loads((layout / "index.json").read_text())
@@ -106,6 +108,8 @@ def export(layout, output, architectures, own_module, binaries):
                 if layer["mediaType"] != "application/vnd.in-toto+json":
                     raise ValueError("unexpected attestation layer")
                 statement = json.loads(data)
+                if statement.get("_type") not in ("https://in-toto.io/Statement/v0.1", "https://in-toto.io/Statement/v1"):
+                    raise ValueError("unsupported attestation statement")
                 predicates.add(statement.get("predicateType"))
                 if not any(subject.get("digest", {}).get("sha256") == reference.removeprefix("sha256:")
                            for subject in statement.get("subject", [])):
@@ -124,7 +128,7 @@ def export(layout, output, architectures, own_module, binaries):
             raise ValueError("image config architecture mismatch")
         if image_config.get("Entrypoint") != ["/opt/server/server"] or image_config.get("User") not in ("65532", "65532:65532", "nonroot"):
             raise ValueError("unexpected server entrypoint or user")
-        files, diff_ids, layers = {}, [], []
+        files, modes, diff_ids, layers = {}, {}, [], []
         for number, layer in enumerate(manifest["layers"]):
             data = blob(layout, layer)
             media = layer["mediaType"]
@@ -164,7 +168,9 @@ def export(layout, output, architectures, own_module, binaries):
                         # Retain original bytes, including files hidden by later whiteouts.
                         (raw_root / str(entry_number)).write_bytes(content)
                         files[name] = content
+                        modes[name] = entry.mode
                     elif entry.isdir():
+                        files.pop(name, None)
                         continue
                     elif entry.issym() or entry.islnk():
                         # Never create attacker-controlled links on the host. Their
@@ -178,10 +184,13 @@ def export(layout, output, architectures, own_module, binaries):
             raise ValueError("layer diff ID mismatch")
         binary_hashes = {}
         destination = output / arch
+        for name in list(binaries) + [name for name in files if name.startswith("licenses/")]:
+            if any(str(parent) in files for parent in PurePosixPath(name).parents):
+                raise ValueError("required payload has a non-directory ancestor")
         for name in binaries:
             content = files.get(name)
             machine = 62 if arch == "amd64" else 183
-            if not isinstance(content, bytes) or len(content) < 20 or content[:6] != b"\x7fELF\x02\x01" or int.from_bytes(content[18:20], "little") != machine:
+            if not isinstance(content, bytes) or not modes.get(name, 0) & 0o111 or len(content) < 20 or content[:6] != b"\x7fELF\x02\x01" or int.from_bytes(content[18:20], "little") != machine:
                 raise ValueError("missing or wrong-architecture server executable")
             target = destination / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +234,9 @@ def scan(directory, forbidden=()):
               rb"\bhttps?://[a-z0-9.-]+\.(?:internal|localdomain)\b"] + [re.escape(value.encode()) for value in forbidden if value]
     text = [rb"\bWX[0-9]+\b", rb"\b(?:S1\.[0-9]+|PM[0-9]{2}|MO[0-9]{2}|[QCD][0-9]{2})\b"]
     for path in root.rglob("*"):
+        relative = path.relative_to(root).as_posix().encode()
+        if any(re.search(pattern, relative) for pattern in common + text):
+            raise ValueError("private reference scan found prohibited content")
         if path.is_symlink():
             raise ValueError("refusing symlinked scan content")
         if path.is_file():

@@ -16,9 +16,10 @@ ancestor LICENSE, COPYING, NOTICE and PATENTS files. /licenses/modules.txt,
 target.txt and manifest.sha256 bind the actual target graph and shipped bytes.
 Tests and tool dependencies are not substituted for the production graph.
 
-The classifier does not recognize this repository's EUPL text. Only the exact SDK
-module identities in scripts/sdk-licenses.tsv have a declared EUPL exception,
-bound to reviewed LICENSE bytes and Git blob identity. Their dependency graphs
+The classifier does not recognize this repository's EUPL text. Only the exact EUPL
+module identities in scripts/declared-licenses.tsv have a declared EUPL exception,
+bound to reviewed LICENSE bytes and Git blob identity. Published golib and graph module declarations have the same exact-byte checks.
+Their dependency graphs
 remain checked. Other unknown or absent external licenses fail the build.
 
 For an unpublished SDK, scripts/prepare-sdk-license.py SOURCE_REPO SOURCE_SHA
@@ -42,7 +43,7 @@ whiteouts, alongside image configurations and attestation statements.
 
 The mandatory pinned gitleaks scanner is redacted and emits no findings report.
 Because gitleaks skips binaries, printable strings from NUL-containing files are
-also streamed through its stdin scanner. Concrete private paths/owners/URLs are
+also streamed through its stdin scanner. Concrete private paths/owners/URLs, including relative artifact paths, are
 checked in binary bytes as well as text. Short planning-ID heuristics apply only
 to text to avoid random machine-code collisions. No source-test allowlist is
 applied to these server artifacts.
@@ -50,6 +51,8 @@ applied to these server artifacts.
 Release/seed callers must supply SOURCE_DATE_EPOCH from the exact source commit
 and use BuildKit's image exporter rewrite-timestamp=true. The Dockerfile's epoch
 zero default is for ordinary development builds, not release qualification.
+The workflows pin the BuildKit multi-platform index as well as the action,
+and explicitly select OCI media types and gzip level 6 for both builds.
 Retain BuildKit SBOM and mode=max provenance. scripts/generate-server-sbom.sh
 adds an offline SPDX scan with the same pinned Syft index as the runtime, for each
 actual platform manifest, and checks coverage of the production module graph.

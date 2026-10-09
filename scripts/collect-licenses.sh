@@ -26,7 +26,7 @@ while IFS='|' read -r dependency version module_dir replacement; do
     "$module"|"$module/"*) continue ;;
     "$module"*) echo "external module collides with application ignore prefix" >&2; exit 1 ;;
   esac
-  declaration="$(awk -F '|' -v module="$dependency" '$1 == module {print}' "$root/scripts/sdk-licenses.tsv")"
+  declaration="$(awk -F '|' -v module="$dependency" '$1 == module {print}' "$root/scripts/declared-licenses.tsv")"
   test -n "$declaration" || continue
   checksum="$(printf '%s\n' "$declaration" | cut -d '|' -f 3)"
   license_blob="$(printf '%s\n' "$declaration" | cut -d '|' -f 4)"
@@ -55,10 +55,11 @@ done < "$work/unique"
 # go-licenses uses package prefixes, not module identities. Ensure a declared
 # SDK exception cannot silently cover a different module with a similar name.
 while IFS='|' read -r dependency version module_dir replacement; do
+  if awk -F '|' -v module="$dependency" '$1 == module {found=1} END {exit !found}' "$root/scripts/declared-licenses.tsv"; then continue; fi
   while IFS='|' read -r sdk _spdx checksum license_blob; do
     case "$sdk" in ""|\#*) continue ;; esac
     case "$dependency" in "$sdk") ;; "$sdk"*) echo "external module collides with declared SDK prefix" >&2; exit 1 ;; esac
-  done < "$root/scripts/sdk-licenses.tsv"
+  done < "$root/scripts/declared-licenses.tsv"
 done < "$work/unique"
 # Prefixes are limited to this repository and byte-verified, explicitly declared
 # SDK modules. Dependencies of ignored packages remain checked by go-licenses.

@@ -10,7 +10,7 @@ output="$(cd "$output" && pwd)"
 # The Go checksum database authenticates the module graph; additionally bind
 # this tool's source archive to the reviewed module checksum.
 export GOTOOLCHAIN="$release_go_version" GOWORK=off GOSUMDB=sum.golang.org GOENV=off
-unset GOFLAGS GOPRIVATE GONOSUMDB GONOPROXY
+unset GOFLAGS GOEXPERIMENT GOOS GOARCH GOPRIVATE GONOSUMDB GONOPROXY
 metadata="$(go mod download -json "$go_licenses_module@$go_licenses_version")"
 jq -e --arg sum "$go_licenses_sum" '.Sum == $sum' <<<"$metadata" >/dev/null
 GOBIN="$output" go install "$go_licenses_module@$go_licenses_version"

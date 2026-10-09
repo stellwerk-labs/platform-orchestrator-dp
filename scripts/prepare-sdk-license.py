@@ -43,7 +43,7 @@ def prepare(repo, sha, subdirectory, destination):
     license_bytes = git(repo, "show", sha + ":LICENSE")
     license_blob = git(repo, "rev-parse", sha + ":LICENSE").decode().strip()
     module = re.search(rb"(?m)^module (\S+)\s*$", expected["go.mod"]).group(1).decode()
-    policy = Path(__file__).with_name("sdk-licenses.tsv").read_text().splitlines()
+    policy = Path(__file__).with_name("declared-licenses.tsv").read_text().splitlines()
     approved = [line.split("|") for line in policy if line and not line.startswith("#") and line.split("|")[0] == module]
     if len(approved) != 1:
         raise ValueError("SDK has no exact declared license policy")
