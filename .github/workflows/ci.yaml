@@ -204,7 +204,8 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ inputs.candidate_tag }}
         run: |
           set -euo pipefail
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout@$IMAGE_DIGEST" "$IMAGE_TAG"
+          OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
+          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
 
       - name: Verify candidate image by immutable digest
@@ -347,7 +348,8 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:ci-seed-${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout@$IMAGE_DIGEST" "$IMAGE_TAG"
+          OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
+          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
 
       - name: Record the immutable CI dependency pin
@@ -666,7 +668,8 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout@$IMAGE_DIGEST" "$IMAGE_TAG"
+          OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
+          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
 
       - name: Verify published image

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import string
 import subprocess
@@ -96,6 +97,7 @@ def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/
                                                    "vnd.docker.reference.digest": descriptor["digest"]})
         manifests.append(attestation_descriptor)
     descriptor = store(encoded({"schemaVersion": 2, "manifests": manifests}), "application/vnd.oci.image.index.v1+json")
+    descriptor["annotations"] = {"org.opencontainers.image.ref.name": "qualification"}
     (root / "index.json").write_bytes(encoded({"schemaVersion": 2, "manifests": [descriptor]}))
 
 
@@ -117,8 +119,8 @@ class ContentTests(unittest.TestCase):
         return content.export(image, output, ["amd64", "arm64"], MODULE,
                               list(options.get("binaries", ("opt/server/server",))))
 
-    def scanner(self, directory):
-        return subprocess.run(["bash", str(ROOT / "scripts/scan-release-content.sh"), str(directory)],
+    def scanner(self, directory, source=ROOT):
+        return subprocess.run(["bash", str(source / "scripts/scan-release-content.sh"), str(directory)],
                               text=True, capture_output=True, timeout=30)
 
     def test_platform_bytes_notices_and_attestations(self):
@@ -190,6 +192,167 @@ class ContentTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn(token, result.stdout + result.stderr)
 
+    def kin_source_pair(self):
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off")
+        metadata = json.loads(subprocess.check_output(
+            ["go", "mod", "download", "-json", content.KIN_MODULE + "@" + content.KIN_VERSION],
+            env=environment, text=True, timeout=30))
+        self.assertEqual(metadata["Sum"], content.KIN_SUM)
+        directory = Path(metadata["Dir"])
+        goroot = Path(subprocess.check_output(["go", "env", "GOROOT"], env=environment, text=True, timeout=15).strip())
+        parts = []
+        for path, line, file_hash, literal_hash in (
+                (directory / "openapi3/validation_error.go", 1518, "420050b8a5b9f92e44cfe2df1d46d2b1ebda5144a05308142ff9542369cb3ea0", content.KIN_BEFORE),
+                (goroot / "src/text/template/option.go", 71, "fae2206d9c10cf31439ba9d616a2f8ead93f8e9b8fc12060fbf9cfbc842c0a43", content.KIN_AFTER)):
+            source = path.read_bytes()
+            self.assertEqual(hashlib.sha256(source).hexdigest(), file_hash)
+            literals = re.findall(r'"(?:[^"\\]|\\.)*"', source.decode().splitlines()[line - 1])
+            values = [json.loads(literal).encode() for literal in literals]
+            matches = [value for value in values if hashlib.sha256(value).hexdigest() == literal_hash]
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(len(matches[0]), 21)
+            parts.append(matches[0])
+        return b"".join(parts)
+
+    def test_exact_binary_exception_boundaries(self):
+        pair = self.kin_source_pair()
+        match = pair[8:34]
+        self.assertEqual(hashlib.sha256(match).hexdigest(), content.KIN_MATCH)
+        data = elf("arm64") + pair + b"\0"
+        finding = {"RuleID": "generic-api-key", "Match": match.decode(), "Secret": match[10:25].decode()}
+        sums = " ".join((content.KIN_MODULE, content.KIN_VERSION, content.KIN_SUM)) + "\n"
+        buildinfo = "fixture: go1.26.2\n\tdep\t" + "\t".join((content.KIN_MODULE, content.KIN_VERSION, content.KIN_SUM)) + "\n"
+        self.assertTrue(content.known_binary_finding(data, finding, sums, buildinfo))
+        changed_context = bytearray(data)
+        changed_context[len(elf("arm64"))] ^= 1
+        negatives = (
+            (bytes(changed_context), finding, sums, buildinfo),
+            (data, dict(finding, Match=finding["Match"] + "x"), sums, buildinfo),
+            (data, dict(finding, Secret="changed"), sums, buildinfo),
+            (data, dict(finding, RuleID="github-pat"), sums, buildinfo),
+            (data, finding, sums.replace(content.KIN_VERSION, "v0.144.1"), buildinfo),
+            (data, finding, sums.replace(content.KIN_SUM, "h1:changed="), buildinfo),
+            (data, finding, sums, buildinfo.replace(content.KIN_VERSION, "v0.144.1")),
+            (data, finding, sums, buildinfo.replace(content.KIN_SUM, "h1:changed=")),
+            (data, finding, sums, buildinfo.replace("go1.26.2", "go1.26.3")),
+            (data, finding, sums, buildinfo + "\t=>\t./replacement\n"),
+            (b"not-ELF\0" + pair, finding, sums, buildinfo),
+            (data + b"\0" + match, finding, sums, buildinfo),
+        )
+        for case in negatives:
+            with self.subTest(case_hash=hashlib.sha256(case[0]).hexdigest()):
+                self.assertFalse(content.known_binary_finding(*case))
+
+    def test_real_go_elf_exception_and_additional_secret(self):
+        pair = self.kin_source_pair()
+        application = self.root / "elf-application"
+        application.mkdir()
+        (application / "go.mod").write_text("module example.org/elf-fixture\n\ngo 1.26.2\n\nrequire "
+                                           + content.KIN_MODULE + " " + content.KIN_VERSION + "\n")
+        (application / "go.sum").write_bytes((ROOT / "go.sum").read_bytes())
+        (application / "main.go").write_text('package main\nimport ("fmt"; _ "github.com/getkin/kin-openapi/openapi3")\n'
+                                            + "func main() { fmt.Print(" + json.dumps(pair.decode()) + ") }\n")
+        directory = self.root / "real-elf-scan"
+        directory.mkdir()
+        executable = directory / "server"
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off",
+                           GOOS="linux", GOARCH="arm64", CGO_ENABLED="0", GOMAXPROCS="2")
+        subprocess.run(["go", "build", "-p=2", "-mod=mod", "-trimpath", "-o", str(executable), "."],
+                       cwd=application, env=environment, check=True, capture_output=True, timeout=120)
+        # The fixture is a separate real source graph, not the component's
+        # dependency graph. Bind the copied scanner to its actual Go lockfile.
+        (application / "scripts").mkdir()
+        for name in ("scan-release-content.sh", "release_content.py", "release-tools.sh", "gitleaks.toml"):
+            shutil.copyfile(ROOT / "scripts" / name, application / "scripts" / name)
+        result = self.scanner(directory, application)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"acceptedBinaryFalsePositives": 1', result.stdout)
+        original = executable.read_bytes()
+        token = "ghp_" + "".join(random.Random(19).sample(string.ascii_letters + string.digits, 36))
+        executable.write_bytes(original + b"\0" + token.encode() + b"\0")
+        result = self.scanner(directory, application)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(token, result.stdout + result.stderr)
+        for before, after in ((content.KIN_VERSION.encode(), b"v0.144.1"),
+                              (content.KIN_SUM.encode(), content.KIN_SUM.replace("hIR", "HIR").encode())):
+            self.assertIn(before, original)
+            executable.write_bytes(original.replace(before, after))
+            self.assertNotEqual(self.scanner(directory, application).returncode, 0)
+
+    def test_binary_scanner_report_failures_are_closed(self):
+        self.assertEqual(content.scanner_findings(0, b"[]", b""), [])
+        for status, output, errors in ((0, b"invalid-json", b""), (0, b"{}", b""),
+                                       (0, b"[{}]", b""), (1, b"[]", b""),
+                                       (2, b"[]", b""), (0, b"[]", b"tool error"),
+                                       (1, b"[null]", b""), (1, b"[{}]", b"")):
+            with self.subTest(status=status, report_hash=hashlib.sha256(output).hexdigest()):
+                with self.assertRaises(ValueError):
+                    content.scanner_findings(status, output, errors)
+
+    def test_artifact_inline_allow_directives_cannot_suppress_secrets(self):
+        token = "ghp_" + "".join(random.Random(31).sample(string.ascii_letters + string.digits, 36))
+        for binary in (False, True):
+            directory = self.root / ("binary-directive" if binary else "text-directive")
+            directory.mkdir()
+            (directory / "content").write_bytes((b"\0" if binary else b"") + token.encode()
+                                                + b" # gitleaks:allow\n")
+            result = self.scanner(directory)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(token, result.stdout + result.stderr)
+
+    def test_artifact_ignore_file_cannot_suppress_secrets(self):
+        directory = self.root / "ignore-file"
+        directory.mkdir()
+        token = "ghp_" + "".join(random.Random(37).sample(string.ascii_letters + string.digits, 36))
+        (directory / "secret.txt").write_text(token + "\n")
+        command = ["gitleaks", "dir", "--redact", "--no-banner", "--log-level", "error",
+                   "--config", str(ROOT / "scripts/gitleaks.toml"), "--report-format", "json",
+                   "--report-path", "-", "."]
+        result = subprocess.run(command, cwd=directory, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        findings = json.loads(result.stdout)
+        self.assertTrue(findings)
+        (directory / ".gitleaksignore").write_text("\n".join(finding["Fingerprint"] for finding in findings) + "\n")
+        self.assertEqual(subprocess.run(command, cwd=directory, capture_output=True, timeout=10).returncode, 0)
+        result = self.scanner(directory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(token, result.stdout + result.stderr)
+
+    def test_secret_in_artifact_filename_fails_without_exception(self):
+        directory = self.root / "path-secret"
+        directory.mkdir()
+        token = "ghp_" + "".join(random.Random(41).sample(string.ascii_letters + string.digits, 36))
+        (directory / token).write_text("Harmless content.\n")
+        result = self.scanner(directory)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(token, result.stdout + result.stderr)
+
+    def test_verified_oci_references_and_sbom_platform_copy(self):
+        report = self.export()
+        image = self.root / "image"
+        self.assertEqual(content.oci_reference(image, report["index"]), "qualification")
+        with self.assertRaises(ValueError):
+            content.oci_reference(image, "sha256:" + "0" * 64)
+        index = json.loads((image / "index.json").read_bytes())
+        changed = json.loads(encoded(index))
+        changed["manifests"][0]["mediaType"] = "application/octet-stream"
+        (image / "index.json").write_bytes(encoded(changed))
+        with self.assertRaises(ValueError):
+            content.oci_reference(image, report["index"])
+        (image / "index.json").write_bytes(encoded(index))
+        selected = self.root / "selected-platform"
+        shutil.copytree(image, selected)
+        inner = json.loads(content.blob(image, index["manifests"][0]))
+        platform = next(item for item in inner["manifests"] if item["platform"] == {"os": "linux", "architecture": "amd64"})
+        (selected / "index.json").write_bytes(encoded({"schemaVersion": 2, "manifests": [platform]}))
+        content.validate_sbom_layout(selected, report["payloads"]["amd64"]["manifest"])
+        with self.assertRaises(ValueError):
+            content.validate_sbom_layout(selected, report["payloads"]["arm64"]["manifest"])
+        platform["mediaType"] = "application/octet-stream"
+        (selected / "index.json").write_bytes(encoded({"schemaVersion": 2, "manifests": [platform]}))
+        with self.assertRaises(ValueError):
+            content.validate_sbom_layout(selected, report["payloads"]["amd64"]["manifest"])
+
     def test_missing_input_and_private_reference_fail_closed(self):
         self.assertNotEqual(self.scanner(self.root / "absent").returncode, 0)
         directory = self.root / "scan"
@@ -238,8 +401,6 @@ class ContentTests(unittest.TestCase):
                                 cwd=application, env=dict(os.environ, GOARCH="amd64"), capture_output=True, timeout=60)
         self.assertNotEqual(result.returncode, 0)
 
-
-
     def test_sdk_declared_license_from_exact_source_commit(self):
         spec = importlib.util.spec_from_file_location("sdk_license", ROOT / "scripts/prepare-sdk-license.py")
         helper = importlib.util.module_from_spec(spec)
@@ -277,8 +438,6 @@ class ContentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             helper.prepare(repo, sha, "shared", repo / "shared")
 
-
-
     def test_nullable_correction_requires_every_exact_boundary(self):
         directory = self.root / "nullable"
         directory.mkdir()
@@ -310,9 +469,6 @@ class ContentTests(unittest.TestCase):
         supplement.write_bytes(original_supplement + b"changed")
         self.assertNotEqual(invoke(arguments, "wrong-supplement").returncode, 0)
 
-
-
-
     def test_real_nullable_production_graph_keeps_original_and_supplement(self):
         application = self.root / "application"
         application.mkdir()
@@ -328,7 +484,6 @@ class ContentTests(unittest.TestCase):
                          (ROOT / "scripts/release-notices/nullable-header.txt").read_bytes())
         self.assertEqual((output / "github.com/oapi-codegen/nullable/LICENSE-2.0.txt").read_bytes(),
                          (ROOT / "scripts/release-notices/apache-2.0.txt").read_bytes())
-
 
 
 if __name__ == "__main__":

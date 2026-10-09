@@ -22,3 +22,10 @@
 
 - Reused the reviewed client collector's exact nullable v1.2.0 module checksum, original header hash and authoritative Apache-2.0 supplement hash. Preserve original bytes and record the supplemental source separately; reject replacements, different versions, hash changes and prefix collisions. Other unknown licenses remain fatal.
 - The native IAM production graph does not include nullable. DP production does, and CP uses the DP SDK. No exception is silently extended to nullable v1.1.0.
+
+## Strict binary scanner qualification
+
+- Added a source/hash/buildinfo-bound exception for the actual IAM migrator's compiler-adjacent benign validation literals. Keep raw Gitleaks reports only in memory, fail malformed/tool-error/unapproved findings, and report sanitized policy/count only.
+- Added real Go ELF and mutation/additional-secret regressions, plus artifact inline-allow and ignore-file suppression regressions. Reject artifact ignore files and isolate stdin scanning. Deduplicate identical raw/merged bytes and batch non-ELF binary strings without exceptions.
+- Helper tests cover notice collection and architecture targets unchanged. Production OCI scanning, Syft and independent payload reproducibility are separate evidence and must be recorded from actual runs before qualification.
+- Added no-exception relative-path secret scanning. Shared OCI reference validation now protects Syft platform copies and all dormant image publishers from digest-only descriptor/media-type loss; wrong index/platform/media-type regressions fail closed.

@@ -46,6 +46,9 @@ class WorkflowTests(unittest.TestCase):
             self.assertLess(evidence_scan, publication)
             self.assertIn("server-evidence/", job)
             self.assertIn('test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"', job)
+            self.assertIn('python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST"', job)
+            self.assertIn('"$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"', job)
+            self.assertNotIn('"$RUNNER_TEMP/server-layout@$IMAGE_DIGEST"', job)
             self.assertIn("moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea", job)
         expected = 3 if component(ROOT) == "dp" else 2
         self.assertEqual(publishers, expected)

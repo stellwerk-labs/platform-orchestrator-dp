@@ -16,13 +16,15 @@ case "$(docker info --format '{{.OSType}}/{{.Architecture}}')" in
 esac
 timeout -k 5s 120s docker pull --quiet --platform "$platform" "$syft_image" >/dev/null
 docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$syft_image" | grep -Fx "$syft_image" >/dev/null
+reference="$(python3 "$root/scripts/release_content.py" oci-reference "$layout" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["index"])' "$inspection/report.json")")"
 while IFS='|' read -r arch manifest; do
   image="$output/image-$arch"
-  timeout -k 5s 120s oras cp --no-tty --from-oci-layout --to-oci-layout \
-    "$layout@$manifest" "$image:scan" >/dev/null
+  timeout -k 5s 120s oras cp --no-tty --platform "linux/$arch" --from-oci-layout --to-oci-layout \
+    "$layout:$reference" "$image:scan" >/dev/null
+  python3 "$root/scripts/release_content.py" sbom-layout "$image" "$manifest"
   timeout -k 5s 240s docker run --rm --pull=never --platform "$platform" --network none --read-only \
     --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
-    --tmpfs /tmp:rw,noexec,nosuid,size=128m --env HOME=/tmp --env SYFT_CHECK_FOR_APP_UPDATE=false \
+    --tmpfs /tmp:rw,noexec,nosuid,size=128m,mode=1777 --env HOME=/tmp --env XDG_CACHE_HOME=/tmp/.cache --env SYFT_CHECK_FOR_APP_UPDATE=false \
     --mount "type=bind,src=$image,dst=/image,readonly" \
     "$syft_image" scan oci-dir:/image -o spdx-json > "$output/$arch.spdx.json"
   python3 - "$output/$arch.spdx.json" "$inspection/$arch/licenses/modules.txt" "$manifest" "$SOURCE_DATE_EPOCH" "$arch" <<'PY'

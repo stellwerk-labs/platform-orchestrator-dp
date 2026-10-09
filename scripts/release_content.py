@@ -4,10 +4,13 @@ import gzip
 import hashlib
 import io
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
+import subprocess
 import sys
 import tarfile
+import tempfile
 
 
 def digest(data):
@@ -25,6 +28,36 @@ def blob(layout, descriptor):
     if len(data) != size or digest(data) != value:
         raise ValueError("OCI blob digest or size mismatch")
     return data
+
+
+def oci_reference(directory, expected):
+    layout = Path(directory)
+    index_file = layout / "index.json"
+    if index_file.is_symlink() or not index_file.is_file():
+        raise ValueError("missing or symlinked OCI index")
+    descriptors = json.loads(index_file.read_bytes()).get("manifests", [])
+    if (len(descriptors) != 1 or descriptors[0].get("digest") != expected
+            or descriptors[0].get("mediaType") != "application/vnd.oci.image.index.v1+json"):
+        raise ValueError("OCI reference differs from inspected index")
+    blob(layout, descriptors[0])
+    tag = descriptors[0].get("annotations", {}).get("org.opencontainers.image.ref.name", "")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):
+        raise ValueError("missing or invalid verified OCI tag")
+    return tag
+
+
+def validate_sbom_layout(directory, expected):
+    layout = Path(directory)
+    index_file = layout / "index.json"
+    if index_file.is_symlink() or not index_file.is_file():
+        raise ValueError("missing or symlinked SBOM OCI index")
+    descriptors = json.loads(index_file.read_bytes()).get("manifests", [])
+    if (len(descriptors) != 1 or descriptors[0].get("digest") != expected
+            or descriptors[0].get("mediaType") != "application/vnd.oci.image.manifest.v1+json"):
+        raise ValueError("SBOM source differs from inspected platform manifest")
+    manifest = json.loads(blob(layout, descriptors[0]))
+    for descriptor in [manifest["config"]] + manifest["layers"]:
+        blob(layout, descriptor)
 
 
 def safe_name(name):
@@ -239,6 +272,8 @@ def scan(directory, forbidden=()):
     text = [rb"\bWX[0-9]+\b", rb"\b(?:S1\.[0-9]+|PM[0-9]{2}|MO[0-9]{2}|[QCD][0-9]{2})\b"]
     for path in root.rglob("*"):
         relative = path.relative_to(root).as_posix().encode()
+        if path.name == ".gitleaksignore":
+            raise ValueError("artifact-provided scanner ignore files are prohibited")
         if any(re.search(pattern, relative) for pattern in common + text):
             raise ValueError("private reference scan found prohibited content")
         if path.is_symlink():
@@ -249,18 +284,122 @@ def scan(directory, forbidden=()):
                 raise ValueError("private reference scan found prohibited content")
 
 
-def binary_strings(directory):
+KIN_MODULE = "github.com/getkin/kin-openapi"
+KIN_VERSION = "v0.144.0"
+KIN_SUM = "h1:hIRcTH+KjLfkLpYU6bSSfdFpi0fZi1fp+hSPi4aQu9Y="
+BINARY_POLICY = "kin-openapi-v0.144.0-go1.26.2-adjacent-validation-v1"
+KIN_MATCH = "41678ee534db27563e9f7717169f4f1b0d2dc051912e2da8f8c9c33e724364b1"
+KIN_SECRET = "8b422fbcf44a15e60d9edc56c00c549209107dee95a0332e5cf560d4cbc961ab"
+KIN_BEFORE = "c70bd16e531b368f911bab880f76007541bf617d3488ae15455b1a389ea524da"
+KIN_AFTER = "feb9e59b60eab45bc01bb66a0e3f5c9a1e432b819c06e0324334cf1266bfcb32"
+
+
+def known_binary_finding(data, finding, sums, buildinfo):
+    """Accept only the reviewed compiler boundary, never a source credential."""
+    if (data[:6] != b"\x7fELF\x02\x01" or len(data) < 20
+            or int.from_bytes(data[18:20], "little") not in (62, 183)
+            or finding.get("RuleID") != "generic-api-key"
+            or not isinstance(finding.get("Match"), str)
+            or not isinstance(finding.get("Secret"), str)):
+        return False
+    match = finding["Match"].encode()
+    if len(match) != 26 or hashlib.sha256(match).hexdigest() != KIN_MATCH:
+        return False
+    secret = finding["Secret"].encode()
+    if len(secret) != 15 or hashlib.sha256(secret).hexdigest() != KIN_SECRET or secret not in match:
+        return False
+    identity = [KIN_MODULE, KIN_VERSION, KIN_SUM]
+    if identity not in [line.split() for line in sums.splitlines()]:
+        return False
+    rows = [line.split() for line in buildinfo.splitlines()]
+    if not buildinfo.splitlines() or not buildinfo.splitlines()[0].endswith(": go1.26.2"):
+        return False
+    deps = [i for i, row in enumerate(rows) if len(row) > 1 and row[:2] == ["dep", KIN_MODULE]]
+    if (len(deps) != 1 or rows[deps[0]] != ["dep"] + identity
+            or (deps[0] + 1 < len(rows) and rows[deps[0] + 1][:1] == ["=>"])):
+        return False
+    # The finding crosses last13/first13 of two complete 21-byte literals.
+    # Validate both adjacent source literals at the same binary occurrence.
+    occurrences = list(re.finditer(re.escape(match), data))
+    for occurrence in occurrences:
+        boundary = occurrence.start() + 13
+        before, after = data[max(0, boundary - 21):boundary], data[boundary:boundary + 21]
+        if (len(before) != 21 or len(after) != 21
+                or hashlib.sha256(before).hexdigest() != KIN_BEFORE
+                or hashlib.sha256(after).hexdigest() != KIN_AFTER):
+            return False
+    return bool(occurrences)
+
+
+def scanner_findings(returncode, stdout, stderr):
+    findings = json.loads(stdout)
+    if (returncode not in (0, 1) or stderr or not isinstance(findings, list)
+            or (returncode == 0) != (len(findings) == 0)
+            or any(not isinstance(finding, dict)
+                   or any(not isinstance(finding.get(key), str) or not finding[key]
+                          for key in ("RuleID", "Match", "Secret")) for finding in findings)):
+        raise ValueError("binary scanner tool or report failure")
+    return findings
+
+
+def binary_scan(directory):
     root = Path(directory)
     if not root.is_dir() or root.is_symlink():
         raise ValueError("missing or symlinked scan input")
+    source = Path(__file__).resolve().parents[1]
+    sums = (source / "go.sum").read_text()
+    accepted = 0
+    seen = set()
+    other_strings = []
+    names = []
+    def inspect(strings):
+        with tempfile.TemporaryDirectory(prefix="binary-scan-") as isolated:
+            result = subprocess.run(["gitleaks", "stdin", "--no-banner", "--log-level", "error",
+                                     "--ignore-gitleaks-allow", "--gitleaks-ignore-path", "/dev/null",
+                                     "--config", str(source / "scripts/gitleaks.toml"),
+                                     "--report-format", "json", "--report-path", "-"],
+                                    input=strings, capture_output=True, timeout=65, cwd=isolated)
+        return scanner_findings(result.returncode, result.stdout, result.stderr)
     for path in root.rglob("*"):
+        names.append(path.relative_to(root).as_posix().encode())
         if path.is_symlink():
             raise ValueError("refusing symlinked scan content")
-        if path.is_file():
-            data = path.read_bytes()
-            if b"\0" in data:
-                for value in re.findall(rb"[\x20-\x7e]{4,}", data):
-                    sys.stdout.buffer.write(value + b"\n")
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if b"\0" not in data:
+            continue
+        identity = hashlib.sha256(data).digest()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        strings = b"\n".join(re.findall(rb"[\x20-\x7e]{4,}", data)) + b"\n"
+        if data[:6] != b"\x7fELF\x02\x01":
+            other_strings.append(strings)
+            continue
+        # Raw finding values exist only in this process's memory. Neither tool
+        # output nor reports are logged or persisted, including on failure.
+        findings = inspect(strings)
+        if not findings:
+            continue
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOENV="off", GOWORK="off")
+        metadata = subprocess.run(["go", "version", "-m", str(path)], capture_output=True,
+                                  env=environment, timeout=15)
+        if metadata.returncode or metadata.stderr:
+            raise ValueError("binary finding lacks verified Go build metadata")
+        buildinfo = metadata.stdout.decode()
+        for finding in findings:
+            if not known_binary_finding(data, finding, sums, buildinfo):
+                raise ValueError("binary secret scan found unapproved content")
+            accepted += 1
+    # Binary data such as timezone databases has no exception. Batch its strings
+    # rather than spawning one scanner process per tiny file. Byte-identical
+    # raw/merged files were already checked once, including hidden lower layers.
+    if other_strings and inspect(b"\n".join(other_strings)):
+        raise ValueError("non-ELF binary secret scan found prohibited content")
+    if inspect(b"\n".join(names)):
+        raise ValueError("artifact path secret scan found prohibited content")
+    print(json.dumps({"acceptedBinaryFalsePositives": accepted, "policy": BINARY_POLICY}, sort_keys=True))
 
 
 def main():
@@ -272,8 +411,12 @@ def main():
         compare(*args)
     elif command == "scan":
         scan(args[0], args[1:])
-    elif command == "strings":
-        binary_strings(*args)
+    elif command == "oci-reference":
+        print(oci_reference(*args))
+    elif command == "sbom-layout":
+        validate_sbom_layout(*args)
+    elif command == "binary-scan":
+        binary_scan(*args)
     else:
         raise ValueError("unknown content command")
 
@@ -281,6 +424,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, EOFError):
+    except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, EOFError, subprocess.SubprocessError):
         print("release content validation failed; inspect locally without exposing findings", file=sys.stderr)
         sys.exit(1)

@@ -80,3 +80,25 @@ including binary-NUL and whiteout-hidden-secret regressions. Passing fixtures is
 not evidence that production images, architecture-specific dependency graphs,
 native hosted suites or two independent production builds have passed.
 Public GOWORK=off dependency resolution remains pending the coordinated SDK tags.
+
+## Binary scanner policy
+
+Artifact-provided ignore files and inline allow comments cannot suppress scans.
+The directory scanner remains strict. Printable NUL-containing content is also
+scanned, with byte-identical raw/merged files deduplicated, unique ELF files
+checked separately, and other binary strings checked without exceptions.
+
+One reviewed binary-only exception covers a generic-api-key false positive
+across two compiler-adjacent 21-byte validation literals. It requires the exact
+finding hash, both complete literal hashes in the same ELF, source go.sum and
+actual Go build metadata for kin-openapi v0.144.0 with its exact module checksum,
+no replacement, and Go 1.26.2. Every occurrence must have the verified context.
+Other findings, malformed reports, scanner errors and additional credentials in
+the same executable fail. Raw finding JSON is retained only in process memory;
+output records only the policy identifier and accepted unique-content count.
+Artifact relative paths are scanned as a separate stream with no exception.
+
+OCI copies resolve a tag only after its root descriptor matches the inspected
+index digest. Syft's platform copy additionally verifies the selected manifest
+digest, media type and every referenced blob. Digest-only local-layout
+resolution is not used, since it can lose the descriptor's image media type.
