@@ -1,5 +1,15 @@
 # Worklog
 
+## Complete raw tar metadata coverage
+
+- Retain every raw layer header, PAX extension, padding and trailing byte in a
+  separate metadata stream, excluding only regular bodies already retained and
+  inspected separately. Validate monotonic body offsets and exact body sizes.
+  Keep the existing binary-only policy bound to per-file executable evidence.
+- Real OCI fixtures with seeded credentials in arbitrary PAX metadata and after
+  tar EOF both reproduced the gap before the correction. Mandatory strict scans
+  reject both afterward without printing their values. Whiteout coverage remains.
+
 ## Immutable BuildKit SBOM generator
 
 - Pinned BuildKit's existing SBOM generator to
@@ -44,3 +54,20 @@
 - Added real Go ELF and mutation/additional-secret regressions, plus artifact inline-allow and ignore-file suppression regressions. Reject artifact ignore files and isolate stdin scanning. Deduplicate identical raw/merged bytes and batch non-ELF binary strings without exceptions.
 - Helper tests cover notice collection and architecture targets unchanged. Production OCI scanning, Syft and independent payload reproducibility are separate evidence and must be recorded from actual runs before qualification.
 - Added no-exception relative-path secret scanning. Shared OCI reference validation now protects Syft platform copies and all dormant image publishers from digest-only descriptor/media-type loss; wrong index/platform/media-type regressions fail closed.
+
+## Complete compressed-layer metadata scanning
+
+- Reproduced scanner bypasses in arbitrary PAX metadata and post-tar trailing
+  bytes, then retained every non-regular-body tar byte alongside the separately
+  inspected original file bodies. Actual seeded credentials now fail closed.
+- Reproduced gzip FNAME metadata bypass. Added bounded RFC 1952 member decoding
+  with zlib CRC/ISIZE validation, retaining optional fields, fixed headers,
+  header checksums, trailers and inter-member padding for strict scanning.
+  Legitimate Distroless FNAME layers remain supported.
+- Real two-member OCI tests cover independent FNAME, FCOMMENT and FEXTRA
+  credentials; malformed members and output/metadata/member bounds fail closed.
+  Scanner logs never contain fixture credentials. Actual final artifact rescans
+  remain required; helper evidence does not qualify different artifact bytes.
+- The new raw stream exposed the public Distroless container home. Exempt only
+  exact `/home/nonroot/` from the developer-home pattern, never from secret or
+  other concrete scans. Private homes and a credential under that path fail.

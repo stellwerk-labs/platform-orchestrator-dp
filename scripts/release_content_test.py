@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("release_content", ROOT / "scripts/release_content.py")
@@ -28,18 +29,35 @@ def encoded(value):
     return json.dumps(value, sort_keys=True).encode()
 
 
-def layer(entries):
+def layer(entries, pax_metadata=None, trailing_bytes=b""):
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w") as archive:
         for name, data in entries.items():
             entry = tarfile.TarInfo(name)
+            entry.pax_headers = pax_metadata or {}
             entry.mode = 0o755 if name.startswith("opt/server/") else 0o644
             if isinstance(data, tuple):
                 entry.type, entry.linkname = data
             else:
                 entry.size = len(data)
             archive.addfile(entry, None if isinstance(data, tuple) else io.BytesIO(data))
-    return raw.getvalue()
+    return raw.getvalue() + trailing_bytes
+
+
+def gzip_member(raw, name=b"", comment=b"", extra=b"", header_crc=False):
+    flags = (8 if name else 0) | (16 if comment else 0) | (4 if extra else 0) | (2 if header_crc else 0)
+    header = b"\x1f\x8b\x08" + bytes([flags]) + b"\0" * 6
+    if extra:
+        header += len(extra).to_bytes(2, "little") + extra
+    if name:
+        header += name + b"\0"
+    if comment:
+        header += comment + b"\0"
+    if header_crc:
+        header += (zlib.crc32(header) & 0xffff).to_bytes(2, "little")
+    compressor = zlib.compressobj(wbits=-15)
+    return (header + compressor.compress(raw) + compressor.flush()
+            + zlib.crc32(raw).to_bytes(4, "little") + (len(raw) & 0xffffffff).to_bytes(4, "little"))
 
 
 def elf(arch):
@@ -58,7 +76,8 @@ def license_bundle(arch):
     return {"licenses/" + name: data for name, data in files.items()}
 
 
-def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/server",), missing_provenance=False):
+def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/server",), missing_provenance=False,
+           pax_metadata=None, trailing_bytes=b"", compress=None):
     root.mkdir()
     (root / "oci-layout").write_bytes(encoded({"imageLayoutVersion": "1.0.0"}))
     blobroot = root / "blobs/sha256"
@@ -73,13 +92,14 @@ def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/
         entries.update({name: elf(arch) for name in binaries})
         if extra:
             entries.update(extra)
-        raws = [layer(entries)]
+        raws = [layer(entries, pax_metadata, trailing_bytes)]
         if whiteout:
             raws.append(layer({"opt/server/.wh.removed": b""}))
         config = {"os": "linux", "architecture": arch, "config": {"User": "65532:65532", "Entrypoint": ["/opt/server/server"]},
                   "rootfs": {"type": "layers", "diff_ids": [content.digest(raw) for raw in raws]}}
         image = {"schemaVersion": 2, "config": store(encoded(config), "application/vnd.oci.image.config.v1+json"),
-                 "layers": [store(gzip.compress(raw, mtime=0), "application/vnd.oci.image.layer.v1.tar+gzip") for raw in raws]}
+                 "layers": [store(compress(raw) if compress else gzip.compress(raw, mtime=0),
+                                  "application/vnd.oci.image.layer.v1.tar+gzip") for raw in raws]}
         if mutate:
             mutate(arch, image, config, store)
         descriptor = store(encoded(image), "application/vnd.oci.image.manifest.v1+json")
@@ -130,6 +150,53 @@ class ContentTests(unittest.TestCase):
         self.assertEqual((self.root / "output/arm64/opt/server/server").read_bytes(), elf("arm64"))
         self.assertFalse((self.root / "output/amd64/etc/link").exists())
         self.assertEqual(self.scanner(self.root / "output").returncode, 0)
+
+    def test_gzip_optional_metadata_in_every_member_is_scanned(self):
+        seed = ("ghp_" + "".join(random.Random(41).sample(string.ascii_letters + string.digits, 36))).encode()
+        for field in ("name", "comment", "extra"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                def compress(raw):
+                    return gzip_member(raw[:512], name=b"public-base-layer", header_crc=True) + gzip_member(
+                        raw[512:], header_crc=True, **{field: seed + b" # gitleaks:allow"})
+                layout(root / "image", compress=compress)
+                content.export(root / "image", root / "output", ["amd64", "arm64"], MODULE, ["opt/server/server"])
+                result = self.scanner(root / "output")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn(seed.decode(), result.stdout + result.stderr)
+
+    def test_gzip_member_validation_and_bounds(self):
+        first = gzip_member(b"first", name=b"base", comment=b"public", extra=b"metadata", header_crc=True)
+        second = gzip_member(b"second")
+        raw, metadata = content.decode_gzip_members(first + b"\0\0" + second + b"\0")
+        self.assertEqual(raw, b"firstsecond")
+        self.assertIn(b"base\0public\0", metadata)
+        self.assertIn(b"metadata", metadata)
+        self.assertTrue(metadata.endswith(b"\0"))
+        for malformed in (b"", b"\0" + first, first[:-1], first + b"not-gzip", first[:3] + b"\xe0" + first[4:],
+                          first[:-8] + bytes([first[-8] ^ 1]) + first[-7:],
+                          first[:-4] + bytes([first[-4] ^ 1]) + first[-3:],
+                          first[:10] + b"\xff\xff" + first[12:],
+                          gzip_member(b"data", name=b"name")[:12]):
+            with self.subTest(malformed=hashlib.sha256(malformed).hexdigest()), self.assertRaises(ValueError):
+                content.decode_gzip_members(malformed)
+        for options in ({"max_output": 4}, {"max_metadata": 8}, {"max_members": 1}, {"max_members": 0}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                content.decode_gzip_members(first + second, **options)
+
+    def test_conventional_container_home_is_not_a_private_home_or_secret_exception(self):
+        target = self.root / "notice"
+        target.write_bytes(b"public container home /home/nonroot/\0")
+        self.assertEqual(self.scanner(self.root).returncode, 0)
+        for private in (b"/home/jay/", b"/Users/nonroot/", b"/home/nonroot-other/"):
+            target.write_bytes(private + b"\0")
+            with self.subTest(private=private), self.assertRaises(ValueError):
+                content.scan(self.root)
+        seed = "ghp_" + "".join(random.Random(43).sample(string.ascii_letters + string.digits, 36))
+        target.write_text("/home/nonroot/" + seed)
+        result = self.scanner(self.root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(seed, result.stdout + result.stderr)
 
     def test_each_shipped_binary_is_required(self):
         self.export(binaries=("opt/server/server", "opt/server/authorization-migrate"))
@@ -191,6 +258,19 @@ class ContentTests(unittest.TestCase):
         result = self.scanner(self.root / "output")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn(token, result.stdout + result.stderr)
+
+    def test_pax_headers_and_unparsed_trailing_bytes_are_scanned(self):
+        token = "ghp_" + "".join(random.Random(29).sample(string.ascii_letters + string.digits, 36))
+        for name, options in (
+                ("pax", dict(pax_metadata={"public.metadata": token + " # gitleaks:allow"})),
+                ("trailing", dict(trailing_bytes=b"\0" + token.encode() + b"\0"))):
+            with self.subTest(metadata=name):
+                image, output = self.root / (name + "-image"), self.root / (name + "-output")
+                layout(image, **options)
+                content.export(image, output, ["amd64", "arm64"], MODULE, ["opt/server/server"])
+                result = self.scanner(output)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn(token, result.stdout + result.stderr)
 
     def kin_source_pair(self):
         environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off")

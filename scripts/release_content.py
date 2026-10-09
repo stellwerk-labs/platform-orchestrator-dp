@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Inspect actual server OCI payloads without materializing untrusted links."""
-import gzip
 import hashlib
 import io
 import json
@@ -11,6 +10,80 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zlib
+
+
+def decode_gzip_members(data, *, max_output=256 * 1024 * 1024,
+                        max_metadata=1024 * 1024, max_members=1024):
+    """Validate bounded RFC 1952 members and retain their non-payload bytes."""
+    if min(max_output, max_metadata, max_members) < 1:
+        raise ValueError("invalid gzip bounds")
+    payloads, metadata, offset, output_size, metadata_size, members = [], [], 0, 0, 0, 0
+
+    def retain(value):
+        nonlocal metadata_size
+        metadata_size += len(value)
+        if metadata_size > max_metadata:
+            raise ValueError("gzip metadata exceeds bound")
+        metadata.append(value)
+
+    while offset < len(data):
+        padding_end = offset
+        while padding_end < len(data) and data[padding_end] == 0:
+            padding_end += 1
+        if padding_end != offset:
+            if not members:
+                raise ValueError("gzip starts with padding")
+            retain(data[offset:padding_end])
+            offset = padding_end
+        if offset == len(data):
+            break
+        members += 1
+        if members > max_members:
+            raise ValueError("gzip member count exceeds bound")
+        if data[offset:offset + 3] != b"\x1f\x8b\x08" or offset + 10 > len(data):
+            raise ValueError("invalid gzip member header or trailing bytes")
+        flags, header_end = data[offset + 3], offset + 10
+        if flags & 0xe0:
+            raise ValueError("reserved gzip header flags")
+        if flags & 4:
+            if header_end + 2 > len(data):
+                raise ValueError("truncated gzip extra length")
+            size = int.from_bytes(data[header_end:header_end + 2], "little")
+            header_end += 2 + size
+        if header_end > len(data):
+            raise ValueError("truncated gzip extra field")
+        for flag in (8, 16):
+            if flags & flag:
+                end = data.find(b"\0", header_end,
+                                min(len(data), offset + max_metadata - metadata_size + 1))
+                if end < 0:
+                    raise ValueError("unterminated or oversized gzip metadata")
+                header_end = end + 1
+        if flags & 2:
+            header_end += 2
+        if header_end > len(data):
+            raise ValueError("truncated gzip header checksum")
+        retain(data[offset:header_end])
+        decoder = zlib.decompressobj(wbits=31)
+        try:
+            payload = decoder.decompress(memoryview(data)[offset:], max_output - output_size + 1)
+        except zlib.error as error:
+            raise ValueError("gzip member checksum or compression invalid") from error
+        output_size += len(payload)
+        if output_size > max_output:
+            raise ValueError("gzip decompressed bytes exceed bound")
+        if not decoder.eof or decoder.unconsumed_tail:
+            raise ValueError("truncated or oversized gzip member")
+        member_end = len(data) - len(decoder.unused_data)
+        if member_end < header_end + 8:
+            raise ValueError("invalid gzip member bounds")
+        retain(data[member_end - 8:member_end])
+        payloads.append(payload)
+        offset = member_end
+    if not members:
+        raise ValueError("gzip has no members")
+    return b"".join(payloads), b"".join(metadata)
 
 
 def digest(data):
@@ -170,18 +243,22 @@ def export(layout, output, architectures, own_module, binaries):
             data = blob(layout, layer)
             media = layer["mediaType"]
             if media in ("application/vnd.oci.image.layer.v1.tar+gzip", "application/vnd.docker.image.rootfs.diff.tar.gzip"):
-                raw = gzip.decompress(data)
+                raw, gzip_metadata = decode_gzip_members(data)
             elif media == "application/vnd.oci.image.layer.v1.tar":
                 raw = data
+                gzip_metadata = b""
             else:
                 raise ValueError("unsupported image layer compression")
             diff_ids.append(digest(raw))
             layers.append(layer["digest"])
             raw_root = output / "layers" / arch / str(number)
             raw_root.mkdir(parents=True)
-            entries, seen = [], set()
+            (raw_root / "gzip-metadata.bin").write_bytes(gzip_metadata)
+            entries, seen, metadata_chunks, cursor = [], set(), [], 0
             with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
                 for entry_number, entry in enumerate(archive):
+                    if entry.size < 0:
+                        raise ValueError("negative layer member size")
                     if entry.isdir() and entry.name in (".", "./"):
                         continue
                     name = safe_name(entry.name)
@@ -190,6 +267,14 @@ def export(layout, output, architectures, own_module, binaries):
                     seen.add(name)
                     record = {"name": name, "mode": entry.mode, "type": entry.type.decode("ascii"), "link": entry.linkname}
                     entries.append(record)
+                    if entry.isfile():
+                        start, end = entry.offset_data, entry.offset_data + entry.size
+                        if start < cursor or end > len(raw):
+                            raise ValueError("invalid layer content offsets")
+                        # Keep every header/PAX/padding byte separate from the
+                        # executable bodies that receive per-file inspection.
+                        metadata_chunks.append(raw[cursor:start])
+                        cursor = end
                     path = PurePosixPath(name)
                     if path.name.startswith(".wh."):
                         if not entry.isfile() or entry.size:
@@ -202,6 +287,8 @@ def export(layout, output, architectures, own_module, binaries):
                             files = {key: value for key, value in files.items() if key != removed and not key.startswith(removed + "/")}
                     elif entry.isfile():
                         content = archive.extractfile(entry).read()
+                        if len(content) != entry.size:
+                            raise ValueError("layer member size mismatch")
                         # Retain original bytes, including files hidden by later whiteouts.
                         (raw_root / str(entry_number)).write_bytes(content)
                         files[name] = content
@@ -217,6 +304,8 @@ def export(layout, output, architectures, own_module, binaries):
                     else:
                         raise ValueError("unsupported non-file OCI entry")
             (raw_root / "entries.json").write_text(json.dumps(entries, sort_keys=True))
+            metadata_chunks.append(raw[cursor:])
+            (raw_root / "metadata-bytes.bin").write_bytes(b"".join(metadata_chunks))
         if config.get("rootfs") != {"type": "layers", "diff_ids": diff_ids}:
             raise ValueError("layer diff ID mismatch")
         binary_hashes = {}
@@ -267,7 +356,8 @@ def scan(directory, forbidden=()):
     root = Path(directory)
     if not root.is_dir() or root.is_symlink():
         raise ValueError("missing or symlinked scan input")
-    common = [rb"/(?:Users|home)/[A-Za-z0-9_.-]+/", rb"github\.com/[^\s\"'<>]+-enterprise\b",
+    # Distroless's conventional container home is not a developer identity.
+    common = [rb"/(?:Users/[A-Za-z0-9_.-]+|home/(?!nonroot/)[A-Za-z0-9_.-]+)/", rb"github\.com/[^\s\"'<>]+-enterprise\b",
               rb"\bhttps?://[a-z0-9.-]+\.(?:internal|localdomain)\b"] + [re.escape(value.encode()) for value in forbidden if value]
     text = [rb"\bWX[0-9]+\b", rb"\b(?:S1\.[0-9]+|PM[0-9]{2}|MO[0-9]{2}|[QCD][0-9]{2})\b"]
     for path in root.rglob("*"):
