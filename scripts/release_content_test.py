@@ -369,6 +369,108 @@ class ContentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     content.scanner_findings(status, output, errors)
 
+    def notice_source_fixture(self):
+        directory = self.root / "public-source"
+        source = self.root / "scanner-source"
+        (source / "scripts").mkdir(parents=True)
+        for name in ("scan-release-content.sh", "release_content.py", "release-tools.sh", "gitleaks.toml"):
+            shutil.copyfile(ROOT / "scripts" / name, source / "scripts" / name)
+        for name in ("go.mod", "go.sum"):
+            shutil.copyfile(ROOT / name, source / name)
+        modules = {}
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off")
+        for module, (version, checksum) in content.NOTICE_MODULES.items():
+            metadata = json.loads(subprocess.check_output(
+                ["go", "mod", "download", "-json", module + "@" + version], env=environment, timeout=30))
+            self.assertEqual(metadata["Sum"], checksum)
+            modules[module] = Path(metadata["Dir"])
+        graph = "".join(module + "|" + version + "\n"
+                        for module, (version, _) in sorted(content.NOTICE_MODULES.items()))
+        merged = directory / "arm64/licenses"
+        merged.mkdir(parents=True)
+        (merged / "modules.txt").write_text(graph)
+        raw = directory / "layers/arm64/0"
+        raw.mkdir(parents=True)
+        entries = []
+        for number, (name, (expected, _, _)) in enumerate(content.NOTICE_FILES.items()):
+            module = max((module for module in modules if name.startswith(module + "/")), key=len)
+            data = (modules[module] / name[len(module) + 1:]).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+            path = merged / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            (raw / str(number)).write_bytes(data)
+            entries.append({"name": "licenses/" + name, "type": "0", "link": "", "mode": 420})
+        (raw / "entries.json").write_bytes(encoded(entries))
+        return directory, source
+
+    def test_exact_public_source_files_and_mutation_boundaries(self):
+        directory, source = self.notice_source_fixture()
+        result = self.scanner(directory, source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"acceptedPublicSourceFindings": 41', result.stdout)
+        name = next(iter(content.NOTICE_FILES))
+        path = directory / "arm64/licenses" / name
+        original = path.read_bytes()
+        token = "ghp_" + "".join(random.Random(53).sample(string.ascii_letters + string.digits, 36))
+        # Complete source bytes, not merely known matching substrings, are bound.
+        for addition in (b"\n// harmless mutation\n", b"\n" + token.encode() + b"\n"):
+            path.write_bytes(original + addition)
+            result = self.scanner(directory, source)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(token, result.stdout + result.stderr)
+        path.write_bytes(original)
+        relocated = directory / "relocated-source"
+        path.rename(relocated)
+        self.assertNotEqual(self.scanner(directory, source).returncode, 0)
+        relocated.rename(path)
+        graph = directory / "arm64/licenses/modules.txt"
+        original_graph = graph.read_text()
+        graph.write_text(original_graph.replace("v1.0.1-vault-7", "v1.0.1-vault-8"))
+        self.assertNotEqual(self.scanner(directory, source).returncode, 0)
+        graph.write_text(original_graph)
+        for filename, before, after in (
+                ("go.mod", "v1.0.1-vault-7", "v1.0.1-vault-8"),
+                ("go.sum", content.NOTICE_MODULES["github.com/hashicorp/hcl"][1], "h1:changed=")):
+            lockfile = source / filename
+            original_lockfile = lockfile.read_text()
+            lockfile.write_text(original_lockfile.replace(before, after))
+            self.assertNotEqual(self.scanner(directory, source).returncode, 0)
+            lockfile.write_text(original_lockfile)
+        mod = source / "go.mod"
+        original_mod = mod.read_text()
+        mod.write_text(original_mod + "\nreplace github.com/hashicorp/hcl => ./replacement\n")
+        self.assertNotEqual(self.scanner(directory, source).returncode, 0)
+        mod.write_text(original_mod)
+        raw_entries = directory / "layers/arm64/0/entries.json"
+        original_entries = raw_entries.read_bytes()
+        entries = json.loads(original_entries)
+        entries[0]["name"] = "relocated/" + name
+        raw_entries.write_bytes(encoded(entries))
+        self.assertNotEqual(self.scanner(directory, source).returncode, 0)
+        raw_entries.write_bytes(original_entries)
+        # Unrelated content and raw metadata never receive a source-file exception.
+        for relative, data in (("unrelated", token.encode()),
+                               ("layers/arm64/0/metadata-bytes.bin", b"\0" + token.encode() + b"\0")):
+            extra = directory / relative
+            extra.write_bytes(data)
+            result = self.scanner(directory, source)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(token, result.stdout + result.stderr)
+            extra.unlink()
+
+    def test_public_source_requires_exact_rules_locations_and_counts(self):
+        directory, source = self.notice_source_fixture()
+        name, (_, rule, positions) = next(iter(content.NOTICE_FILES.items()))
+        path = directory / "arm64/licenses" / name
+        keys = ("StartLine", "EndLine", "StartColumn", "EndColumn")
+        findings = [dict(zip(keys, position), RuleID=rule) for position in positions]
+        self.assertTrue(content.known_notice_findings(directory, path, findings, source))
+        for changed in (findings[:-1], findings + [findings[0]],
+                        [dict(findings[0], RuleID="private-key")] + findings[1:],
+                        [dict(findings[0], StartLine=1)] + findings[1:]):
+            self.assertFalse(content.known_notice_findings(directory, path, changed, source))
+
     def test_artifact_inline_allow_directives_cannot_suppress_secrets(self):
         token = "ghp_" + "".join(random.Random(31).sample(string.ascii_letters + string.digits, 36))
         for binary in (False, True):

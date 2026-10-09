@@ -432,6 +432,111 @@ def scanner_findings(returncode, stdout, stderr):
     return findings
 
 
+NOTICE_POLICY = "hashicorp-public-source-notices-v1"
+# go-licenses v2.0.1 preserves reciprocal-library source, including these
+# upstream test fixtures. Bind the complete public files, not secret patterns.
+NOTICE_MODULES = {
+    "github.com/hashicorp/hcl": ("v1.0.1-vault-7", "h1:ag5OxFVy3QYTFTJODRzTKVZ6xvdfLLCA1cy/Y6xGI0I="),
+    "github.com/hashicorp/vault/api": ("v1.23.0", "h1:gXgluBsSECfRWTSW9niY2jwg2e9mMJc4WoHNv4g3h6A="),
+    "github.com/hashicorp/vault/api/auth/kubernetes": ("v0.10.0", "h1:5rqWmUFxnu3S7XYq9dafURwBgabYDFzo2Wv+AMopPHs="),
+}
+NOTICE_FILES = {
+    "github.com/hashicorp/hcl/json/scanner/scanner_test.go":
+        ("fe5824fbefc9283a92072a25d50ef5938ad3176e72ad48b90670d213771785fa", "generic-api-key",
+         ((106, 106, 5, 37), (110, 110, 5, 36), (134, 134, 5, 36), (138, 138, 5, 37), (142, 142, 5, 38), (146, 146, 5, 37))),
+    "github.com/hashicorp/hcl/hcl/scanner/scanner_test.go":
+        ("8fd8ccada793173cdad28e260637e5187238b111ba97493b87de89c2c4113381", "generic-api-key",
+         ((119, 119, 5, 37), (125, 125, 5, 37), (142, 142, 5, 38), (148, 148, 5, 38), (191, 191, 5, 37),
+          (195, 195, 5, 36), (219, 219, 5, 36), (223, 223, 5, 37), (227, 227, 5, 38), (231, 231, 5, 37))),
+    "github.com/hashicorp/vault/api/test-fixtures/keys/key.pem":
+        ("f776bd22e8ac0a1ed2b76ddd9e3f4ea0cf5ad1e8d7165033b28532214ed9ce2a", "private-key", ((1, 27, 1, 30),)),
+    "github.com/hashicorp/vault/api/test-fixtures/root/pkioutput":
+        ("25311302e804833627b63368ab473785399ab3f9bf5f5ff6fe5a90f14ad10b62", "private-key", ((46, 72, 19, 30),)),
+    "github.com/hashicorp/vault/api/test-fixtures/root/rootcakey.pem":
+        ("9e32eacb685fc948ff353f7d66411e0e95a47f58705c7885258e7dd169f8bb8e", "private-key", ((1, 27, 1, 30),)),
+    "github.com/hashicorp/vault/api/test-fixtures/keys/pkioutput":
+        ("32a47442a9485f60c5c4e519d89c74b554c288d24cb4a6d96b8bf44a6eaf70fc", "private-key", ((47, 73, 19, 30),)),
+    "github.com/hashicorp/vault/api/auth/kubernetes/go.sum":
+        ("8d10769bd75929527a9b611c37c53fab08cec31305cd607ad0fb5461e6ef2c24", "generic-api-key", ((40, 40, 29, 87),)),
+}
+
+
+def notice_identity(root, path):
+    """Resolve only exporter-created merged or raw-layer regular-file paths."""
+    parts = path.relative_to(root).parts
+    if len(parts) >= 4 and parts[0] in ("amd64", "arm64") and parts[1] == "licenses":
+        return parts[0], "/".join(parts[2:])
+    if (len(parts) == 4 and parts[0] == "layers" and parts[1] in ("amd64", "arm64")
+            and parts[2].isdigit() and parts[3].isdigit()):
+        entries = json.loads((path.parent / "entries.json").read_bytes())
+        number = int(parts[3])
+        if not isinstance(entries, list) or number >= len(entries):
+            return None
+        entry = entries[number]
+        if not isinstance(entry, dict) or entry.get("type") != "0" or entry.get("link") != "":
+            return None
+        name = safe_name(entry["name"])
+        if name.startswith("licenses/"):
+            return parts[1], name[9:]
+    return None
+
+
+def known_notice_findings(root, path, findings, source):
+    identity = notice_identity(root, path)
+    if identity is None:
+        return False
+    arch, name = identity
+    if name not in NOTICE_FILES:
+        return False
+    expected_hash, rule, positions = NOTICE_FILES[name]
+    if hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+        return False
+    module = max((module for module in NOTICE_MODULES if name.startswith(module + "/")), key=len)
+    version, checksum = NOTICE_MODULES[module]
+    sums = [line.split() for line in (source / "go.sum").read_text().splitlines()]
+    if [module, version, checksum] not in sums:
+        return False
+    mod = (source / "go.mod").read_text()
+    if (not re.search(r"(?m)^\s*(?:require\s+)?" + re.escape(module + " " + version) + r"(?:\s*//[^\n]*)?\s*$", mod)
+            or re.search(r"(?m)^\s*(?:replace\s+)?" + re.escape(module) + r"(?:\s+[^\s]+)?\s*=>", mod)):
+        return False
+    graph = (root / arch / "licenses/modules.txt").read_text().splitlines()
+    if [line for line in graph if line.startswith(module + "|")] != [module + "|" + version]:
+        return False
+    actual = []
+    for finding in findings:
+        keys = ("StartLine", "EndLine", "StartColumn", "EndColumn")
+        if finding.get("RuleID") != rule or any(type(finding.get(key)) is not int for key in keys):
+            return False
+        actual.append(tuple(finding[key] for key in keys))
+    return sorted(actual) == sorted(positions)
+
+
+def source_scan(directory):
+    """Keep Gitleaks reports redacted and apply only exact public-file policy."""
+    root = Path(directory).resolve()
+    source = Path(__file__).resolve().parents[1]
+    result = subprocess.run(["gitleaks", "dir", "--redact=100", "--no-banner", "--log-level", "error",
+                             "--ignore-gitleaks-allow", "--gitleaks-ignore-path", "/dev/null",
+                             "--config", str(source / "scripts/gitleaks.toml"),
+                             "--report-format", "json", "--report-path", "-", "."],
+                            capture_output=True, timeout=120, cwd=root)
+    findings = scanner_findings(result.returncode, result.stdout, result.stderr)
+    groups = {}
+    for finding in findings:
+        name = finding.get("File")
+        if not isinstance(name, str) or name != safe_name(name):
+            raise ValueError("source scanner report path invalid")
+        path = root / name
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("source scanner finding is not a regular file")
+        groups.setdefault(path, []).append(finding)
+    for path, group in groups.items():
+        if not known_notice_findings(root, path, group, source):
+            raise ValueError("source secret scan found unapproved content")
+    print(json.dumps({"acceptedPublicSourceFindings": len(findings), "policy": NOTICE_POLICY}, sort_keys=True))
+
+
 def binary_scan(directory):
     root = Path(directory)
     if not root.is_dir() or root.is_symlink():
@@ -507,6 +612,8 @@ def main():
         validate_sbom_layout(*args)
     elif command == "binary-scan":
         binary_scan(*args)
+    elif command == "source-scan":
+        source_scan(*args)
     else:
         raise ValueError("unknown content command")
 

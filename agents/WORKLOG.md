@@ -71,3 +71,24 @@
 - The new raw stream exposed the public Distroless container home. Exempt only
   exact `/home/nonroot/` from the developer-home pattern, never from secret or
   other concrete scans. Private homes and a credential under that path fail.
+
+## Exact public dependency-source scan policy
+
+- Isolated this change from the frozen release source and private CI controls.
+  The unchanged final DP image produced 82 repeated findings from seven exact
+  public dependency source files, all matching verified module bytes/checksums.
+- Added a complete-file, original-path, module/version/sum and exact-finding-set
+  policy. Preserve every source/legal byte and unchanged strict metadata,
+  binary, relative-path and private-reference scans. No blanket allowlist.
+- Added real pinned-module source fixtures and negatives for changed file,
+  source/image module versions, checksum, replacement, relocation/raw entry,
+  missing/extra/wrong-rule findings, same-file and unrelated credentials, and
+  raw metadata. Fixture credential values never appear in scanner output.
+- All 30 content helper tests pass, plus shell syntax, ShellCheck with sourced
+  helpers, Python compilation and diff checks. Existing export reinspection
+  passes with exactly 82 source findings and zero binary exceptions. A fresh
+  multiarch OCI export/check also passed in 74.55 seconds, with report identical
+  to the original exact-image export. Independent review is required before use.
+- Additional workflow contracts: 18 passed; the pre-existing stable workflow
+  contract still expects mutable `sbom: true` instead of the approved pinned
+  generator. Its owner was notified; no workflow paths changed in this branch.
