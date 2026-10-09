@@ -60,7 +60,11 @@ def notices(files, arch, own_module):
         if not module or any(character.isspace() for character in module + version):
             raise ValueError("invalid production module identity")
         # The root EUPL explicitly covers this repository, including its SDK.
-        if module == own_module or module.startswith(own_module + "/"):
+        if module == own_module:
+            continue
+        if module in (own_module + "/shared", own_module + "/shared/v2"):
+            if bundle.get(module + "/LICENSE") != bundle["application/LICENSE"]:
+                raise ValueError("own SDK lacks its source repository license")
             continue
         candidates = [name for name in bundle if name.startswith(module + "/") and
                       re.match(r"(?i)(LICENSE|LICENCE|COPYING)", PurePosixPath(name).name)]
