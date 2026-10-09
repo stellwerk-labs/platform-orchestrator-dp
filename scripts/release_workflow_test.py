@@ -2,9 +2,19 @@
 """Fail-closed publication wiring contracts, without invoking a publisher."""
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def component(directory):
+    module = (directory / "go.mod").read_text().splitlines()[0]
+    known = {"module github.com/stellwerk-labs/platform-orchestrator-" + name: name
+             for name in ("cp", "dp", "iam")}
+    if module not in known:
+        raise ValueError("unknown server module identity")
+    return known[module]
 
 
 class WorkflowTests(unittest.TestCase):
@@ -37,7 +47,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("server-evidence/", job)
             self.assertIn('test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"', job)
             self.assertIn("moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea", job)
-        expected = 3 if ROOT.name.startswith("platform-orchestrator-dp") else 2
+        expected = 3 if component(ROOT) == "dp" else 2
         self.assertEqual(publishers, expected)
 
     def test_production_dockerfile_carries_notices_and_all_executables(self):
@@ -48,9 +58,19 @@ class WorkflowTests(unittest.TestCase):
         build = (ROOT / "scripts/build-server-artifact.sh").read_text()
         self.assertIn("-trimpath -buildvcs=false", build)
         self.assertIn("GOAMD64=v1 GOARM64=v8.0", build)
-        if ROOT.name.startswith("platform-orchestrator-iam"):
+        if component(ROOT) == "iam":
             self.assertIn("./cmd/authorization-migrate", build)
             self.assertIn("opt/server/authorization-migrate", (ROOT / "scripts/check-server-artifact.sh").read_text())
+
+    def test_neutral_checkout_directory_preserves_component_contracts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = Path(temporary) / "source"
+            checkout.mkdir()
+            (checkout / "go.mod").write_bytes((ROOT / "go.mod").read_bytes())
+            self.assertEqual(component(checkout), component(ROOT))
+            (checkout / "go.mod").write_text("module example.org/unknown\\n")
+            with self.assertRaises(ValueError):
+                component(checkout)
 
 
 if __name__ == "__main__":
