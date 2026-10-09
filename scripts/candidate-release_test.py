@@ -88,7 +88,7 @@ class CandidateReleaseTests(unittest.TestCase):
         for required in ("github.repository == 'stellwerk-labs/platform-orchestrator-dp'",
                          "github.event_name == 'workflow_dispatch'", "environment: public-release-candidate",
                          "- candidate-preflight", "- verify", "- integration",
-                         "--verify-tag --prerelease --latest=false",
+                         "--verify-tag --draft --prerelease --latest=false",
                          "ref: ${{ inputs.candidate_sha }}", "--check-image-absent \"$GITHUB_REPOSITORY\""):
             self.assertIn(required, publication)
         for forbidden in ("semantic-release-action@", "git tag ", ":latest"):

@@ -79,14 +79,14 @@ class StableReleaseTests(unittest.TestCase):
             "gh release create \"$RELEASE_TAG\" --verify-tag --draft --latest=false",
             "gh release edit \"$RELEASE_TAG\" --draft=false --latest",
             "context: .",
-            "sbom: true",
+            "sbom: generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9",
             "provenance: mode=max",
             "org.opencontainers.image.version=${{ steps.release.outputs.version }}",
             "org.opencontainers.image.revision=${{ github.sha }}",
             "docker buildx imagetools inspect",
         ):
             self.assertIn(required, release)
-        self.assertIn("sbom: true", image_step)
+        self.assertIn("sbom: generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9", image_step)
         self.assertIn("provenance: mode=max", image_step)
         self.assertLess(release.index("stable-release-preflight.py"), release.index("gh release create"))
         self.assertLess(release.index("gh release create"), release.index("docker/build-push-action@"))

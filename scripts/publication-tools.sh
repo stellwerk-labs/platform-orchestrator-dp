@@ -1,0 +1,2 @@
+# shellcheck shell=bash disable=SC2034
+cosign_image=ghcr.io/sigstore/cosign/cosign@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8 # v3.1.3
