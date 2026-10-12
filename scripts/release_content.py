@@ -86,6 +86,18 @@ def decode_gzip_members(data, *, max_output=256 * 1024 * 1024,
     return b"".join(payloads), b"".join(metadata)
 
 
+def strict_json(data):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate OCI JSON key")
+            result[key] = value
+        return result
+
+    return json.loads(data, object_pairs_hook=unique)
+
+
 def digest(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
@@ -108,7 +120,7 @@ def oci_reference(directory, expected):
     index_file = layout / "index.json"
     if index_file.is_symlink() or not index_file.is_file():
         raise ValueError("missing or symlinked OCI index")
-    descriptors = json.loads(index_file.read_bytes()).get("manifests", [])
+    descriptors = strict_json(index_file.read_bytes()).get("manifests", [])
     if (len(descriptors) != 1 or descriptors[0].get("digest") != expected
             or descriptors[0].get("mediaType") != "application/vnd.oci.image.index.v1+json"):
         raise ValueError("OCI reference differs from inspected index")
@@ -124,11 +136,11 @@ def validate_sbom_layout(directory, expected):
     index_file = layout / "index.json"
     if index_file.is_symlink() or not index_file.is_file():
         raise ValueError("missing or symlinked SBOM OCI index")
-    descriptors = json.loads(index_file.read_bytes()).get("manifests", [])
+    descriptors = strict_json(index_file.read_bytes()).get("manifests", [])
     if (len(descriptors) != 1 or descriptors[0].get("digest") != expected
             or descriptors[0].get("mediaType") != "application/vnd.oci.image.manifest.v1+json"):
         raise ValueError("SBOM source differs from inspected platform manifest")
-    manifest = json.loads(blob(layout, descriptors[0]))
+    manifest = strict_json(blob(layout, descriptors[0]))
     for descriptor in [manifest["config"]] + manifest["layers"]:
         blob(layout, descriptor)
 
@@ -185,13 +197,16 @@ def export(layout, output, architectures, own_module, binaries):
         raise ValueError("inspection output must be new")
     if (layout / "oci-layout").is_symlink() or (layout / "index.json").is_symlink():
         raise ValueError("symlinked OCI metadata")
-    if json.loads((layout / "oci-layout").read_text()) != {"imageLayoutVersion": "1.0.0"}:
+    marker_bytes = (layout / "oci-layout").read_bytes()
+    if strict_json(marker_bytes) != {"imageLayoutVersion": "1.0.0"}:
         raise ValueError("unsupported OCI layout")
-    index = json.loads((layout / "index.json").read_text())
+    index_bytes = (layout / "index.json").read_bytes()
+    index = strict_json(index_bytes)
     if len(index["manifests"]) != 1:
         raise ValueError("layout must contain one release index")
     top = index["manifests"][0]
-    image_index = json.loads(blob(layout, top))
+    image_index_bytes = blob(layout, top)
+    image_index = strict_json(image_index_bytes)
     manifests = image_index.get("manifests")
     if image_index.get("schemaVersion") != 2 or not isinstance(manifests, list):
         raise ValueError("release must be an OCI image index")
@@ -200,13 +215,21 @@ def export(layout, output, architectures, own_module, binaries):
     output.mkdir()
     metadata = output / "metadata"
     metadata.mkdir()
-    (metadata / "index.json").write_text(json.dumps(image_index, sort_keys=True))
+    # Retain original bytes as well as decoded values for strict scanning.
+    (metadata / "oci-layout.json").write_bytes(marker_bytes)
+    (metadata / "layout-index.json").write_bytes(index_bytes)
+    (metadata / "index.json").write_bytes(image_index_bytes)
+    (metadata / "layout-index-decoded.json").write_text(json.dumps(index, sort_keys=True))
+    (metadata / "index-decoded.json").write_text(json.dumps(image_index, sort_keys=True))
     for descriptor in manifests:
         platform = descriptor.get("platform", {})
-        manifest = json.loads(blob(layout, descriptor))
+        manifest_bytes = blob(layout, descriptor)
+        manifest = strict_json(manifest_bytes)
         config_bytes = blob(layout, manifest["config"])
-        config = json.loads(config_bytes)
+        config = strict_json(config_bytes)
         identity = descriptor["digest"][7:]
+        (metadata / (identity + "-manifest.json")).write_bytes(manifest_bytes)
+        (metadata / (manifest["config"]["digest"][7:] + "-config.json")).write_bytes(config_bytes)
         (metadata / (identity + ".json")).write_text(json.dumps({"descriptor": descriptor, "manifest": manifest, "config": config}, sort_keys=True))
         if platform.get("os") == "unknown" and platform.get("architecture") == "unknown":
             if descriptor.get("annotations", {}).get("vnd.docker.reference.type") != "attestation-manifest":
@@ -217,7 +240,7 @@ def export(layout, output, architectures, own_module, binaries):
                 data = blob(layout, layer)
                 if layer["mediaType"] != "application/vnd.in-toto+json":
                     raise ValueError("unexpected attestation layer")
-                statement = json.loads(data)
+                statement = strict_json(data)
                 if statement.get("_type") not in ("https://in-toto.io/Statement/v0.1", "https://in-toto.io/Statement/v1"):
                     raise ValueError("unsupported attestation statement")
                 predicates.add(statement.get("predicateType"))
@@ -225,6 +248,7 @@ def export(layout, output, architectures, own_module, binaries):
                            for subject in statement.get("subject", [])):
                     raise ValueError("attestation subject does not bind platform manifest")
                 (metadata / (identity + "-" + str(number) + ".json")).write_bytes(data)
+                (metadata / (identity + "-" + str(number) + "-decoded.json")).write_text(json.dumps(statement, sort_keys=True))
             if "https://spdx.dev/Document" not in predicates or not predicates.intersection(
                     {"https://slsa.dev/provenance/v0.2", "https://slsa.dev/provenance/v1"}):
                 raise ValueError("platform lacks SPDX SBOM or SLSA provenance")

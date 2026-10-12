@@ -66,10 +66,10 @@ def elf(arch):
     return bytes(data)
 
 
-def license_bundle(arch):
+def license_bundle(arch, own_module=MODULE):
     files = {"application/LICENSE": b"application license", "go/LICENSE": b"Go license", "go/PATENTS": b"Go patent grant",
              "example.org/dependency/LICENSE": b"dependency license",
-             "modules.txt": b"example.org/application|\nexample.org/dependency|v1.0.0\n",
+             "modules.txt": ("\n".join(sorted((own_module + "|", "example.org/dependency|v1.0.0"))) + "\n").encode(),
              "target.txt": ("linux/" + arch + "\n").encode()}
     files["manifest.sha256"] = "".join(hashlib.sha256(data).hexdigest() + "  ./" + name + "\n"
                                             for name, data in sorted(files.items())).encode()
@@ -77,18 +77,26 @@ def license_bundle(arch):
 
 
 def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/server",), missing_provenance=False,
-           pax_metadata=None, trailing_bytes=b"", compress=None):
+           pax_metadata=None, trailing_bytes=b"", compress=None, json_transform=None, own_module=MODULE):
     root.mkdir()
-    (root / "oci-layout").write_bytes(encoded({"imageLayoutVersion": "1.0.0"}))
+    def metadata(kind, data):
+        return json_transform(kind, data) if json_transform else data
+    (root / "oci-layout").write_bytes(metadata("marker", encoded({"imageLayoutVersion": "1.0.0"})))
     blobroot = root / "blobs/sha256"
     blobroot.mkdir(parents=True)
     def store(data, media):
+        kinds = {"application/vnd.oci.image.config.v1+json": "config",
+                 "application/vnd.oci.image.manifest.v1+json": "manifest",
+                 "application/vnd.oci.image.index.v1+json": "index",
+                 "application/vnd.in-toto+json": "statement"}
+        if media in kinds:
+            data = metadata(kinds[media], data)
         descriptor = {"mediaType": media, "digest": content.digest(data), "size": len(data)}
         (blobroot / descriptor["digest"][7:]).write_bytes(data)
         return descriptor
     manifests = []
     for arch in ("amd64", "arm64"):
-        entries = license_bundle(arch)
+        entries = license_bundle(arch, own_module)
         entries.update({name: elf(arch) for name in binaries})
         if extra:
             entries.update(extra)
@@ -109,7 +117,7 @@ def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/
                        "predicateType": kind, "predicate": {}} for kind in ("https://spdx.dev/Document", "https://slsa.dev/provenance/v0.2")]
         if missing_provenance:
             statements.pop()
-        attestation = {"schemaVersion": 2, "config": store(b"{}", "application/vnd.oci.image.config.v1+json"),
+        attestation = {"schemaVersion": 2, "config": store(b'{"fixture":true}', "application/vnd.oci.image.config.v1+json"),
                        "layers": [store(encoded(statement), "application/vnd.in-toto+json") for statement in statements]}
         attestation_descriptor = store(encoded(attestation), "application/vnd.oci.image.manifest.v1+json")
         attestation_descriptor.update(platform={"os": "unknown", "architecture": "unknown"},
@@ -118,7 +126,7 @@ def layout(root, extra=None, whiteout=False, mutate=None, binaries=("opt/server/
         manifests.append(attestation_descriptor)
     descriptor = store(encoded({"schemaVersion": 2, "manifests": manifests}), "application/vnd.oci.image.index.v1+json")
     descriptor["annotations"] = {"org.opencontainers.image.ref.name": "qualification"}
-    (root / "index.json").write_bytes(encoded({"schemaVersion": 2, "manifests": [descriptor]}))
+    (root / "index.json").write_bytes(metadata("wrapper", encoded({"schemaVersion": 2, "manifests": [descriptor]})))
 
 
 class ContentTests(unittest.TestCase):
@@ -142,6 +150,75 @@ class ContentTests(unittest.TestCase):
     def scanner(self, directory, source=ROOT):
         return subprocess.run(["bash", str(source / "scripts/scan-release-content.sh"), str(directory)],
                               text=True, capture_output=True, timeout=30)
+
+    def test_original_metadata_bytes_and_decoded_references_are_scanned(self):
+        for kind in ("wrapper", "index", "manifest", "config", "statement"):
+            for value in (b"private-owner-fixture", b"private-owner-fixtur\\u0065"):
+                with self.subTest(kind=kind, escaped=b"\\u" in value), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    originals = []
+                    def transform(stage, data):
+                        if stage == kind:
+                            data = b'{ "audit":"' + value + b'",\n' + data[1:]
+                            originals.append(data)
+                        return data
+                    layout(root / "image", json_transform=transform)
+                    content.export(root / "image", root / "output", ["amd64", "arm64"], MODULE, ["opt/server/server"])
+                    retained = [path.read_bytes() for path in (root / "output/metadata").iterdir()]
+                    self.assertTrue(originals)
+                    for raw in originals:
+                        self.assertIn(raw, retained)
+                    with self.assertRaisesRegex(ValueError, "prohibited content"):
+                        content.scan(root / "output", ["private-owner-fixture"])
+
+    def artifact_check(self, image, output):
+        return subprocess.run(["bash", str(ROOT / "scripts/check-server-artifact.sh"), str(image), str(output)],
+                              capture_output=True, text=True, timeout=30)
+
+    def publication_layout(self, path, transform=None):
+        module = (ROOT / "go.mod").read_text().splitlines()[0].removeprefix("module ")
+        binaries = tuple(re.findall(r"opt/server/[a-z-]+", (ROOT / "scripts/check-server-artifact.sh").read_text()))
+        layout(path, own_module=module, binaries=binaries, json_transform=transform)
+
+    def test_duplicate_metadata_keys_fail_at_both_inspection_boundaries(self):
+        for kind in ("marker", "wrapper", "index", "manifest", "config", "statement"):
+            for prefix in (b'{"audit":"private-owner-fixture","audit":"public",',
+                           b'{"nested":{"audit":"private-owner-fixture","aud\\u0069t":"public"},'):
+                with self.subTest(kind=kind, nested=b"nested" in prefix), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    def transform(stage, data):
+                        return prefix + data[1:] if stage == kind else data
+                    self.publication_layout(root / "image", transform)
+                    module = (ROOT / "go.mod").read_text().splitlines()[0].removeprefix("module ")
+                    with self.assertRaisesRegex(ValueError, "duplicate OCI JSON key"):
+                        content.export(root / "image", root / "direct", ["amd64", "arm64"], module, ["opt/server/server"])
+                    for boundary in ("producer", "publisher"):
+                        result = self.artifact_check(root / "image", root / boundary)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("release content validation failed", result.stderr)
+                        self.assertNotIn("private-owner-fixture", result.stdout + result.stderr)
+
+    def test_publication_reinspection_rejects_digest_valid_metadata_tamper(self):
+        token = "ghp_" + "".join(random.Random(61).sample(string.ascii_letters + string.digits, 36))
+        for kind in ("index", "manifest", "config"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                image = root / "image"
+                self.publication_layout(image)
+                producer = self.artifact_check(image, root / "producer")
+                self.assertEqual(producer.returncode, 0, producer.stderr)
+                publisher = self.artifact_check(image, root / "publisher-clean")
+                self.assertEqual(publisher.returncode, 0, publisher.stderr)
+                self.assertEqual((root / "producer/report.json").read_bytes(),
+                                 (root / "publisher-clean/report.json").read_bytes())
+                shutil.rmtree(image)
+                def transform(stage, data):
+                    return b'{"audit":"' + token.encode() + b' # gitleaks:allow",' + data[1:] if stage == kind else data
+                self.publication_layout(image, transform)
+                for boundary in ("producer-tampered", "publisher-tampered"):
+                    tampered = self.artifact_check(image, root / boundary)
+                    self.assertNotEqual(tampered.returncode, 0)
+                    self.assertNotIn(token, tampered.stdout + tampered.stderr)
 
     def test_platform_bytes_notices_and_attestations(self):
         report = self.export(extra={"etc/link": (tarfile.SYMTYPE, "/etc/certs"), "etc/certs": b"base certificate"})

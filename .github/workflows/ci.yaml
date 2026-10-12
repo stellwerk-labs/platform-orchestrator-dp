@@ -212,6 +212,9 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ inputs.candidate_tag }}
         run: |
           set -euo pipefail
+          bash scripts/check-server-artifact.sh "$RUNNER_TEMP/server-layout" "$RUNNER_TEMP/server-publication-inspection" \
+            "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
+          cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
           oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
@@ -385,6 +388,9 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:ci-seed-${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
+          bash scripts/check-server-artifact.sh "$RUNNER_TEMP/server-layout" "$RUNNER_TEMP/server-publication-inspection" \
+            "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
+          cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
           oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
@@ -738,6 +744,9 @@ jobs:
           IMAGE_TAG: ghcr.io/stellwerk-labs/platform-orchestrator-dp:${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
+          bash scripts/check-server-artifact.sh "$RUNNER_TEMP/server-layout" "$RUNNER_TEMP/server-publication-inspection" \
+            "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
+          cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
           oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
           test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
