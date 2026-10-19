@@ -90,6 +90,128 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify()
 
+    def test_manual_candidate_stages_from_its_exact_branch_workflow(self):
+        ref = "refs/heads/release/candidate-fixture/nested"
+        self.git("checkout", "-b", ref.removeprefix("refs/heads/"))
+        self.env.update(GITHUB_REF=ref, GITHUB_WORKFLOW_REF=REPOSITORY + "/.github/workflows/ci.yaml@" + ref)
+        self.stage()
+        self.verify()
+        predicate = json.loads((self.output / "source-provenance.json").read_text())
+        self.assertEqual(predicate["runDetails"]["builder"]["id"],
+                         "https://github.com/" + self.env["GITHUB_WORKFLOW_REF"])
+        self.assertEqual(predicate["runDetails"]["metadata"]["invocationId"],
+                         "https://github.com/" + REPOSITORY + "/actions/runs/123/attempts/1")
+
+    def test_distinct_candidate_and_producer_commits_require_identical_workflow_bytes(self):
+        source = self.env["RELEASE_SOURCE_SHA"]
+        ref = "refs/heads/release/candidate-producer"
+        self.git("checkout", "-b", ref.removeprefix("refs/heads/"))
+        (self.source / "producer.txt").write_text("same workflow, later producer\n")
+        self.git("add", "producer.txt")
+        self.git("commit", "-m", "producer with identical workflow")
+        producer = self.git("rev-parse", "HEAD")
+        self.assertNotEqual(source, producer)
+        self.git("checkout", "--detach", source)
+        self.env.update(GITHUB_REF=ref, GITHUB_WORKFLOW_REF=REPOSITORY + "/.github/workflows/ci.yaml@" + ref,
+                        GITHUB_SHA=producer, GITHUB_WORKFLOW_SHA=producer)
+        self.stage()
+        self.verify()
+        predicate = json.loads((self.output / "source-provenance.json").read_text())
+        self.assertEqual([entry["digest"]["gitCommit"] for entry in
+                          predicate["buildDefinition"]["resolvedDependencies"]], [source, producer])
+        (self.output / "source-provenance.json").unlink()
+        (self.output / "SHA256SUMS").unlink()
+        self.git("checkout", ref.removeprefix("refs/heads/"))
+        (self.source / ".github/workflows/ci.yaml").write_text("name: different producer\n")
+        self.git("add", ".github/workflows/ci.yaml")
+        self.git("commit", "-m", "producer with different workflow")
+        changed = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--detach", source)
+        self.env.update(GITHUB_SHA=changed, GITHUB_WORKFLOW_SHA=changed)
+        with self.assertRaises(ValueError):
+            self.stage()
+        self.assertFalse((self.output / "source-provenance.json").exists())
+
+    def test_matching_nonbranch_or_malformed_refs_are_refused(self):
+        for ref in ("refs/tags/v3.0.0-rc.1", "refs/pull/1/merge", "refs/heads/",
+                    "refs/heads/release/../candidate", "refs/heads/release//candidate",
+                    "refs/heads/release/", "refs/heads/release/candidate.lock",
+                    "refs/heads/release/bad name", "refs/heads/release/bad\nname",
+                    "refs/heads/release/@{1}", "refs/heads/.hidden"):
+            changed = dict(self.env, GITHUB_REF=ref,
+                           GITHUB_WORKFLOW_REF=REPOSITORY + "/.github/workflows/ci.yaml@" + ref)
+            with self.subTest(ref=ref), self.assertRaises(ValueError):
+                publication.identity(changed, MODULE)
+
+    def test_candidate_branch_workflow_binding_is_exact(self):
+        ref = "refs/heads/release/candidate-fixture"
+        candidate = dict(self.env, GITHUB_REF=ref,
+                         GITHUB_WORKFLOW_REF=REPOSITORY + "/.github/workflows/ci.yaml@" + ref)
+        publication.identity(candidate, MODULE)
+        for workflow in (REPOSITORY + "/.github/workflows/ci.yaml@refs/heads/main",
+                         REPOSITORY + "/.github/workflows/other.yaml@" + ref,
+                         "other/repository/.github/workflows/ci.yaml@" + ref):
+            with self.subTest(workflow=workflow), self.assertRaises(ValueError):
+                publication.identity(dict(candidate, GITHUB_WORKFLOW_REF=workflow), MODULE)
+
+    def test_seed_cannot_change_repository_source_or_event_kind(self):
+        repository = "stellwerk-labs/platform-orchestrator-dp"
+        seed = dict(self.env, GITHUB_REPOSITORY=repository,
+                    GITHUB_WORKFLOW_REF=repository + "/.github/workflows/ci.yaml@refs/heads/main",
+                    RELEASE_KIND="seed", RELEASE_VERSION="ci-seed-" + self.env["RELEASE_SOURCE_SHA"],
+                    IMAGE_TAG="ghcr.io/" + repository + ":ci-seed-" + self.env["RELEASE_SOURCE_SHA"])
+        module = "module github.com/" + repository
+        publication.identity(seed, module)
+        for changed in (dict(seed, RELEASE_VERSION="ci-seed-" + "e" * 40),
+                        dict(seed, GITHUB_EVENT_NAME="push")):
+            with self.assertRaises(ValueError):
+                publication.identity(changed, module)
+        repository = "stellwerk-labs/platform-orchestrator-cp"
+        changed = dict(seed, GITHUB_REPOSITORY=repository,
+                       GITHUB_WORKFLOW_REF=repository + "/.github/workflows/ci.yaml@refs/heads/main",
+                       IMAGE_TAG="ghcr.io/" + repository + ":" + seed["RELEASE_VERSION"])
+        with self.assertRaises(ValueError):
+            publication.identity(changed, "module github.com/" + repository)
+
+    def test_matching_nonmain_push_is_refused(self):
+        stable = dict(self.env, GITHUB_EVENT_NAME="push", RELEASE_VERSION="v3.0.0",
+                      IMAGE_TAG="ghcr.io/" + REPOSITORY + ":v3.0.0")
+        publication.identity(stable, MODULE)
+        ref = "refs/heads/release/candidate-fixture"
+        stable.update(GITHUB_REF=ref, GITHUB_WORKFLOW_REF=REPOSITORY + "/.github/workflows/ci.yaml@" + ref)
+        with self.assertRaises(ValueError):
+            publication.identity(stable, MODULE)
+
+    def test_dp_seed_stages_from_branch_with_one_unqualified_platform(self):
+        repository = "stellwerk-labs/platform-orchestrator-dp"
+        if MODULE != "module github.com/" + repository:
+            (self.source / "go.mod").write_text("module github.com/" + repository + "\n")
+            self.git("add", "go.mod")
+            self.git("commit", "-m", "DP seed fixture")
+        source = self.git("rev-parse", "HEAD")
+        ref = "refs/heads/release/seed-fixture"
+        self.git("checkout", "-b", ref.removeprefix("refs/heads/"))
+        self.env.update(GITHUB_REPOSITORY=repository, GITHUB_REF=ref,
+                        GITHUB_WORKFLOW_REF=repository + "/.github/workflows/ci.yaml@" + ref,
+                        GITHUB_SHA=source, RELEASE_SOURCE_SHA=source, GITHUB_WORKFLOW_SHA=source,
+                        RELEASE_KIND="seed", RELEASE_VERSION="ci-seed-" + source,
+                        IMAGE_TAG="ghcr.io/" + repository + ":ci-seed-" + source)
+        payload = self.report["payloads"]["amd64"]
+        labels = {"org.opencontainers.image.source": "https://github.com/" + repository,
+                  "org.opencontainers.image.revision": source,
+                  "org.opencontainers.image.description": "CI dependency seed; not a qualified release"}
+        raw = json.dumps({"config": {"Labels": labels}}).encode()
+        payload["config"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+        (self.layout / "blobs/sha256" / payload["config"][7:]).write_bytes(raw)
+        del self.report["payloads"]["arm64"]
+        (self.output / "arm64.spdx.json").unlink()
+        write(self.output / "platforms.json", self.report)
+        self.stage()
+        self.verify()
+        predicate = json.loads((self.output / "source-provenance.json").read_text())
+        self.assertEqual(predicate["buildDefinition"]["externalParameters"]["purpose"],
+                         "unqualified-ci-dependency-seed")
+
     def test_public_workflow_destination_source_and_run_fail_closed(self):
         publication.identity(self.env, MODULE)
         for key, value in (("GITHUB_REPOSITORY", "private/example"), ("GITHUB_REF", "refs/heads/other"),

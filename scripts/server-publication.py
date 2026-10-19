@@ -19,11 +19,15 @@ def identity(env, module):
     known = {"module github.com/stellwerk-labs/platform-orchestrator-" + name:
              "stellwerk-labs/platform-orchestrator-" + name for name in ("cp", "dp", "iam")}
     repository = known.get(module)
+    ref = env.get("GITHUB_REF", "")
     if (not repository or env.get("GITHUB_REPOSITORY") != repository
-            or env.get("GITHUB_REF") != "refs/heads/main"
-            or env.get("GITHUB_WORKFLOW_REF") != repository + "/.github/workflows/ci.yaml@refs/heads/main"
+            or not ref.startswith("refs/heads/")
+            or env.get("GITHUB_WORKFLOW_REF") != repository + "/.github/workflows/ci.yaml@" + ref
             or env.get("GITHUB_EVENT_NAME") not in ("push", "workflow_dispatch")):
-        raise ValueError("only the original public main release workflow can authenticate artifacts")
+        raise ValueError("only the exact public branch workflow can authenticate artifacts")
+    if subprocess.run(["git", "check-ref-format", ref], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, timeout=5).returncode != 0:
+        raise ValueError("a valid full branch ref is required")
     for key in ("RELEASE_SOURCE_SHA", "GITHUB_SHA", "GITHUB_WORKFLOW_SHA"):
         if not SHA.fullmatch(env.get(key, "")):
             raise ValueError("exact source, event and producing workflow commits are required")
@@ -43,8 +47,9 @@ def identity(env, module):
         raise ValueError("canonical release version required")
     elif env["GITHUB_EVENT_NAME"] == "workflow_dispatch" and "-rc." not in tag:
         raise ValueError("manual release must be a candidate")
-    elif env["GITHUB_EVENT_NAME"] == "push" and ("-rc." in tag or source != env["GITHUB_SHA"]):
-        raise ValueError("stable source must equal the main push commit")
+    elif env["GITHUB_EVENT_NAME"] == "push" and (ref != "refs/heads/main"
+                                                or "-rc." in tag or source != env["GITHUB_SHA"]):
+        raise ValueError("stable releases require the exact main push commit")
     if env.get("IMAGE_TAG") != "ghcr.io/" + repository + ":" + tag:
         raise ValueError("image destination differs from source repository and approved version")
     if not DIGEST.fullmatch(env.get("IMAGE_DIGEST", "")):
