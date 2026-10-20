@@ -18,6 +18,45 @@ def component(directory):
 
 
 class WorkflowTests(unittest.TestCase):
+    def assert_publisher_buildx_policy(self, workflow):
+        publishers = [job for job in re.split(r"(?m)^  [a-z][a-z0-9-]*:\n", workflow)[1:]
+                      if "oras cp --no-tty --from-oci-layout" in job]
+        self.assertEqual(len(publishers), 3)
+        for job in publishers:
+            steps = re.split(r"(?m)^      - name: ", job)[1:]
+            setup = [step for step in steps if "uses: docker/setup-buildx-action@" in step]
+            builds = [step for step in steps if "uses: docker/build-push-action@" in step]
+            self.assertEqual(len(setup), 1)
+            self.assertIn("uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e", setup[0])
+            self.assertIn("          version: v0.38.0\n", setup[0])
+            self.assertRegex(setup[0], re.compile(
+                r"(?m)^          driver-opts: \|\n"
+                r"            image=moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea\n"
+                r"            provenance-add-gha=false$"))
+            self.assertEqual(len(builds), 2)
+            for build in builds:
+                self.assertIn("sbom: generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9", build)
+                self.assertIn("provenance: mode=max", build)
+
+    def test_every_publisher_uses_pinned_buildx_and_creation_context_opt_out(self):
+        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        self.assert_publisher_buildx_policy(workflow)
+
+    def test_publisher_builder_policy_rejects_tool_context_and_attestation_drift(self):
+        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        changes = (
+            ("version: v0.38.0", "version: v0.37.2"),
+            ("provenance-add-gha=false", "provenance-add-gha=true"),
+            ("image=moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea",
+             "image=moby/buildkit@sha256:" + "0" * 64),
+            ("sbom: generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9",
+             "sbom: true"),
+            ("provenance: mode=max", "provenance: mode=min"),
+        )
+        for old, new in changes:
+            with self.subTest(change=old), self.assertRaises(AssertionError):
+                self.assert_publisher_buildx_policy(workflow.replace(old, new, 1))
+
     def test_every_image_publisher_validates_complete_local_layout_first(self):
         workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
         publishers = 0
