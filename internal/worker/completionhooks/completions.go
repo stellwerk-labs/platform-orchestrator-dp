@@ -20,7 +20,9 @@ type CompletionHooks[h comparable, T any] struct {
 // AddWaiter registers a new handler for the event and returns the channel that will be closed when it is triggered. The remove function MUST be called in a defer or other finalizer to make
 // sure the handler is cleaned up.
 func (h *CompletionHooks[ht, T]) AddWaiter(handle ht) (ch chan T, remove func()) {
-	ch = make(chan T)
+	// Notify owns at most one delivery after it detaches a waiter. Buffer that
+	// delivery so a caller cancelling at the same time cannot strand Notify.
+	ch = make(chan T, 1)
 
 	h.mux.Lock()
 	defer h.mux.Unlock()
@@ -51,7 +53,12 @@ func (h *CompletionHooks[ht, T]) removeWaiter(handle ht, ch chan T) {
 	if waiters, ok := h.waiters[handle]; ok {
 		for i, w := range waiters {
 			if w == ch {
-				h.waiters[handle] = append(waiters[:i], waiters[i+1:]...)
+				waiters = append(waiters[:i], waiters[i+1:]...)
+				if len(waiters) == 0 {
+					delete(h.waiters, handle)
+				} else {
+					h.waiters[handle] = waiters
+				}
 				break
 			}
 		}
@@ -61,16 +68,20 @@ func (h *CompletionHooks[ht, T]) removeWaiter(handle ht, ch chan T) {
 // Notify notifies any handlers that may exist for the handle.
 func (h *CompletionHooks[ht, T]) Notify(handle ht, msg T) int {
 	h.mux.Lock()
-	defer h.mux.Unlock()
-	if waiters, ok := h.waiters[handle]; ok {
+	waiters, ok := h.waiters[handle]
+	if ok {
 		delete(h.waiters, handle)
-		for _, ch := range waiters {
-			ch <- msg
-			close(ch)
-		}
-		return len(waiters)
 	}
-	return 0
+	h.mux.Unlock()
+
+	// Once detached, Notify exclusively owns these channels. Delivery cannot
+	// block because every waiter has capacity for this single message. Closing
+	// outside the lock lets cancellation cleanup and unrelated handles proceed.
+	for _, ch := range waiters {
+		ch <- msg
+		close(ch)
+	}
+	return len(waiters)
 }
 
 type DeploymentOrgAndId struct {

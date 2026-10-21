@@ -21,14 +21,7 @@ const (
 )
 
 type RunnerEventApplier interface {
-	ApplyRunnerDeploymentResult(
-		ctx context.Context,
-		orgID string,
-		runnerID string,
-		deploymentID uuid.UUID,
-		eventID string,
-		body api.DeploymentResultsUpdateBody,
-	) error
+	ApplyRunnerDeploymentResultEnvelope(context.Context, hmessaging.EventEnvelope, api.DeploymentResultsUpdateBody) error
 	ApplyRunnerError(ctx context.Context, orgID, runnerID string, deploymentID uuid.UUID, eventID, code, message string) error
 }
 
@@ -80,7 +73,7 @@ func (h *Handler) Handle(ctx context.Context, logger *zap.Logger, delivery hmess
 		if !result.Status.Valid() {
 			return hmessaging.NewTerminalError(fmt.Errorf("invalid deployment result status %q", result.Status))
 		}
-		if err := h.Applier.ApplyRunnerDeploymentResult(ctx, envelope.OrganizationID, envelope.RunnerID, deploymentID, envelope.EventID, result); err != nil {
+		if err := h.Applier.ApplyRunnerDeploymentResultEnvelope(ctx, envelope, result); err != nil {
 			return applicationError(err, "failed to apply deployment result")
 		}
 	case EventTypeRunnerError:

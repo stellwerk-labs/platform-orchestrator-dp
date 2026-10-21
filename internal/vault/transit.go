@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 const (
 	RSA4096                  = "rsa-4096"
+	AES256GCM96              = "aes256-gcm96"
 	JWTHashAlgorithm         = "sha2-256"
 	JWTSignatureAlgorithm    = "pkcs1v15"
 	JWTMarshalingAlgorithm   = "jws"
@@ -29,10 +31,23 @@ type TransitKeyVersion struct {
 	PublicKey    string    `json:"public_key"`
 }
 
+// UnmarshalJSON accepts both Vault representations. Asymmetric Transit keys
+// expose metadata objects, while symmetric keys expose an opaque numeric key
+// version. Callers only need the latter to prove that the key exists.
+func (v *TransitKeyVersion) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] != '{' {
+		var version json.Number
+		return json.Unmarshal(data, &version)
+	}
+	type transitKeyVersion TransitKeyVersion
+	return json.Unmarshal(data, (*transitKeyVersion)(v))
+}
+
 // TransitKey represents the key stored in Vault Transit, it includes only fields used in the service
 type TransitKey struct {
 	Name          string                       `json:"name"`
 	Type          string                       `json:"type"`
+	Exportable    bool                         `json:"exportable"`
 	Keys          map[string]TransitKeyVersion `json:"keys"`
 	LatestVersion int                          `json:"latest_version"`
 }
@@ -93,6 +108,57 @@ func (vlt *vaultClient) CreateKey(ctx context.Context, keyName, autoRotatePeriod
 		return errors.Wrapf(err, "failed to create Vault key: `%s`", vlt.GetKeyPath(keyName))
 	}
 	return nil
+}
+
+// CreateEncryptionKey creates a non-exportable symmetric Transit key. Vault
+// retains prior rotated key versions so existing ciphertext remains readable.
+func (vlt *vaultClient) CreateEncryptionKey(ctx context.Context, keyName, autoRotatePeriod string) error {
+	data := map[string]interface{}{"type": AES256GCM96}
+	if autoRotatePeriod != "" {
+		data["auto_rotate_period"] = autoRotatePeriod
+	}
+	if _, err := vlt.client.Logical().WriteWithContext(ctx, vlt.GetKeyPath(keyName), data); err != nil {
+		return errors.Wrapf(err, "failed to create Vault encryption key: `%s`", vlt.GetKeyPath(keyName))
+	}
+	return nil
+}
+
+func (vlt *vaultClient) Encrypt(ctx context.Context, keyName string, plaintext []byte) (string, error) {
+	path := filepath.Join(vlt.transitPath, "encrypt", keyName)
+	secret, err := vlt.client.Logical().WriteWithContext(ctx, path, map[string]interface{}{
+		"plaintext": base64.StdEncoding.EncodeToString(plaintext),
+	})
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to encrypt data with Vault key: `%s`", path)
+	}
+	if secret == nil {
+		return "", errors.Errorf("Vault encryption response was empty for key `%s`", keyName)
+	}
+	ciphertext, ok := secret.Data["ciphertext"].(string)
+	if !ok || ciphertext == "" {
+		return "", errors.Errorf("Vault encryption response did not contain ciphertext for key `%s`", keyName)
+	}
+	return ciphertext, nil
+}
+
+func (vlt *vaultClient) Decrypt(ctx context.Context, keyName, ciphertext string) ([]byte, error) {
+	path := filepath.Join(vlt.transitPath, "decrypt", keyName)
+	secret, err := vlt.client.Logical().WriteWithContext(ctx, path, map[string]interface{}{"ciphertext": ciphertext})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to decrypt data with Vault key: `%s`", path)
+	}
+	if secret == nil {
+		return nil, errors.Errorf("Vault decryption response was empty for key `%s`", keyName)
+	}
+	plaintext, ok := secret.Data["plaintext"].(string)
+	if !ok || plaintext == "" {
+		return nil, errors.Errorf("Vault decryption response did not contain plaintext for key `%s`", keyName)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(plaintext)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode Vault plaintext")
+	}
+	return decoded, nil
 }
 
 // SignData signs a data with a key in Transit engine in Vault

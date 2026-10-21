@@ -60,6 +60,8 @@ func buildForDeployment(ctx context.Context, controlPlaneClient platformorchestr
 			versionsToGet = append(versionsToGet, fmt.Sprintf("%s@%s", node.ModuleConfiguration.DefinitionId, node.ModuleConfiguration.VersionId))
 		}
 	}
+	slices.Sort(versionsToGet)
+	versionsToGet = slices.Compact(versionsToGet)
 
 	var inlineModules []platformorchestratorcp.InternalModuleCatalogueModule
 	if len(versionsToGet) > 0 {
@@ -92,7 +94,10 @@ func buildForDeployment(ctx context.Context, controlPlaneClient platformorchestr
 		if response.StatusCode() != http.StatusOK {
 			return nil, errors.Errorf("unexpected status code %d when fetching module catalogue: %s", response.StatusCode(), string(response.Body))
 		}
-		inlineModules = response.JSON200.Modules
+		inlineModules, err = selectInlineModules(versionsToGet, response.JSON200.Modules)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return compressWithArtifacts(tofu, inlineModules, artifacts)
@@ -108,6 +113,40 @@ func restrictedVersionConfirmations(artifacts []model.ModuleArtifactRequirement,
 	}
 	slices.Sort(confirmations)
 	return slices.Compact(confirmations)
+}
+
+func selectInlineModules(versions []string, modules []platformorchestratorcp.InternalModuleCatalogueModule) ([]platformorchestratorcp.InternalModuleCatalogueModule, error) {
+	requested := make(map[string]struct{}, len(versions))
+	for _, version := range versions {
+		moduleID, versionID, ok := strings.Cut(version, "@")
+		if !ok || moduleID == "" || versionID == "" || strings.Contains(versionID, "@") {
+			return nil, errors.Errorf("invalid inline module coordinate %q", version)
+		}
+		requested[version] = struct{}{}
+	}
+
+	selected := make([]platformorchestratorcp.InternalModuleCatalogueModule, 0, len(requested))
+	found := make(map[string]struct{}, len(requested))
+	for _, module := range modules {
+		coordinate := fmt.Sprintf("%s@%s", module.Id, module.VersionId)
+		if _, ok := requested[coordinate]; !ok {
+			continue
+		}
+		if _, duplicate := found[coordinate]; duplicate {
+			return nil, errors.Errorf("duplicate inline module %s in catalogue response", coordinate)
+		}
+		if module.ModuleSource != "inline" || module.ModuleSourceCode == nil || strings.TrimSpace(*module.ModuleSourceCode) == "" {
+			return nil, errors.Errorf("inline module %s has invalid source code", coordinate)
+		}
+		found[coordinate] = struct{}{}
+		selected = append(selected, module)
+	}
+	for coordinate := range requested {
+		if _, ok := found[coordinate]; !ok {
+			return nil, errors.Errorf("inline module %s missing from catalogue response", coordinate)
+		}
+	}
+	return selected, nil
 }
 
 func compressWithArtifacts(content []byte, inlineModules []platformorchestratorcp.InternalModuleCatalogueModule, artifacts []model.ModuleArtifactRequirement) (*bytes.Buffer, error) {

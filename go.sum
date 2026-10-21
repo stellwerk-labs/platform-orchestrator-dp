@@ -480,10 +480,12 @@ github.com/stellwerk-labs/golib/hvaultapi v1.0.0 h1:OFNEUnh1mmYdcFHA9xTG1RxZTKkF
 github.com/stellwerk-labs/golib/hvaultapi v1.0.0/go.mod h1:AFoiZcR87zfbsuBR/j4qcxVUcb/qW1d4PtsDwl/9Bec=
 github.com/stellwerk-labs/platform-orchestrator-cp/shared v1.0.0 h1:TUjqcKMepSG8putt4Us+BUyW8lUhWhZEvutkTmiw+jk=
 github.com/stellwerk-labs/platform-orchestrator-cp/shared v1.0.0/go.mod h1:yM0yuhjeCY8kgYqm/SK3XLMd5JgeJYrMVh8ZKTiiRzo=
+github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2 v2.1.0 h1:Apzd9WIOPkjhAf+rx1BfThCA5uVAdqvARr5A8smzWpU=
+github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2 v2.1.0/go.mod h1:W/uHYFi/+d8YZWq2ZZvd7kdJICPcUWeZTRAJwWQHXwo=
 github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0 h1:qnSfL9UnxcZwmOPcY3BTafWaT9xSA458b4R1U8PDxds=
 github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0/go.mod h1:hyifyIkMJ2cDDx+6CDwDBKGSikfGEjjY0+AbKt2tCCI=
-github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.0.0 h1:Sho6t8Tbec7JrUc7Y0CFQxbOYDV96dHRMhPc5qFwpRI=
-github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.0.0/go.mod h1:02RGP9EkIGfXplnKpungZodRycivKf06GlMk8+xvyeI=
+github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.2.0 h1:Fz1RoqMIU//bsr5o5MwvX9/M75vfINRghnPEBaRI0no=
+github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.2.0/go.mod h1:UdaY4lBK7/mxTGsI0MdMd1xTr7lfmeIYavjWIEb5HSs=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -53,5 +54,63 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 		KubernetesRunnerPodSchedulingDelay: 5 * time.Minute,
 		RunnerCommandTTL:                   24 * time.Hour,
 		MetadataOutputKey:                  "platform_orchestrator_metadata",
+		DeploymentQueueMaxDepth:            10,
+		DeploymentQueueDefaultTTL:          2 * time.Hour,
+		DeploymentQueueMaxTTL:              24 * time.Hour,
 	}, cfg)
+}
+
+func TestDeploymentQueueDefaultTTLMustNotExceedMaximum(t *testing.T) {
+	t.Setenv("DATABASE_NAME", "test_db")
+	t.Setenv("DATABASE_USER", "test_user")
+	t.Setenv("DATABASE_PASSWORD", "test_password")
+	t.Setenv("DATABASE_HOST", "localhost")
+	t.Setenv("DATABASE_PORT", "5432")
+	t.Setenv("CONTROL_PLANE_URL", "http://control-plane:8080")
+	t.Setenv("IAM_URL", "http://iam:8080")
+	t.Setenv("VAULT_URL", "http://vault:8200")
+	t.Setenv("VAULT_AUTH", "token")
+	t.Setenv("RUNNER_TOKEN_SALT", "test_salt")
+	t.Setenv("NATS_URL", "nats://nats:4222")
+	t.Setenv("RUNNER_GATEWAY_URL", "https://orchestrator.example.test/runner-gateway")
+	t.Setenv("RUNNER_GATEWAY_INTERNAL_URL", "http://runner-gateway:8080/runner-gateway")
+	t.Setenv("DEPLOYMENT_QUEUE_DEFAULT_TTL", "3h")
+	t.Setenv("DEPLOYMENT_QUEUE_MAX_TTL", "1h")
+	require.Error(t, hconfig.LoadConfigWithoutRetag(new(Configuration)))
+
+	t.Setenv("DEPLOYMENT_QUEUE_MAX_TTL", "3h")
+	t.Setenv("DEPLOYMENT_QUEUE_MAX_DEPTH", "3")
+	cfg := new(Configuration)
+	require.NoError(t, hconfig.LoadConfigWithoutRetag(cfg))
+	require.Equal(t, 3, cfg.DeploymentQueueMaxDepth)
+	require.Equal(t, 3*time.Hour, cfg.DeploymentQueueDefaultTTL)
+
+	t.Setenv("DEPLOYMENT_QUEUE_MAX_DEPTH", "0")
+	require.Error(t, hconfig.LoadConfigWithoutRetag(new(Configuration)))
+}
+
+func TestDeploymentAdmissionConfigurationIsPaired(t *testing.T) {
+	credentialFile := filepath.Join(t.TempDir(), "service-credential")
+	tests := []struct {
+		name    string
+		config  Configuration
+		enabled bool
+		wantErr bool
+	}{
+		{name: "disabled"},
+		{name: "enabled", config: Configuration{DeploymentAdmissionCoreURL: "https://gateway.example.test", DeploymentAdmissionCoreTokenFile: credentialFile}, enabled: true},
+		{name: "URL only", config: Configuration{DeploymentAdmissionCoreURL: "https://gateway.example.test"}, wantErr: true},
+		{name: "token only", config: Configuration{DeploymentAdmissionCoreTokenFile: credentialFile}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			enabled, err := test.config.DeploymentAdmissionConfigured()
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.enabled, enabled)
+		})
+	}
 }

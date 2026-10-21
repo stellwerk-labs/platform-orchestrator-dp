@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -14,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pkg/errors"
@@ -52,11 +52,13 @@ import (
 )
 
 const (
-	concurrentLogDeletes   = 20
-	natsConnectTimeout     = 5 * time.Second
-	runnerLogsObjectStore  = "PO_RUNNER_LOGS"
-	runtimeMetricsInterval = 5 * time.Second
-	samplingRatio          = 1
+	concurrentLogDeletes                     = 20
+	natsConnectTimeout                       = 5 * time.Second
+	runnerLogsObjectStore                    = "PO_RUNNER_LOGS"
+	runtimeMetricsInterval                   = 5 * time.Second
+	samplingRatio                            = 1
+	deploymentAdmissionReconciliationTimeout = 30 * time.Second
+	deploymentAdmissionReconciliationBatch   = 100
 )
 
 var buildInfo *debug.BuildInfo
@@ -226,15 +228,62 @@ func main() {
 		Vault:                    vlt,
 		OidcIssuerUrl:            cfg.OidcIssuerUrl,
 		IamClient:                iamClient,
+		DeploymentQueue: api.DeploymentQueueConfig{
+			MaxDepth: cfg.DeploymentQueueMaxDepth, DefaultTTL: cfg.DeploymentQueueDefaultTTL, MaxTTL: cfg.DeploymentQueueMaxTTL,
+		},
+	}
+	deploymentAdmissionConfigured, err := cfg.DeploymentAdmissionConfigured()
+	if err != nil {
+		zap.L().Fatal("invalid Deployment admission configuration", zap.Error(err))
+	}
+	if deploymentAdmissionConfigured {
+		server.DeploymentAdmissions, err = api.NewOrdinaryDeploymentAdmissionService(
+			db, cfg.DeploymentAdmissionCoreURL, cfg.DeploymentAdmissionCoreTokenFile, http.DefaultClient,
+		)
+		if err != nil {
+			zap.L().Fatal("failed to initialize Deployment admission service", zap.Error(err))
+		}
+	}
+	if cfg.PluginDeployEnabled {
+		if cfg.PluginIssuer == "" || cfg.PluginCoreURL == "" {
+			zap.L().Fatal("external deployment admission requires an issuer and Core gateway URL")
+		}
+		verificationKey, bearerToken, err := api.LoadExternalDeploymentCredentials(
+			cfg.PluginVerifyKeyFile,
+			cfg.PluginCoreTokenFile,
+		)
+		if err != nil {
+			zap.L().Fatal("failed to load external deployment credentials", zap.Error(err))
+		}
+		coreGatewayURL, err := url.Parse(cfg.PluginCoreURL)
+		if err != nil || (coreGatewayURL.Scheme != "http" && coreGatewayURL.Scheme != "https") ||
+			coreGatewayURL.Host == "" || coreGatewayURL.User != nil {
+			zap.L().Fatal("external deployment Core gateway URL is invalid")
+		}
+		grantHTTPClient := *http.DefaultClient
+		grantHTTPClient.Timeout = api.ExternalDeploymentGrantTimeout
+		grantHTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		grantClient := api.CoreExternalDeploymentGrantClient{
+			BaseURL: coreGatewayURL, HTTPClient: &grantHTTPClient, BearerToken: bearerToken,
+		}
+		server.ExternalDeployments = &api.ExternalDeploymentHTTPAdapter{
+			Issuer:             cfg.PluginIssuer,
+			VerificationKey:    verificationKey,
+			Admission:          api.ExternalDeploymentAdmissionService{Database: db, Authorizer: grantClient, Logger: zap.L()},
+			Materials:          api.ExternalOperationMaterialService{Vault: vlt},
+			ControlPlaneClient: cpClient,
+			EventPublisher:     eventPublisher,
+			Logger:             zap.L(),
+		}
 	}
 	echo, err := hecho.DefaultEchoServerWithValidation(&hecho.ValidatedServerConfig{
 		AppName:          path.Base(buildInfo.Main.Path),
 		Logger:           server.Logger,
 		OpenAPIRawSchema: api.MustDecodeOpenApiSpec(),
 		Tracing:          hecho.TracingOTel,
-		OpenAPISkipperFn: func(c echo.Context) bool {
-			return c.Path() == "/alive" || c.Path() == "/health" || c.Path() == "/internal/actions/flush-pending-messages"
-		},
+		OpenAPISkipperFn: api.SkipGeneratedOpenAPIValidation,
 	})
 	if err != nil {
 		zap.L().Fatal("Failed to setup server with schema validation", zap.Error(err))
@@ -245,6 +294,29 @@ func main() {
 
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	defer bgCancel()
+	if server.DeploymentAdmissions != nil {
+		go func() {
+			reconcile := func() {
+				reconcileCtx, cancel := context.WithTimeout(bgCtx, deploymentAdmissionReconciliationTimeout)
+				defer cancel()
+				if err := server.DeploymentAdmissions.ReconcileUnsettled(reconcileCtx, deploymentAdmissionReconciliationBatch); err != nil && !errors.Is(err, context.Canceled) {
+					zap.L().Error("failed to reconcile unsettled Deployment admissions", zap.Error(err))
+				}
+			}
+			reconcile()
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-bgCtx.Done():
+					return
+				case <-ticker.C:
+					reconcile()
+				}
+			}
+		}()
+	}
+	go sweepDeploymentQueue(bgCtx, &server)
 	go func() {
 		zap.L().Info("Starting scheduled flush of pending messages")
 		reliableoutbox.ScheduledFlushPendingMessages(bgCtx, server.Database.AsReliableOutboxStore(), eventPublisher, reliableoutbox.DefaultScheduledFlushPeriodFunc)
@@ -277,6 +349,9 @@ func main() {
 			return nil, errors.Wrap(err, "failed to read runner logs from NATS Object Store")
 		}
 		return reader, nil
+	}
+	if server.ExternalDeployments != nil {
+		server.ExternalDeployments.RunnerLogsReader = server.RunnerLogsReader
 	}
 
 	var oidcProvider oidc.Provider
@@ -320,6 +395,8 @@ func main() {
 		},
 		KubernetesRunnerPodSchedulingDelay: cfg.KubernetesRunnerPodSchedulingDelay,
 		MetadataOutputKey:                  cfg.MetadataOutputKey,
+		DeploymentAdmissions:               server.DeploymentAdmissions,
+		DeploymentQueue:                    &server,
 	}
 	wrkc, err := wrk.BuildMainConsumer(bgCtx)
 	if err != nil {
@@ -423,4 +500,21 @@ func main() {
 			zap.L().Error("Error received from background component", zap.Error(e))
 		}
 	}()
+}
+
+// sweepDeploymentQueue expires waiting Deployments and retries queue heads
+// that no event promoted, on every replica.
+func sweepDeploymentQueue(ctx context.Context, server *api.Server) {
+	ticker := time.NewTicker(api.DeploymentQueueSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := server.SweepDeploymentQueue(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				zap.L().Error("failed to sweep the deployment queue", zap.Error(err))
+			}
+		}
+	}
 }

@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Configuration ...
 type Configuration struct {
@@ -33,6 +36,20 @@ type Configuration struct {
 	ControlPlaneUrl string `env:"CONTROL_PLANE_URL" validate:"required,url"`
 	RunnerTokenSalt string `env:"RUNNER_TOKEN_SALT" validate:"required"`
 
+	PluginDeployEnabled bool   `env:"EXTERNAL_DEPLOYMENT_ENABLED, default=false"`
+	PluginIssuer        string `env:"EXTERNAL_DEPLOYMENT_ISSUER"`
+	PluginVerifyKeyFile string `env:"EXTERNAL_DEPLOYMENT_VERIFICATION_KEY_FILE"`
+	PluginCoreURL       string `env:"EXTERNAL_DEPLOYMENT_CORE_GATEWAY_URL"`
+	PluginCoreTokenFile string `env:"EXTERNAL_DEPLOYMENT_CORE_BEARER_TOKEN_FILE"`
+
+	DeploymentAdmissionCoreURL       string `env:"DEPLOYMENT_ADMISSION_CORE_GATEWAY_URL"`
+	DeploymentAdmissionCoreTokenFile string `env:"DEPLOYMENT_ADMISSION_CORE_BEARER_TOKEN_FILE"`
+
+	// Bounds of each Environment's deployment queue. A request may shorten its TTL, never exceed the maximum.
+	DeploymentQueueMaxDepth   int           `env:"DEPLOYMENT_QUEUE_MAX_DEPTH, default=10"   validate:"gt=0"`
+	DeploymentQueueDefaultTTL time.Duration `env:"DEPLOYMENT_QUEUE_DEFAULT_TTL, default=2h" validate:"gt=0,ltefield=DeploymentQueueMaxTTL"`
+	DeploymentQueueMaxTTL     time.Duration `env:"DEPLOYMENT_QUEUE_MAX_TTL, default=24h"    validate:"gt=0"`
+
 	// IamUrl is the internal url for the platform-orchestrator-iam service
 	IamUrl string `env:"IAM_URL" validate:"required,url"`
 
@@ -54,4 +71,13 @@ type Configuration struct {
 	OidcIssuerUrl string `env:"OIDC_ISSUER_URL" validate:"omitempty,url"`
 
 	MetadataOutputKey string `env:"METADATA_KEY, default=platform_orchestrator_metadata"`
+}
+
+func (c Configuration) DeploymentAdmissionConfigured() (bool, error) {
+	hasURL := c.DeploymentAdmissionCoreURL != ""
+	hasToken := c.DeploymentAdmissionCoreTokenFile != ""
+	if hasURL != hasToken {
+		return false, errors.New("deployment admission requires both Core gateway URL and service bearer token file")
+	}
+	return hasURL, nil
 }

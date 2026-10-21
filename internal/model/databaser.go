@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +26,8 @@ import (
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+var registerGoMigrations sync.Once
+
 // Model is the underlying type for the entire model.
 type databaser struct {
 	*sql.DB
@@ -43,18 +47,46 @@ func NewDatabaser(ctx context.Context, logger *zap.Logger, connStr string) (Data
 	goose.SetLogger(&gooseZapLogger{SugaredLogger: logger.Named("goose").Sugar()})
 	goose.SetBaseFS(embedMigrations)
 	goose.SetVerbose(logger.Level() <= zap.DebugLevel)
-	goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardoutbox.MigrateUp01, hstandardoutbox.MigrateDown01)
+	registerGoMigrations.Do(func() {
+		goose.AddNamedMigrationContext("000002_pending_event_messages.go", hstandardoutbox.MigrateUp01, hstandardoutbox.MigrateDown01)
+	})
 
-	if inner, err := hpostgresconnect.InitDatabase(ctx, &hpostgresconnect.Config{
+	inner, err := hpostgresconnect.InitDatabase(ctx, &hpostgresconnect.Config{
 		Logger:  logger,
 		ConnStr: connStr,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
-	} else if err := goose.Up(inner.DB, "migrations"); err != nil {
-		return nil, err
-	} else {
-		return &databaser{DB: inner.DB, logger: logger}, nil
 	}
+	if err := migrate(ctx, inner.DB); err != nil {
+		_ = inner.Close()
+		return nil, err
+	}
+	return &databaser{DB: inner.DB, logger: logger}, nil
+}
+
+// migrate applies the embedded migrations, but first refuses a database that
+// a newer release has migrated further. goose only applies versions above the
+// database's, so it would apply nothing and report success, and this binary
+// would then serve a schema it does not know. Version numbers have gaps, so
+// the bound is the highest embedded version, never the number of migrations.
+func migrate(ctx context.Context, db *sql.DB) error {
+	embedded, err := goose.CollectMigrations("migrations", 0, goose.MaxVersion)
+	if err != nil {
+		return err
+	}
+	latest, err := embedded.Last()
+	if err != nil {
+		return err
+	}
+	current, err := goose.GetDBVersionContext(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to read database migration version: %w", err)
+	}
+	if current > latest.Version {
+		return fmt.Errorf("database schema version %d is newer than this binary's latest migration %d", current, latest.Version)
+	}
+	return goose.UpContext(ctx, db, "migrations")
 }
 
 // Databaser provides an interface which can be used to mock the model
@@ -78,12 +110,17 @@ type Databaser interface {
 	GetDeploymentEncryptedOutputs(ctx context.Context, optionalTx Tx, orgId string, deploymentId uuid.UUID) (string, error)
 	GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error)
 	GetLastDeployment(ctx context.Context, optionalTx Tx, orgId string, projectId, envId string, params GetLastDeploymentParams) (*DeploymentSummary, EncodedDeploymentManifest, RawTofu, EncodedDeploymentGraph, error)
+	GetEnvironmentDeploymentReadiness(ctx context.Context, optionalTx Tx, orgID string, refs []EnvironmentRef) ([]EnvironmentDeploymentReadiness, error)
+	ReadPendingEnvironmentChanges(ctx context.Context, optionalTx Tx, orgID, projectID, envID string, environmentUUID uuid.UUID) (PendingEnvironmentChanges, error)
 	DeleteDeploymentsForEnv(ctx context.Context, optionalTx Tx, orgId, projectId, envId string, force bool) error
 	UpdateDeploymentStatusAndOutputs(ctx context.Context, optionalTx Tx, deploymentId uuid.UUID, params UpdateDeploymentStatusAndOutputsParams) (*DeploymentSummary, error)
 	DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error)
 	ListLastDeploymentsByNodeProperties(ctx context.Context, optionalTx Tx, orgId string, pageToken string, perPage int, params ListLastDeploymentsByNodePropertiesParams) ([]DeploymentSummary, string, error)
 	CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error
 	TryRecordRunnerEvent(ctx context.Context, optionalTx Tx, eventID, orgID, runnerID string, deploymentID uuid.UUID, eventType string) (bool, error)
+	RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error
+	BeginDeploymentDispatch(ctx context.Context, deployment *DeploymentSummary) (time.Time, error)
+	GetDeploymentDispatchBudget(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID) (DeploymentDispatchBudget, error)
 
 	InitActiveResourcesFromGraph(ctx context.Context, tx Tx, deploymentEnvUuid, deploymentId uuid.UUID, graph *platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]) error
 	GetActiveResources(ctx context.Context, optionalTx Tx, deploymentEnvUuid uuid.UUID) ([]ResourceNode, error)

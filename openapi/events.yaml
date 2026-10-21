@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
-  title: ""
-  version: ""
+  title: Stellwerk Data Plane events
+  version: unreleased
 paths: {}
 components:
   schemas:

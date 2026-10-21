@@ -106,6 +106,14 @@ func (h *CreateDepHandler) Handle(ctx context.Context, logger *zap.Logger, deliv
 				logger.Info("discarding event message belonging to deployment that is not executing")
 				return nil
 			}
+			if model.RequiresEnvironmentLease(d.Mode) {
+				if err := h.db.RenewDeploymentLease(ctx, nil, d.Id, model.DefaultEnvironmentLeaseTTL); err != nil {
+					if _, conflict := model.IsErrConflict(err); conflict {
+						return h.failDeployment(ctx, logger, d, "deployment lost its exclusive Environment lease before Runner dispatch")
+					}
+					return hmessaging.NewRetryError(errors.Wrap(err, "failed to renew deployment lease"))
+				}
+			}
 
 			if err := h.handleInner(ctx, logger, d); err != nil {
 				if d.RunnerId == magicNoOpRunnerId {
@@ -187,6 +195,7 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	if isRunning, err := runner.IsRunning(ctx); err != nil {
 		return errors.Wrap(err, "failed to check if runner is running")
 	} else if isRunning {
+		// Upgraded legacy attempts retain their conservative admission budget.
 		logger.Info("job already running, ensuring status check is scheduled")
 		return h.scheduleStatusCheck(ctx, d)
 	}
@@ -200,12 +209,17 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	deadline, err := h.db.BeginDeploymentDispatch(ctx, d)
+	if err != nil {
+		return err
+	}
+	d.DispatchDeadline = deadline
 	if err := runner.Start(ctx); err != nil {
 		if errors.Is(err, runners.ErrRunnerCommandPublishRetry) {
 			return hmessaging.NewRetryError(errors.Wrap(err, "failed to durably publish runner command"))
 		}
 		if errors.Is(err, runners.ErrKubernetesAgentNotReachableRetry) {
-			if time.Since(d.CreatedAt) < runners.KubernetesAgentConnectionIssueTolerance {
+			if time.Until(deadline) > model.RunnerExecutionBudget-runners.KubernetesAgentConnectionIssueTolerance {
 				return hmessaging.NewRetryError(errors.Wrap(err, "kubernetes agent temporary not reachable, will retry"))
 			} else {
 				return usererrors.NewUserErrorWithDetails(fmt.Sprintf("kubernetes-agent runner %q not reachable, please check your network connectivity and configuration", rn.Id), err)

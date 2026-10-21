@@ -44,6 +44,31 @@ type Server struct {
 	OidcIssuerUrl            string
 	IamClient                platformorchestratoriam.ClientWithResponsesInterface
 	RunnerLogsReader         RunnerLogsReader
+	ExternalDeployments      *ExternalDeploymentHTTPAdapter
+	DeploymentAdmissions     *OrdinaryDeploymentAdmissionService
+	DeploymentQueue          DeploymentQueueConfig
+
+	queueKicks deploymentQueueKicks
+}
+
+// SkipGeneratedOpenAPIValidation excludes only the manually registered generic
+// external-deployment adapters. Their generated operations are intentionally
+// omitted from StrictServerInterface because authentication verifies the exact
+// request bytes before decoding. Each adapter performs its own strict decode.
+func SkipGeneratedOpenAPIValidation(c echo.Context) bool {
+	switch c.Path() {
+	case "/alive", "/health", "/internal/actions/flush-pending-messages",
+		ExternalDeploymentAdmissionPath,
+		ExternalDeploymentReadinessPath,
+		ExternalDeploymentPlanningPath,
+		ExternalDeploymentReadPath,
+		ExternalDeploymentDispatchReadPath,
+		ExternalDeploymentLogsPath,
+		ExternalDeploymentOutputsPath:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) MapRoutes(e *echo.Echo) {
@@ -55,6 +80,15 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		adaptStrictMiddleware(token.StrictEncryptionMiddleware()),
 	})
 	RegisterHandlers(e, apiHandler)
+	if s.ExternalDeployments != nil {
+		e.POST(ExternalDeploymentAdmissionPath, s.ExternalDeployments.Handle)
+		e.POST(ExternalDeploymentReadinessPath, s.ExternalDeployments.HandleReadiness)
+		e.POST(ExternalDeploymentPlanningPath, s.ExternalDeployments.HandlePlan)
+		e.GET(ExternalDeploymentReadPath, s.ExternalDeployments.HandleRead)
+		e.GET(ExternalDeploymentDispatchReadPath, s.ExternalDeployments.HandleDispatchRead)
+		e.GET(ExternalDeploymentLogsPath, s.ExternalDeployments.HandleLogs)
+		e.GET(ExternalDeploymentOutputsPath, s.ExternalDeployments.HandleOutputs)
+	}
 
 	buildInfo, _ := debug.ReadBuildInfo()
 	e.GET("/alive", func(c echo.Context) error {

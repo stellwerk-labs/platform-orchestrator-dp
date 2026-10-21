@@ -48,6 +48,9 @@ containerd image store may resolve the issue. See the
 
 ## Configuration and APIs
 
+Runner timeout, unknown-outcome fencing and its audited acknowledgement are
+documented in [Runner dispatch and completion recovery](./docs/runner-dispatch-recovery.md).
+
 Runtime configuration is defined in
 [`internal/config/config.go`](./internal/config/config.go). The OpenAPI contract
 is in [`openapi/spec.yaml`](./openapi/spec.yaml); the service also exposes

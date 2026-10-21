@@ -41,6 +41,11 @@ const (
 
 const idempotencyDigestTimeLimit = time.Hour * 24
 
+// DefaultEnvironmentLeaseTTL outlives the Runner's one-hour status-check
+// window. It fences a replacement mutation while an older Runner may still be
+// changing the same Environment.
+const DefaultEnvironmentLeaseTTL = 65 * time.Minute
+
 type DeploymentSummary struct {
 	OrgId             string
 	ProjectId         string
@@ -64,6 +69,11 @@ type DeploymentSummary struct {
 	RunnerLogLevel             string
 	ModuleArtifacts            []ModuleArtifactRequirement
 	ModuleVersionRequestDigest string
+	// Internal only: caps buffered Runner commands at the immutable first attempt budget.
+	DispatchDeadline time.Time
+	// EnvironmentFence is set by ListLastDeployments only, while the item's
+	// Environment refuses new Deployments behind an unreconciled plugin dispatch.
+	EnvironmentFence opt.Opt[EnvironmentFence]
 }
 
 type UpdateDeploymentStatusAndOutputsParams struct {
@@ -75,6 +85,8 @@ type UpdateDeploymentStatusAndOutputsParams struct {
 
 	// ExpectedRevision will reject the update if the deployment is not at the same revision number
 	ExpectedRevision opt.Opt[int64]
+	// Set only by an authenticated Runner result, never an operator/watchdog failure.
+	RunnerCompletionProven bool
 }
 
 type EncodedDeploymentManifest json.RawMessage
@@ -97,19 +109,46 @@ type CreateDeploymentParams struct {
 	RunnerLogLevel             string
 	ModuleArtifacts            []ModuleArtifactRequirement
 	ModuleVersionRequestDigest string
+	// Optional captured-base recovery CAS, checked after the normal lease is held.
+	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
+	// Optional client CAS on the current state head, for manifests derived from it.
+	ExpectedBaseDeploymentID opt.Opt[uuid.UUID]
+	// The queue head being promoted. Every other mutating creation yields to queued work.
+	QueueItemID opt.Opt[uuid.UUID]
 }
 
 type ModuleArtifactRequirement struct {
-	ModuleID                  string `json:"module_id"`
-	Version                   string `json:"version"`
-	SemanticVersion           string `json:"semantic_version,omitempty"`
-	MigrationGeneration       string `json:"migration_generation,omitempty"`
-	Source                    string `json:"source"`
-	ArtifactDigest            string `json:"artifact_digest,omitempty"`
-	RetainedArtifactException bool   `json:"retained_artifact_exception,omitempty"`
+	ModuleID                  string    `json:"module_id"`
+	ModuleUUID                uuid.UUID `json:"module_uuid,omitempty"`
+	Version                   string    `json:"version"`
+	VersionUUID               uuid.UUID `json:"version_uuid,omitempty"`
+	SemanticVersion           string    `json:"semantic_version,omitempty"`
+	MigrationGeneration       string    `json:"migration_generation,omitempty"`
+	Source                    string    `json:"source"`
+	ArtifactDigest            string    `json:"artifact_digest,omitempty"`
+	RetainedArtifactException bool      `json:"retained_artifact_exception,omitempty"`
 	// Captured only after exact-version confirmation and scoped authorization.
 	// Background bundle reconstruction must not drop this operation's authority.
 	ConfirmedRestrictedVersionUUID *uuid.UUID `json:"confirmed_restricted_version_uuid,omitempty"`
+}
+
+type EnvironmentRef struct {
+	ProjectID string
+	EnvID     string
+}
+
+type EnvironmentDeploymentReadiness struct {
+	EnvironmentRef
+	EnvironmentUUID           opt.Opt[uuid.UUID]
+	LatestDeploymentID        opt.Opt[uuid.UUID]
+	LatestStatus              opt.Opt[DeploymentStatus]
+	LatestMode                opt.Opt[DeploymentMode]
+	ActiveLeaseUntil          opt.Opt[time.Time]
+	EffectiveBaseDeploymentID opt.Opt[uuid.UUID]
+	ActiveModules             []ModuleArtifactRequirement
+	// Queued reports Core-queued Deployments that every other mutation must wait for.
+	Queued bool
 }
 
 type ListDeploymentsParams struct {
@@ -166,6 +205,12 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	if tx == nil {
 		return nil, errors.New("transaction is required")
 	}
+	if params.ExpectedCurrentDeploymentID.IsSet() && (params.ExpectedCurrentDeploymentID.Must() == uuid.Nil || params.Mode != DeploymentModeRollback || !params.RollbackToId.IsSet()) {
+		return nil, NewErrBadRequest("expected current Deployment requires captured-base rollback")
+	}
+	if params.RetryOfRollbackDeploymentID.IsSet() && (!params.ExpectedCurrentDeploymentID.IsSet() || params.RetryOfRollbackDeploymentID.Must() == uuid.Nil || params.RetryOfRollbackDeploymentID.Must() != params.ExpectedCurrentDeploymentID.Must()) {
+		return nil, NewErrBadRequest("explicit rollback retry must identify the expected current head")
+	}
 
 	out := &DeploymentSummary{
 		OrgId:                      orgId,
@@ -188,19 +233,94 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		ModuleVersionRequestDigest: params.ModuleVersionRequestDigest,
 	}
 
+	if RequiresEnvironmentLease(params.Mode) {
+		if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
+			return nil, err
+		}
+		var holder uuid.UUID
+		if err := tx.QueryRowContext(ctx, `INSERT INTO environment_deployment_leases
+			(environment_id, org_id, project_id, env_id, holder_id, purpose, deployment_id, expires_at)
+			VALUES ($1, $2, $3, $4, $5, 'deployment', $5, now() + $6::interval)
+			ON CONFLICT (environment_id) DO UPDATE SET
+				org_id=EXCLUDED.org_id, project_id=EXCLUDED.project_id, env_id=EXCLUDED.env_id,
+				holder_id=EXCLUDED.holder_id, purpose=EXCLUDED.purpose,
+				deployment_id=EXCLUDED.deployment_id, acquired_at=now(), heartbeat_at=now(), expires_at=EXCLUDED.expires_at
+			WHERE environment_deployment_leases.expires_at <= now()
+			RETURNING holder_id`, out.DeploymentEnvUuid, orgId, projectId, envId, out.Id, DefaultEnvironmentLeaseTTL.String()).Scan(&holder); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, NewErrCodedConflict(CodeEnvironmentBusy, "environment has an active deployment lease")
+			}
+			return nil, errors.Wrap(err, "failed to acquire environment deployment lease")
+		}
+	}
+
 	{
 		var lastDeploymentId uuid.UUID
 		var lastDeploymentStatus string
+		var lastStateDeploymentID uuid.UUID
 		if err := tx.QueryRowContext(
 			ctx,
-			`SELECT d.id, d.status FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_executing_deployment_id WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 FOR UPDATE`,
+			`SELECT d.id, d.status, e.last_state_deployment_id FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_executing_deployment_id WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 FOR UPDATE`,
 			orgId, projectId, envId,
-		).Scan(&lastDeploymentId, &lastDeploymentStatus); err != nil {
+		).Scan(&lastDeploymentId, &lastDeploymentStatus, &lastStateDeploymentID); err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
 				return nil, errors.Wrap(err, "failed to query for existing executing deployment")
 			}
+			if params.ExpectedCurrentDeploymentID.IsSet() {
+				return nil, NewErrConflict("captured-base recovery has no current Deployment head")
+			}
 		} else if DeploymentStatus(lastDeploymentStatus) == DeploymentStatusExecuting {
-			return nil, NewErrConflict(fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
+			return nil, NewErrCodedConflict(CodeEnvironmentBusy, fmt.Sprintf("deployment '%s' is still executing", lastDeploymentId))
+		}
+		if err := requireReplaceableStateHead(ctx, tx, lastStateDeploymentID); err != nil {
+			return nil, err
+		}
+		if RequiresEnvironmentLease(params.Mode) {
+			if err := requireQueueHead(ctx, tx, out.DeploymentEnvUuid, params.QueueItemID.Or(uuid.Nil)); err != nil {
+				return nil, err
+			}
+		}
+		if params.ExpectedBaseDeploymentID.IsSet() && params.ExpectedBaseDeploymentID.Must() != lastStateDeploymentID {
+			return nil, NewErrCodedConflict(CodeDeploymentBaseChanged, "the Environment's current Deployment is no longer the expected base").
+				AboutDeployment(lastStateDeploymentID)
+		}
+		if params.ExpectedCurrentDeploymentID.IsSet() {
+			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {
+				return nil, NewErrConflict("captured-base recovery forward Deployment is no longer the current head")
+			}
+			forward, _, _, _, err := d.GetDeployment(ctx, tx, orgId, lastStateDeploymentID, GetModeForUpdate)
+			modeMatches := err == nil && forward.Mode == DeploymentModeDeploy
+			if err == nil && params.RetryOfRollbackDeploymentID.IsSet() {
+				modeMatches = forward.Mode == DeploymentModeRollback && forward.Status == DeploymentStatusFailed &&
+					forward.RollbackToId.IsSet() && forward.RollbackToId.Must() == params.RollbackToId.Must()
+			}
+			if err != nil || forward.DeploymentEnvUuid != params.DeploymentEnvUuid || !modeMatches || !forward.CompletedAt.IsSet() ||
+				(forward.Status != DeploymentStatusSucceeded && forward.Status != DeploymentStatusFailed) {
+				return nil, NewErrConflict("captured-base recovery requires a stopped terminal forward or explicitly retried failed rollback Deployment")
+			}
+			if forward.Status == DeploymentStatusFailed {
+				// Watchdog/status-check failures also set CompletedAt. Only the
+				// transactionally applied Runner result proves a terminal effect,
+				// unless an operator acknowledged this exact unknown outcome.
+				var completed bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runner_event_inbox
+					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 AND event_type='deployment-result' FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_late_runner_results
+					WHERE org_id=$1 AND runner_id=$2 AND deployment_id=$3 FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_dispatch_budgets WHERE deployment_id=$3 AND completion_received_at IS NOT NULL FOR SHARE)
+					OR EXISTS (SELECT 1 FROM deployment_outcome_acknowledgements WHERE org_id=$1 AND deployment_id=$3 FOR SHARE)`,
+					orgId, forward.RunnerId, forward.Id).Scan(&completed); err != nil {
+					return nil, errors.Wrap(err, "failed to verify terminal Runner result")
+				}
+				if !completed {
+					return nil, NewErrConflict("failed forward Deployment has no authoritative terminal Runner result")
+				}
+			}
+			base, manifest, tofu, graph, err := d.GetDeployment(ctx, tx, orgId, params.RollbackToId.Must(), GetModeForUpdate)
+			if err != nil || base.Status != DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != params.DeploymentEnvUuid ||
+				base.ProjectId != projectId || base.EnvId != envId || !CompleteDeploymentSnapshot(manifest, tofu, graph) {
+				return nil, NewErrConflict("captured rollback base is not a complete retained successful Deployment")
+			}
 		}
 	}
 
@@ -241,6 +361,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		return nil, errors.Wrap(err, "failed to insert deployment")
 	}
 
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_dispatch_budgets (deployment_id,deployment_revision) VALUES ($1,$2)`, out.Id, out.Revision); err != nil {
+		return nil, errors.Wrap(err, "failed to create Runner dispatch budget")
+	}
 	return out, nil
 }
 
@@ -312,8 +435,6 @@ func (d *databaser) ListDeployments(ctx context.Context, optionalTx Tx, orgId st
 }
 
 func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgId string, pageToken string, perPage int, params ListLastDeploymentsParams) ([]DeploymentSummary, string, error) {
-	logger := hlogger.TraceScopedLoggerFromCtx(d.logger, ctx)
-
 	var afterProjectId, afterEnvId string
 	if pageToken != "" {
 		parts := strings.Split(pageToken, ",")
@@ -322,41 +443,63 @@ func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgI
 		}
 		afterProjectId, afterEnvId = parts[0], parts[1]
 	}
-	limitPlusOne := max(1, perPage) + 1
+	limit := max(1, perPage)
+	tx := d.txOrDb(optionalTx)
+	out, failedStateHeads, err := d.queryLastDeployments(ctx, tx, orgId, afterProjectId, afterEnvId, limit+1, params)
+	if err != nil {
+		return nil, "", err
+	}
+	var nextPageToken string
+	if len(out) > limit {
+		out, failedStateHeads = out[:limit], failedStateHeads[:limit]
+		nextPageToken = fmt.Sprintf("%s,%s", out[limit-1].ProjectId, out[limit-1].EnvId)
+	}
+	// The row set is closed by now, so these reads may share optionalTx's connection.
+	for i, head := range failedStateHeads {
+		if out[i].EnvironmentFence, err = ReadEnvironmentFence(ctx, tx, head.UUID); err != nil {
+			return nil, "", errors.Wrap(err, "failed to read environment fence")
+		}
+	}
+	return out, nextPageToken, nil
+}
 
-	if rs, err := d.txOrDb(optionalTx).QueryContext(
+// queryLastDeployments also returns each Environment's state head if it failed:
+// no other state head can fence its Environment.
+func (d *databaser) queryLastDeployments(ctx context.Context, tx Tx, orgId, afterProjectId, afterEnvId string, limit int, params ListLastDeploymentsParams) ([]DeploymentSummary, []uuid.NullUUID, error) {
+	rs, err := tx.QueryContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND 
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, head.id
+		 FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND
 		(CASE WHEN $7 THEN d.id = e.last_state_deployment_id ELSE d.id = e.last_executing_deployment_id END)
+		 LEFT JOIN deployments head ON head.id = e.last_state_deployment_id AND head.status = 'failed'
 		 WHERE e.org_id = $1 AND (e.project_id, e.env_id) > ($2, $3) AND ($5::text IS NULL OR e.project_id = $5) AND ($6::text IS NULL OR e.env_id = $6)
 		 ORDER BY e.org_id, e.project_id, e.env_id LIMIT $4`,
-		orgId, afterProjectId, afterEnvId, limitPlusOne, params.ProjectId, params.EnvId, params.StateChangeOnly,
-	); err != nil {
-		return nil, "", errors.Wrap(err, "failed to query rows")
-	} else {
-		defer func() {
-			if err := rs.Close(); err != nil {
-				logger.Error("failed to close row set")
-			}
-		}()
-		out := make([]DeploymentSummary, 0, limitPlusOne-1)
-		for rs.Next() {
-			next := DeploymentSummary{OrgId: orgId}
-			if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics),
-				&next.Revision, opt.Scan(&next.RollbackToId)); err != nil {
-				return nil, "", errors.Wrap(err, "failed to scan row")
-			}
-			if len(out) >= limitPlusOne-1 {
-				last := out[len(out)-1]
-				return out, fmt.Sprintf("%s,%s", last.ProjectId, last.EnvId), nil
-			}
-			out = append(out, next)
-		}
-		if rs.Err() != nil {
-			return nil, "", errors.Wrap(rs.Err(), "failed to iterate rows")
-		}
-		return out, "", nil
+		orgId, afterProjectId, afterEnvId, limit, params.ProjectId, params.EnvId, params.StateChangeOnly,
+	)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "failed to query rows")
 	}
+	defer func() {
+		if err := rs.Close(); err != nil {
+			hlogger.TraceScopedLoggerFromCtx(d.logger, ctx).Error("failed to close row set")
+		}
+	}()
+	out := make([]DeploymentSummary, 0, limit)
+	failedStateHeads := make([]uuid.NullUUID, 0, limit)
+	for rs.Next() {
+		next := DeploymentSummary{OrgId: orgId}
+		var failedStateHead uuid.NullUUID
+		if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics),
+			&next.Revision, opt.Scan(&next.RollbackToId), &failedStateHead); err != nil {
+			return nil, nil, errors.Wrap(err, "failed to scan row")
+		}
+		out = append(out, next)
+		failedStateHeads = append(failedStateHeads, failedStateHead)
+	}
+	if err := rs.Err(); err != nil {
+		return nil, nil, errors.Wrap(err, "failed to iterate rows")
+	}
+	return out, failedStateHeads, nil
 }
 
 func (d *databaser) GetDeploymentByIdempotencyKeyDigest(ctx context.Context, optionalTx Tx, orgId, projectId, envId, idempotencyKeyDigest string) (*DeploymentSummary, EncodedDeploymentManifest, error) {
@@ -432,6 +575,9 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		}
 	}
 
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+		return errors.Wrap(err, "failed to delete deployment queue items")
+	}
 	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
 		return errors.Wrap(err, "failed to delete deployment environments")
 	} else if _, err := rs.RowsAffected(); err != nil {
@@ -465,6 +611,69 @@ func (d *databaser) GetLastDeployment(ctx context.Context, optionalTx Tx, orgId 
 	return out, EncodedDeploymentManifest(rawManifest), rawTofu, EncodedDeploymentGraph(rawGraph), nil
 }
 
+func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optionalTx Tx, orgID string, refs []EnvironmentRef) ([]EnvironmentDeploymentReadiness, error) {
+	if len(refs) == 0 {
+		return []EnvironmentDeploymentReadiness{}, nil
+	}
+	projectIDs := make([]string, len(refs))
+	environmentIDs := make([]string, len(refs))
+	for index, ref := range refs {
+		projectIDs[index] = ref.ProjectID
+		environmentIDs[index] = ref.EnvID
+	}
+	rows, err := d.txOrDb(optionalTx).QueryContext(ctx, `
+		WITH requested AS (
+			SELECT project_id, env_id, ordinal
+			FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS request(project_id, env_id, ordinal)
+		)
+		SELECT request.project_id, request.env_id, environment.id,
+		       latest.id, latest.status, latest.mode, lease.expires_at,
+		       base.id, COALESCE(base.module_artifacts, '[]'::jsonb),
+		       EXISTS (SELECT 1 FROM environment_deployment_queue queued
+		               WHERE queued.org_id=$1 AND queued.project_id=request.project_id
+		                 AND queued.env_id=request.env_id AND queued.state='queued')
+		FROM requested request
+		LEFT JOIN deployment_environments environment
+		  ON environment.org_id=$1 AND environment.project_id=request.project_id AND environment.env_id=request.env_id
+		LEFT JOIN deployments latest ON latest.id=environment.last_state_deployment_id
+		LEFT JOIN environment_deployment_leases lease
+		  ON lease.environment_id=environment.id AND lease.deployment_id=latest.id AND lease.expires_at > now()
+		LEFT JOIN LATERAL (
+			SELECT deployment.id, deployment.module_artifacts
+			FROM deployments deployment
+			WHERE deployment.de_id=environment.id
+			  AND deployment.status='succeeded'
+			  AND deployment.mode IN ('deploy', 'rollback', 'destroy')
+			ORDER BY deployment.created_at DESC
+			LIMIT 1
+		) base ON true
+		ORDER BY request.ordinal`, orgID, pq.Array(projectIDs), pq.Array(environmentIDs))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query environment deployment readiness")
+	}
+	defer func() { _ = rows.Close() }()
+	result := make([]EnvironmentDeploymentReadiness, 0, len(refs))
+	for rows.Next() {
+		var item EnvironmentDeploymentReadiness
+		var artifacts json.RawMessage
+		if err := rows.Scan(
+			&item.ProjectID, &item.EnvID, opt.Scan(&item.EnvironmentUUID),
+			opt.Scan(&item.LatestDeploymentID), opt.Scan(&item.LatestStatus), opt.Scan(&item.LatestMode),
+			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts, &item.Queued,
+		); err != nil {
+			return nil, errors.Wrap(err, "failed to scan environment deployment readiness")
+		}
+		if err := json.Unmarshal(artifacts, &item.ActiveModules); err != nil {
+			return nil, errors.Wrap(err, "failed to decode active module inventory")
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "failed to iterate environment deployment readiness")
+	}
+	return result, nil
+}
+
 func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, optionalTx Tx, deploymentId uuid.UUID, params UpdateDeploymentStatusAndOutputsParams) (*DeploymentSummary, error) {
 	out := &DeploymentSummary{
 		Id: deploymentId,
@@ -487,7 +696,46 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 		}
 		return nil, errors.Wrap(err, "failed to update deployment")
 	}
+	if params.Status == DeploymentStatusSucceeded || params.Status == DeploymentStatusFailed {
+		if params.RunnerCompletionProven {
+			if err := RecordDeploymentCompletion(ctx, d.txOrDb(optionalTx), deploymentId); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := d.txOrDb(optionalTx).ExecContext(ctx, `DELETE FROM environment_deployment_leases WHERE deployment_id = $1`, deploymentId); err != nil {
+			return nil, errors.Wrap(err, "failed to release environment deployment lease")
+		}
+	}
 	return out, nil
+}
+
+func CompleteDeploymentSnapshot(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph) bool {
+	return len(tofu) > 0 && json.Valid(manifest) && json.Valid(graph) && strings.HasPrefix(strings.TrimSpace(string(manifest)), "{") && strings.HasPrefix(strings.TrimSpace(string(graph)), "{")
+}
+
+func RequiresEnvironmentLease(mode DeploymentMode) bool {
+	return mode == DeploymentModeDeploy || mode == DeploymentModeRollback || mode == DeploymentModeDestroy
+}
+
+func (d *databaser) RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error {
+	if ttl <= 0 {
+		ttl = DefaultEnvironmentLeaseTTL
+	}
+	result, err := d.txOrDb(optionalTx).ExecContext(ctx, `UPDATE environment_deployment_leases lease
+		SET heartbeat_at=now(), expires_at=now() + $1::interval
+		FROM deployments deployment
+		WHERE lease.deployment_id=$2 AND deployment.id=lease.deployment_id AND deployment.status='executing'`, ttl.String(), deploymentID)
+	if err != nil {
+		return errors.Wrap(err, "failed to renew environment deployment lease")
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to read renewed lease count")
+	}
+	if count != 1 {
+		return NewErrConflict("deployment no longer owns its environment lease")
+	}
+	return nil
 }
 
 func (d *databaser) CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error {
@@ -507,13 +755,43 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 func (d *databaser) DeleteDeploymentOutputsByCompletionDate(ctx context.Context, optionalTx Tx, completedBefore time.Time) ([]DeploymentSummary, error) {
 	logger := hlogger.TraceScopedLoggerFromCtx(d.logger, ctx)
+	// DP-owned external material follows its retained Deployment, not the short
+	// user-key transfer window. A replay receipt alone is insufficient: it may
+	// outlive the Deployment and must match the exact scoped wrapped identity.
 	if rs, err := d.txOrDb(optionalTx).QueryContext(
 		ctx, `
-WITH UpdatedDeployments AS (
-    UPDATE deployments
+WITH UpdatedLateResults AS (
+    UPDATE deployment_late_runner_results late SET encrypted_outputs=NULL
+    FROM deployments d JOIN deployment_environments environment ON d.de_id=environment.id
+    WHERE late.deployment_id=d.id AND d.completed_at<$1 AND late.encrypted_outputs IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM external_operation_deployments receipt
+          JOIN external_operation_material material
+            ON material.org_id=receipt.org_id AND material.plugin_id=receipt.plugin_id
+           AND material.operation_ref::text=receipt.operation_ref
+          WHERE receipt.deployment_id=d.id AND receipt.org_id=environment.org_id
+            AND receipt.project_id=environment.project_id AND receipt.env_id=environment.env_id
+            AND receipt.environment_uuid=environment.id AND receipt.project_uuid IS NOT NULL
+            AND material.recipient=d.encrypted_outputs_recipient AND material.recipient=late.recipient
+            AND material.encrypted_identity ~ '^vault:v[1-9][0-9]*:.+$'
+      )
+), UpdatedDeployments AS (
+    UPDATE deployments d
     SET outputs = ''::bytea
-    WHERE completed_at < $1 AND outputs != ''::bytea
-    RETURNING de_id, id
+    FROM deployment_environments environment
+    WHERE d.de_id = environment.id AND d.completed_at < $1 AND d.outputs != ''::bytea
+      AND NOT EXISTS (
+          SELECT 1 FROM external_operation_deployments receipt
+          JOIN external_operation_material material
+            ON material.org_id = receipt.org_id AND material.plugin_id = receipt.plugin_id
+           AND material.operation_ref::text = receipt.operation_ref
+          WHERE receipt.deployment_id = d.id AND receipt.org_id = environment.org_id
+            AND receipt.project_id = environment.project_id AND receipt.env_id = environment.env_id
+            AND receipt.environment_uuid = environment.id AND receipt.project_uuid IS NOT NULL
+            AND material.recipient = d.encrypted_outputs_recipient
+            AND material.encrypted_identity ~ '^vault:v[1-9][0-9]*:.+$'
+      )
+    RETURNING d.de_id, d.id
 )
 SELECT ud.id, e.org_id, e.project_id, e.env_id
 FROM UpdatedDeployments ud
@@ -543,7 +821,10 @@ INNER JOIN deployment_environments e ON ud.de_id = e.id;`, completedBefore,
 
 func (d *databaser) GetDeploymentEncryptedOutputs(ctx context.Context, optionalTx Tx, orgId string, deploymentId uuid.UUID) (string, error) {
 	var out string
-	if err := d.txOrDb(optionalTx).QueryRowContext(ctx, `SELECT d.outputs FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`, orgId, deploymentId).Scan(&out); err != nil {
+	if err := d.txOrDb(optionalTx).QueryRowContext(ctx, `SELECT COALESCE(NULLIF(d.outputs,''::bytea),
+        (SELECT late.encrypted_outputs FROM deployment_late_runner_results late WHERE late.deployment_id=d.id
+         AND late.org_id=e.org_id AND late.runner_id=d.runner_id AND late.result_status='success' AND late.recipient=d.encrypted_outputs_recipient),''::bytea)
+        FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`, orgId, deploymentId).Scan(&out); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", NewErrNotFound(fmt.Sprintf("deployment '%s' not found", deploymentId))
 		}

@@ -1,0 +1,315 @@
+//go:build integration
+
+package model
+
+import (
+	"context"
+	"database/sql"
+	"io/fs"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/pressly/goose/v3"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+)
+
+func TestDispatchBudgetStartsBeforeEffectAndNeverRefreshes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
+	require.NotEmpty(t, connection)
+	_, _, scoped := migrationTestDatabase(t, ctx, connection)
+	store, err := NewDatabaser(ctx, zap.NewNop(), scoped)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+	tx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	dep, err := store.CreateDeployment(ctx, tx, "budget-org", "project", "env", CreateDeploymentParams{
+		DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")})
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE deployments SET created_at=now()-interval '8 hours' WHERE id=$1`, dep.Id)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	dep, _, _, _, err = store.GetDeployment(ctx, nil, "budget-org", dep.Id, GetModeDefault)
+	require.NoError(t, err)
+	deadline, err := BeginDeploymentDispatch(ctx, store, dep)
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now().Add(time.Hour), deadline, 2*time.Second)
+	require.True(t, time.Now().After(dep.CreatedAt.Add(time.Hour)), "old admission timeout would already have failed this new first dispatch")
+	require.NoError(t, store.Close())
+	store, err = NewDatabaser(ctx, zap.NewNop(), scoped)
+	require.NoError(t, err)
+	again, err := BeginDeploymentDispatch(ctx, store, dep)
+	require.NoError(t, err)
+	require.Equal(t, deadline, again, "restart/redelivery cannot extend first-attempt budget")
+	tx, err = store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET first_attempt_at=now()-interval '2 hours',deadline=now()-interval '1 hour' WHERE deployment_id=$1`, dep.Id)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	_, err = BeginDeploymentDispatch(ctx, store, dep)
+	require.ErrorContains(t, err, "exhausted")
+}
+
+func dispatchedFailure(t *testing.T, ctx context.Context, store Databaser, env string, params CreateDeploymentParams, pluginDispatched bool) *DeploymentSummary {
+	t.Helper()
+	tx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	dep, err := store.CreateDeployment(ctx, tx, "unknown-org", "p", env, params)
+	require.NoError(t, err)
+	if pluginDispatched {
+		_, err = CreateExternalOperationDeploymentReceipt(ctx, tx, ExternalOperationDeploymentReceipt{
+			ExternalOperationDeploymentKey: ExternalOperationDeploymentKey{OrgID: "unknown-org", PluginID: "dev.example.rollouts", RequestID: uuid.NewString()},
+			OperationRef:                   uuid.NewString(), Fence: 1, AssertionAction: "external-deployment.admit", ServiceAction: "external-deployment.admit",
+			RequestBodySHA256: strings.Repeat("a", 64), ActorID: params.CreatedBy.String(), ProjectID: "p", EnvID: env,
+			ProjectUUID: opt.Of(uuid.New()), EnvironmentUUID: opt.Of(params.DeploymentEnvUuid), DeploymentID: dep.Id,
+		})
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	_, err = BeginDeploymentDispatch(ctx, store, dep)
+	require.NoError(t, err)
+	_, err = store.UpdateDeploymentStatusAndOutputs(ctx, nil, dep.Id, UpdateDeploymentStatusAndOutputsParams{Status: DeploymentStatusFailed, StatusMessage: "watchdog"})
+	require.NoError(t, err)
+	return dep
+}
+
+func dispatchTestStore(t *testing.T, ctx context.Context) Databaser {
+	t.Helper()
+	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
+	require.NotEmpty(t, connection)
+	_, _, scoped := migrationTestDatabase(t, ctx, connection)
+	store, err := NewDatabaser(ctx, zap.NewNop(), scoped)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	return store
+}
+
+func replaceHead(ctx context.Context, store Databaser, params CreateDeploymentParams) error {
+	tx, err := store.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := store.CreateDeployment(ctx, tx, "unknown-org", "p", "e", params); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func acknowledge(ctx context.Context, store Databaser, deploymentID, actorID uuid.UUID, reason string) (*DeploymentOutcomeAcknowledgement, bool, error) {
+	tx, err := store.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ack, replayed, err := AcknowledgeDeploymentOutcome(ctx, tx, "unknown-org", deploymentID, actorID, reason, time.Now())
+	if err != nil {
+		return nil, false, err
+	}
+	return ack, replayed, tx.Commit()
+}
+
+func TestOrdinaryFailedDispatchWithoutRunnerProofDoesNotBlockReplacement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	store := dispatchTestStore(t, ctx)
+	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
+	dep := dispatchedFailure(t, ctx, store, "e", params, false)
+	tx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	unknown, err := DeploymentOutcomeUnreconciled(ctx, tx, dep.Id)
+	require.NoError(t, err)
+	require.True(t, unknown, "the evidence stays honest; only the fence is scoped to plugin dispatches")
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, replaceHead(ctx, store, params), "ordinary Core behaviour: a terminal failure never blocks the next Deployment")
+	_, _, err = acknowledge(ctx, store, dep.Id, uuid.New(), "runner job deleted")
+	_, conflict := IsErrConflict(err)
+	require.True(t, conflict, "ordinary Deployments have nothing to acknowledge")
+}
+
+func TestPluginDispatchedUnknownFailureBlocksReplacementAfterLeaseExpiry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	store := dispatchTestStore(t, ctx)
+	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
+	dep := dispatchedFailure(t, ctx, store, "e", params, true)
+	_, err := store.(*databaser).ExecContext(ctx, `UPDATE environment_deployment_leases SET expires_at=now()-interval '1 second' WHERE deployment_id=$1`, dep.Id)
+	require.NoError(t, err)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled")
+	var total int
+	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT count(*) FROM deployments`).Scan(&total))
+	require.Equal(t, 1, total)
+}
+
+func TestPluginDispatchedUnknownFailureBlocksUntilAcknowledgedExactlyOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	store := dispatchTestStore(t, ctx)
+	params := CreateDeploymentParams{DeploymentEnvUuid: uuid.New(), Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")}
+	first := dispatchedFailure(t, ctx, store, "e", params, true)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled")
+
+	actor, reason := uuid.New(), "runner job deleted from the cluster"
+	_, _, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.ErrorContains(t, err, "dispatch window is open")
+	_, err = store.(*databaser).ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET first_attempt_at=now()-interval '2 hours', deadline=now()-interval '1 hour' WHERE deployment_id=$1`, first.Id)
+	require.NoError(t, err)
+
+	ack, replayed, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.False(t, replayed)
+	require.Equal(t, actor, ack.ActorID)
+	require.Equal(t, reason, ack.Reason)
+	require.Equal(t, params.DeploymentEnvUuid, ack.EnvironmentID)
+	require.Equal(t, "dev.example.rollouts", ack.PluginID)
+	again, replayed, err := acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	require.Equal(t, ack.AcknowledgedAt, again.AcknowledgedAt)
+	_, _, err = acknowledge(ctx, store, first.Id, uuid.New(), reason)
+	_, conflict := IsErrConflict(err)
+	require.True(t, conflict, "a different actor cannot rewrite the audit record")
+
+	second := dispatchedFailure(t, ctx, store, "e", params, true)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled", "the acknowledgement covers exactly one Deployment")
+	_, replayed, err = acknowledge(ctx, store, first.Id, actor, reason)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	require.ErrorContains(t, replaceHead(ctx, store, params), "unreconciled", "replaying an old acknowledgement unblocks nothing")
+	var acknowledgements int
+	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT count(*) FROM deployment_outcome_acknowledgements`).Scan(&acknowledgements))
+	require.Equal(t, 1, acknowledgements)
+	var failed string
+	require.NoError(t, store.(*databaser).QueryRowContext(ctx, `SELECT status FROM deployments WHERE id=$1`, first.Id).Scan(&failed))
+	require.Equal(t, string(DeploymentStatusFailed), failed, "acknowledgement never rewrites the Deployment")
+	require.NotEqual(t, first.Id, second.Id)
+}
+
+func TestUpgradeKeepsLegacyOrdinaryFailuresDeployableAndFencesPluginDispatches(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
+	require.NotEmpty(t, connection)
+	_, _, scoped := migrationTestDatabase(t, ctx, connection)
+	db, err := sql.Open("postgres", scoped)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	defer func() { require.NoError(t, db.Close()) }()
+	source, err := fs.Sub(embedMigrations, "migrations")
+	require.NoError(t, err)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true), goose.WithGoMigrations(goose.NewGoMigration(2, &goose.GoFunc{RunTx: hstandardoutbox.MigrateUp01}, &goose.GoFunc{RunTx: hstandardoutbox.MigrateDown01})))
+	require.NoError(t, err)
+	_, err = provider.UpTo(ctx, 30)
+	require.NoError(t, err)
+	ordinaryEnv, pluginEnv := uuid.New(), uuid.New()
+	// The Environment head foreign keys are deferred, so seed in one transaction.
+	seed, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = seed.Rollback() }()
+	for env, plugin := range map[uuid.UUID]bool{ordinaryEnv: false, pluginEnv: true} {
+		dep := uuid.New()
+		_, err = seed.ExecContext(ctx, `INSERT INTO deployment_environments(id,org_id,project_id,env_id,last_executing_deployment_id,last_executing_deployment_at,last_state_deployment_id,last_state_deployment_at) VALUES($1,'unknown-org','p',$2,$3,now(),$3,now())`, env, env.String(), dep)
+		require.NoError(t, err)
+		_, err = seed.ExecContext(
+			ctx,
+			`INSERT INTO deployments(id,de_id,mode,status,status_message,manifest,graph,tofu,runner_id,runner_log_level,created_by,created_at,completed_at) VALUES($1,$2,'deploy','failed','watchdog','{}','{}','terraform {}','runner','info',$3,now()-interval '3 hours',now()-interval '2 hours')`,
+			dep,
+			env,
+			uuid.New(),
+		)
+		require.NoError(t, err)
+		if plugin {
+			_, err = seed.ExecContext(ctx, `INSERT INTO external_operation_deployments(org_id,plugin_id,operation_ref,fence,request_id,assertion_action,service_action,request_body_sha256,actor_id,project_id,env_id,deployment_id)
+				VALUES('unknown-org','dev.example.rollouts',$1,1,$2,'external-deployment.admit','external-deployment.admit',$3,$4,'p',$5,$6)`, uuid.NewString(), uuid.NewString(), strings.Repeat("a", 64), uuid.NewString(), env.String(), dep)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, seed.Commit())
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
+	store, err := NewDatabaser(ctx, zap.NewNop(), scoped)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+	create := func(env uuid.UUID) error {
+		tx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		_, err = store.CreateDeployment(
+			ctx,
+			tx,
+			"unknown-org",
+			"p",
+			env.String(),
+			CreateDeploymentParams{DeploymentEnvUuid: env, Mode: DeploymentModeDeploy, CreatedBy: uuid.New(), RunnerId: "runner", RunnerLogLevel: "info", Manifest: EncodedDeploymentManifest(`{}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}")},
+		)
+		return err
+	}
+	require.NoError(t, create(ordinaryEnv), "a backfilled legacy ordinary failure must stay deployable after upgrade")
+	require.ErrorContains(t, create(pluginEnv), "unreconciled")
+}
+
+func TestDispatchEvidenceMigrationConservativeRestartAndGuardedDown(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
+	require.NotEmpty(t, connection)
+	_, _, scoped := migrationTestDatabase(t, ctx, connection)
+	db, err := sql.Open("postgres", scoped)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	defer func() { require.NoError(t, db.Close()) }()
+	source, err := fs.Sub(embedMigrations, "migrations")
+	require.NoError(t, err)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true), goose.WithGoMigrations(goose.NewGoMigration(2, &goose.GoFunc{RunTx: hstandardoutbox.MigrateUp01}, &goose.GoFunc{RunTx: hstandardoutbox.MigrateDown01})))
+	require.NoError(t, err)
+	_, err = provider.UpTo(ctx, 30)
+	require.NoError(t, err)
+	env, dep := uuid.New(), uuid.New()
+	seed, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = seed.Rollback() }()
+	_, err = seed.ExecContext(ctx, `INSERT INTO deployment_environments(id,org_id,project_id,env_id,last_executing_deployment_id,last_executing_deployment_at,last_state_deployment_id,last_state_deployment_at) VALUES($1,'legacy','p','e',$2,now(),$2,now());`, env, dep)
+	require.NoError(t, err)
+	_, err = seed.ExecContext(
+		ctx,
+		`INSERT INTO deployments(id,de_id,mode,status,status_message,manifest,graph,tofu,runner_id,runner_log_level,created_by,created_at) VALUES($1,$2,'deploy','executing','running','{}','{}','terraform {}','runner','info',$3,now()-interval '8 hours')`,
+		dep,
+		env,
+		uuid.New(),
+	)
+	require.NoError(t, err)
+	require.NoError(t, seed.Commit())
+	var legacyCreated time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT created_at FROM deployments WHERE id=$1`, dep).Scan(&legacyCreated))
+	_, err = db.ExecContext(ctx, `SET TIME ZONE 'Europe/Berlin'`)
+	require.NoError(t, err)
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
+	first, err := ReadDeploymentDispatchBudget(ctx, db, dep)
+	require.NoError(t, err)
+	require.True(t, first.Legacy)
+	require.True(t, legacyCreated.Equal(first.FirstAttemptAt.Time), "legacy UTC admission must not shift with the migrator session timezone")
+	require.True(t, first.Deadline.Time.Before(time.Now()))
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
+	second, err := ReadDeploymentDispatchBudget(ctx, db, dep)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	_, err = provider.DownTo(ctx, 30)
+	require.NoError(t, err, "empty new evidence allows schema30 fallback")
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET legacy=false WHERE deployment_id=$1`, dep)
+	require.NoError(t, err)
+	_, err = provider.DownTo(ctx, 30)
+	require.ErrorContains(t, err, "cannot discard durable Runner")
+}

@@ -80,9 +80,32 @@ func CreateDeployment(
 }
 
 type DeploymentOptions struct {
-	ExplicitModuleVersions  map[string]string
-	RestrictedConfirmations []uuid.UUID
-	AuthorizeModuleVersion  func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
+	ExplicitModuleVersions      map[string]string
+	RestrictedConfirmations     []uuid.UUID
+	ModuleOperationID           opt.Opt[uuid.UUID]
+	AuthorizeModuleVersion      func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error
+	ReuseLastSuccessfulManifest bool
+	IgnoreEnvironmentPins       bool
+	RequireExistingRunner       bool
+	ExpectedCurrentDeploymentID opt.Opt[uuid.UUID]
+	RetryOfRollbackDeploymentID opt.Opt[uuid.UUID]
+	ExpectedBaseDeploymentID    opt.Opt[uuid.UUID]
+	// A promoted queue item carries its key digest instead of the raw key.
+	IdempotencyKeyDigest opt.Opt[string]
+	QueueItemID          opt.Opt[uuid.UUID]
+	Admission            *OrdinaryDeploymentAdmissionAttempt
+	CapturePlan          *DeploymentPlanCapture
+	ValidatePlan         func(DeploymentPlanCapture) error
+}
+
+// DeploymentPlanCapture keeps the exact DP-internal planning snapshot. HTTP
+// adapters must expose only a value-free projection of Manifest and Graph.
+type DeploymentPlanCapture struct {
+	BaseDeploymentID uuid.UUID
+	Manifest         json.RawMessage
+	Graph            json.RawMessage
+	Diff             json.RawMessage
+	ModuleArtifacts  []model.ModuleArtifactRequirement
 }
 
 func CreateDeploymentWithOptions(
@@ -93,7 +116,7 @@ func CreateDeploymentWithOptions(
 	db model.Databaser, tx model.Tx, options DeploymentOptions,
 ) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
 	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
-		return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("environment is in status '%s'", env.Status))
+		return nil, nil, nil, model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status))
 	}
 	isRollback := mode == model.DeploymentModeRollback || mode == model.DeploymentModeRollbackPlan
 	useLastGraph := mode == model.DeploymentModeDestroy || isRollback
@@ -101,6 +124,9 @@ func CreateDeploymentWithOptions(
 		return nil, nil, nil, errors.Errorf("manifest should be empty on destroy or rollback deployments")
 	}
 
+	if env.RunnerId == nil && options.RequireExistingRunner {
+		return nil, nil, nil, model.NewErrConflict("environment has no assigned runner for planning")
+	}
 	if env.RunnerId == nil {
 		if r, err := cp.UpdateRunnerInAnEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.UpdateRunnerInAnEnvironmentParams{}); err != nil {
 			return nil, nil, nil, errors.Wrap(err, "failed to update runner in environment")
@@ -113,14 +139,12 @@ func CreateDeploymentWithOptions(
 		}
 	}
 
-	// If the idempotency key was provided, then we use the hex(sha256(.)) digest.
-	var idempotencyKeyDigest opt.Opt[string]
-	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
+	idempotencyKeyDigest := options.IdempotencyKeyDigest
 	if idempotencyKey != nil {
-		h := sha256.New()
-		_, _ = h.Write([]byte(*idempotencyKey))
-		idempotencyKeyDigest = opt.Of(hex.EncodeToString(h.Sum(nil)))
-
+		idempotencyKeyDigest = opt.Of(digestIdempotencyKey(*idempotencyKey))
+	}
+	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
+	if idempotencyKeyDigest.IsSet() {
 		if d, m, err := db.GetDeploymentByIdempotencyKeyDigest(ctx, tx, orgId, projectId, envId, idempotencyKeyDigest.Must()); err != nil {
 			if _, ok := model.IsErrNotFound(err); !ok {
 				return nil, nil, nil, errors.Wrap(err, "failed to get deployment by idempotency key digest")
@@ -180,6 +204,15 @@ func CreateDeploymentWithOptions(
 			logger.Info("identified reference deployment", zap.String("deployment_id", d.Id.String()))
 		}
 	}
+	if options.ReuseLastSuccessfulManifest {
+		if lastGraph == nil || lastDeploymentId == uuid.Nil {
+			return nil, nil, nil, model.NewErrConflict("environment has no effective deployment base")
+		}
+		if !lastDeploymentSucceeded {
+			return nil, nil, nil, model.NewErrConflict("latest mutating deployment is not a successful planning base")
+		}
+		manifest = lastManifest
+	}
 	if mode == model.DeploymentModeDestroy && lastGraph == nil {
 		return nil, nil, nil, model.NewErrConflict("cannot destroy an environment that has never been deployed")
 	}
@@ -231,6 +264,18 @@ func CreateDeploymentWithOptions(
 	if len(activeDefinitions) > 0 {
 		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
 			request.Header.Set("X-Stellwerk-Active-Module-Versions", strings.Join(activeDefinitions, ","))
+			return nil
+		})
+	}
+	if options.IgnoreEnvironmentPins {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Planning", "true")
+			return nil
+		})
+	}
+	if options.ModuleOperationID.IsSet() {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Id", options.ModuleOperationID.Must().String())
 			return nil
 		})
 	}
@@ -372,6 +417,42 @@ func CreateDeploymentWithOptions(
 			}
 		}
 	}
+	carryForwardVersions, confirmedRestrictedVersions := deploymentAdmissionLifecycleEvidence(mode, activeDefinitions, deploymentArtifacts)
+	if options.Admission != nil {
+		if err := options.Admission.Authorize(ctx, tx, deploymentArtifacts, ordinaryDeploymentCompiledIntent{
+			ProjectID: projectId, EnvironmentID: envId, RunnerID: runner.Id,
+			EffectiveBaseDeploymentID: lastDeploymentId,
+			RollbackToDeploymentID:    uuid.NullUUID{UUID: rollbackTo.Or(uuid.Nil), Valid: rollbackTo.IsSet()},
+			Manifest:                  rawManifest, Graph: rawNewGraph, Tofu: rawTofu,
+			EncryptedOutputsRecipient:  ref.DerefOr(encryptedOutputsRecipient, ""),
+			EncryptedLogsRecipient:     ref.DerefOr(encryptedLogsRecipient, ""),
+			RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+			CarryForwardModuleVersions: carryForwardVersions, ConfirmedRestrictedVersionUUIDs: confirmedRestrictedVersions,
+		}); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if options.CapturePlan != nil || options.ValidatePlan != nil {
+		rawDiff, err := json.Marshal(diff)
+		if err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to serialize deployment diff")
+		}
+		captured := DeploymentPlanCapture{
+			BaseDeploymentID: lastDeploymentId,
+			Manifest:         slices.Clone(rawManifest),
+			Graph:            slices.Clone(rawNewGraph),
+			Diff:             rawDiff,
+			ModuleArtifacts:  slices.Clone(deploymentArtifacts),
+		}
+		if options.CapturePlan != nil {
+			*options.CapturePlan = captured
+		}
+		if options.ValidatePlan != nil {
+			if err := options.ValidatePlan(captured); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
 
 	if dryRun {
 		return &model.DeploymentSummary{
@@ -393,24 +474,31 @@ func CreateDeploymentWithOptions(
 	}
 
 	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, model.CreateDeploymentParams{
-		CreatedBy:                  createdBy,
-		DeploymentEnvUuid:          env.Uuid,
-		Mode:                       mode,
-		Manifest:                   rawManifest,
-		RollbackToId:               rollbackTo,
-		Graph:                      rawNewGraph,
-		Tofu:                       rawTofu,
-		IdempotencyKeyDigest:       idempotencyKeyDigest,
-		RunnerId:                   runner.Id,
-		EncryptedOutputsRecipient:  opt.OfRef(encryptedOutputsRecipient),
-		EncryptedLogsRecipient:     opt.OfRef(encryptedLogsRecipient),
-		Metrics:                    metrics,
-		RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
-		ModuleArtifacts:            deploymentArtifacts,
-		ModuleVersionRequestDigest: requestDigest,
+		CreatedBy:                   createdBy,
+		DeploymentEnvUuid:           env.Uuid,
+		Mode:                        mode,
+		Manifest:                    rawManifest,
+		RollbackToId:                rollbackTo,
+		Graph:                       rawNewGraph,
+		Tofu:                        rawTofu,
+		IdempotencyKeyDigest:        idempotencyKeyDigest,
+		RunnerId:                    runner.Id,
+		EncryptedOutputsRecipient:   opt.OfRef(encryptedOutputsRecipient),
+		EncryptedLogsRecipient:      opt.OfRef(encryptedLogsRecipient),
+		Metrics:                     metrics,
+		RunnerLogLevel:              string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		ModuleArtifacts:             deploymentArtifacts,
+		ModuleVersionRequestDigest:  requestDigest,
+		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
+		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
+		ExpectedBaseDeploymentID:    options.ExpectedBaseDeploymentID,
+		QueueItemID:                 options.QueueItemID,
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
+	}
+	if err := options.Admission.Bind(ctx, tx, d.Id); err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to bind Deployment admission receipt")
 	}
 	diff.ToDeploymentId = ref.Ref(d.Id)
 
@@ -445,6 +533,36 @@ func CreateDeploymentWithOptions(
 	)
 
 	return d, messages, &diff, nil
+}
+
+// digestIdempotencyKey is the only form in which an idempotency key is stored.
+func digestIdempotencyKey(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(digest[:])
+}
+
+func deploymentAdmissionLifecycleEvidence(mode model.DeploymentMode, activeDefinitions []string, artifacts []model.ModuleArtifactRequirement) (map[string]uuid.UUID, []uuid.UUID) {
+	carryForwardVersions := make(map[string]uuid.UUID)
+	confirmedRestrictedVersions := make([]uuid.UUID, 0)
+	if mode == model.DeploymentModeDestroy {
+		return carryForwardVersions, confirmedRestrictedVersions
+	}
+	activeCoordinates := make(map[string]struct{}, len(activeDefinitions))
+	for _, coordinate := range activeDefinitions {
+		activeCoordinates[coordinate] = struct{}{}
+	}
+	for _, artifact := range artifacts {
+		if _, carriedForward := activeCoordinates[artifact.ModuleID+"@"+artifact.Version]; carriedForward {
+			carryForwardVersions[artifact.ModuleUUID.String()] = artifact.VersionUUID
+		}
+		if artifact.ConfirmedRestrictedVersionUUID != nil {
+			confirmedRestrictedVersions = append(confirmedRestrictedVersions, *artifact.ConfirmedRestrictedVersionUUID)
+		}
+	}
+	slices.SortFunc(confirmedRestrictedVersions, func(a, b uuid.UUID) int {
+		return strings.Compare(a.String(), b.String())
+	})
+	return carryForwardVersions, confirmedRestrictedVersions
 }
 
 func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid.UUID) string {
@@ -574,7 +692,8 @@ func moduleArtifactRequirements(graph *platformorchestratorgraph.Graph[*graphs.G
 			return nil, model.NewErrConflict(fmt.Sprintf("module %s has no immutable version metadata", key))
 		}
 		byKey[key] = model.ModuleArtifactRequirement{
-			ModuleID: configuration.DefinitionId, Version: configuration.VersionId, Source: artifact.Source,
+			ModuleID: configuration.DefinitionId, ModuleUUID: artifact.ModuleUUID,
+			Version: configuration.VersionId, VersionUUID: artifact.VersionUUID, Source: artifact.Source,
 			SemanticVersion: artifact.SemanticVersion, MigrationGeneration: artifact.MigrationGeneration,
 			ArtifactDigest: artifact.Digest, RetainedArtifactException: retainedArtifactException,
 		}

@@ -53,6 +53,15 @@ func TestReadKey(t *testing.T) {
 			},
 		},
 		{
+			Name:            "should read a symmetric encryption key",
+			VaultStatusCode: http.StatusOK,
+			VaultResponse:   `{"data":{"type":"aes256-gcm96","latest_version":1,"keys":{"1":1},"name":"test-key"}}`,
+			Expected: &TransitKey{
+				Type: AES256GCM96, LatestVersion: 1, Name: testTransitKey,
+				Keys: map[string]TransitKeyVersion{"1": {}},
+			},
+		},
+		{
 			Name:            "should handle the missing key (not found)",
 			VaultStatusCode: http.StatusNotFound,
 			Expected:        ErrSecretNotFound,
@@ -177,6 +186,45 @@ func TestCreateKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTransitEnvelopeEncryption(t *testing.T) {
+	plaintext := []byte("age-secret-key")
+	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, vaultToken, r.Header.Get("X-Vault-Token"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/transit/keys/" + testTransitKey:
+			assert.Equal(t, http.MethodPut, r.Method)
+			var request map[string]interface{}
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			assert.Equal(t, map[string]interface{}{"type": AES256GCM96, "auto_rotate_period": "720h"}, request)
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		case "/v1/transit/encrypt/" + testTransitKey:
+			assert.Equal(t, http.MethodPut, r.Method)
+			var request map[string]string
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			assert.Equal(t, "YWdlLXNlY3JldC1rZXk=", request["plaintext"])
+			_, _ = w.Write([]byte(`{"data":{"ciphertext":"vault:v1:ciphertext"}}`))
+		case "/v1/transit/decrypt/" + testTransitKey:
+			assert.Equal(t, http.MethodPut, r.Method)
+			var request map[string]string
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			assert.Equal(t, "vault:v1:ciphertext", request["ciphertext"])
+			_, _ = w.Write([]byte(`{"data":{"plaintext":"YWdlLXNlY3JldC1rZXk="}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(fakeServer.Close)
+	vlt := NewTestVaultClient(t, fakeServer.URL, fakeServer.Client())
+	require.NoError(t, vlt.CreateEncryptionKey(t.Context(), testTransitKey, "720h"))
+	ciphertext, err := vlt.Encrypt(t.Context(), testTransitKey, plaintext)
+	require.NoError(t, err)
+	require.Equal(t, "vault:v1:ciphertext", ciphertext)
+	decoded, err := vlt.Decrypt(t.Context(), testTransitKey, ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, decoded)
 }
 
 func TestSignData(t *testing.T) {

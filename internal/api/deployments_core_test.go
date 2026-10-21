@@ -114,6 +114,23 @@ func TestActiveModuleDefinitionsExcludeRemovedResources(t *testing.T) {
 	assert.Equal(t, []string{"postgres@opaque-history"}, activeModuleDefinitions(graph))
 }
 
+func TestDeploymentAdmissionLifecycleEvidenceUsesOnlyExactCompiledTargets(t *testing.T) {
+	carriedModule, changedModule := uuid.New(), uuid.New()
+	carriedVersion, changedVersion := uuid.New(), uuid.New()
+	confirmedVersion := uuid.New()
+	artifacts := []model.ModuleArtifactRequirement{
+		{ModuleID: "database", ModuleUUID: carriedModule, Version: "1.0.0", VersionUUID: carriedVersion, ConfirmedRestrictedVersionUUID: &confirmedVersion},
+		{ModuleID: "cache", ModuleUUID: changedModule, Version: "2.0.0", VersionUUID: changedVersion},
+	}
+	carryForward, confirmations := deploymentAdmissionLifecycleEvidence(model.DeploymentModeDeploy, []string{"database@1.0.0", "cache@1.0.0"}, artifacts)
+	require.Equal(t, map[string]uuid.UUID{carriedModule.String(): carriedVersion}, carryForward)
+	require.Equal(t, []uuid.UUID{confirmedVersion}, confirmations)
+
+	carryForward, confirmations = deploymentAdmissionLifecycleEvidence(model.DeploymentModeDestroy, []string{"database@1.0.0"}, artifacts)
+	require.Empty(t, carryForward)
+	require.Empty(t, confirmations)
+}
+
 func TestDiffGraphs_empty(t *testing.T) {
 	assert.Empty(t, DiffGraphs(
 		uuid.New(),

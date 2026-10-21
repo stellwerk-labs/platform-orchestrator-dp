@@ -73,6 +73,9 @@ func (k *KubernetesRunner) Start(ctx context.Context) error {
 		return errors.Wrap(err, "failed to obtain access to the runner cluster")
 	}
 
+	if !k.deploymentSummary.DispatchDeadline.IsZero() && !time.Now().Before(k.deploymentSummary.DispatchDeadline) {
+		return errors.New("Runner dispatch budget is exhausted")
+	}
 	job, err := k8sClient.CreateJob(ctx, jobCfg, k.runnerImage, k.metadataOutputKey, k.deploymentSummary, k.gatewayConfiguration)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -120,13 +123,13 @@ func (k *KubernetesRunner) CheckStatus(ctx context.Context) (*RunnerStatus, erro
 			// we must introduce a delay before considering it stuck as we experienced some system can take long time to schedule the job
 			return &RunnerStatus{
 				IsCompleted: false,
-				IsStuck:     time.Since(k.deploymentSummary.CreatedAt) > k.podSchedulingDelay,
+				IsStuck:     time.Since(runnerDispatchStart(k.deploymentSummary)) > k.podSchedulingDelay,
 			}, nil
 		}
 		return nil, errors.Wrap(err, "failed to check job status")
 	}
 
-	jobStartDate := ref.DerefOr(jobStatus.StartTime, v1.NewTime(k.deploymentSummary.CreatedAt))
+	jobStartDate := ref.DerefOr(jobStatus.StartTime, v1.NewTime(runnerDispatchStart(k.deploymentSummary)))
 	if jobStatus.Failed > 0 || jobStatus.Succeeded > 0 {
 		return &RunnerStatus{
 			IsCompleted: true,

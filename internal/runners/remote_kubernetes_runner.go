@@ -98,7 +98,10 @@ func (r *RemoteKubernetesRunner) Start(ctx context.Context) error {
 		Namespace:     jobCfg.Namespace,
 		Configuration: jobSpecMap,
 	}
-	expiresAt := time.Now().UTC().Add(r.commandTTL)
+	expiresAt, err := boundedRunnerCommandExpiry(time.Now().UTC(), r.commandTTL, r.deploymentSummary.DispatchDeadline)
+	if err != nil {
+		return err
+	}
 	if err := r.commandPublisher.PublishCreateJob(
 		ctx,
 		r.deploymentSummary.OrgId,
@@ -113,6 +116,24 @@ func (r *RemoteKubernetesRunner) Start(ctx context.Context) error {
 
 	r.logger.Info("queued create-job command for remote runner", zap.Time("expires_at", expiresAt))
 	return nil
+}
+
+func boundedRunnerCommandExpiry(now time.Time, ttl time.Duration, deadline time.Time) (time.Time, error) {
+	if !deadline.IsZero() && !now.Before(deadline) {
+		return time.Time{}, errors.New("Runner dispatch budget is exhausted")
+	}
+	expires := now.Add(ttl)
+	if !deadline.IsZero() && expires.After(deadline) {
+		expires = deadline
+	}
+	return expires, nil
+}
+
+func runnerDispatchStart(deployment *model.DeploymentSummary) time.Time {
+	if !deployment.DispatchDeadline.IsZero() {
+		return deployment.DispatchDeadline.Add(-model.RunnerExecutionBudget)
+	}
+	return deployment.CreatedAt
 }
 
 func (r *RemoteKubernetesRunner) IsRunning(context.Context) (bool, error) {

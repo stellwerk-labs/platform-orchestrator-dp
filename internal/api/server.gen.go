@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,8 +26,9 @@ import (
 )
 
 const (
-	JwtAuthScopes      jwtAuthContextKey      = "jwtAuth.Scopes"
-	UserIdHeaderScopes userIdHeaderContextKey = "userIdHeader.Scopes"
+	JwtAuthScopes       jwtAuthContextKey       = "jwtAuth.Scopes"
+	PluginContextScopes pluginContextContextKey = "pluginContext.Scopes"
+	UserIdHeaderScopes  userIdHeaderContextKey  = "userIdHeader.Scopes"
 )
 
 // Defines values for DeploymentCreateBodyMode.
@@ -74,6 +76,24 @@ func (e DeploymentCreateBodyRunnerLogLevel) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentCreateBodyWhenBusy.
+const (
+	Queue  DeploymentCreateBodyWhenBusy = "queue"
+	Reject DeploymentCreateBodyWhenBusy = "reject"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentCreateBodyWhenBusy enum.
+func (e DeploymentCreateBodyWhenBusy) Valid() bool {
+	switch e {
+	case Queue:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentDiffChangeType.
 const (
 	DeploymentDiffChangeTypeAdded         DeploymentDiffChangeType = "added"
@@ -98,6 +118,51 @@ func (e DeploymentDiffChangeType) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentQueueItemMode.
+const (
+	DeploymentQueueItemModeDeploy   DeploymentQueueItemMode = "deploy"
+	DeploymentQueueItemModeRollback DeploymentQueueItemMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemMode enum.
+func (e DeploymentQueueItemMode) Valid() bool {
+	switch e {
+	case DeploymentQueueItemModeDeploy:
+		return true
+	case DeploymentQueueItemModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentQueueItemState.
+const (
+	Cancelled  DeploymentQueueItemState = "cancelled"
+	Dispatched DeploymentQueueItemState = "dispatched"
+	Expired    DeploymentQueueItemState = "expired"
+	Queued     DeploymentQueueItemState = "queued"
+	Rejected   DeploymentQueueItemState = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemState enum.
+func (e DeploymentQueueItemState) Valid() bool {
+	switch e {
+	case Cancelled:
+		return true
+	case Dispatched:
+		return true
+	case Expired:
+		return true
+	case Queued:
+		return true
+	case Rejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentResultsUpdateBodyStatus.
 const (
 	Failure DeploymentResultsUpdateBodyStatus = "failure"
@@ -116,6 +181,183 @@ func (e DeploymentResultsUpdateBodyStatus) Valid() bool {
 	}
 }
 
+// Defines values for EnvironmentFenceCode.
+const (
+	OutcomeUnreconciled EnvironmentFenceCode = "outcome_unreconciled"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceCode enum.
+func (e EnvironmentFenceCode) Valid() bool {
+	switch e {
+	case OutcomeUnreconciled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EnvironmentFenceRemedy.
+const (
+	AcknowledgeOutcome EnvironmentFenceRemedy = "acknowledge-outcome"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceRemedy enum.
+func (e EnvironmentFenceRemedy) Valid() bool {
+	switch e {
+	case AcknowledgeOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentAdmissionBodyMode.
+const (
+	ExternalDeploymentAdmissionBodyModeDeploy   ExternalDeploymentAdmissionBodyMode = "deploy"
+	ExternalDeploymentAdmissionBodyModeRollback ExternalDeploymentAdmissionBodyMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyMode enum.
+func (e ExternalDeploymentAdmissionBodyMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyModeDeploy:
+		return true
+	case ExternalDeploymentAdmissionBodyModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentAdmissionBodyRunnerLogLevel.
+const (
+	ExternalDeploymentAdmissionBodyRunnerLogLevelDebug ExternalDeploymentAdmissionBodyRunnerLogLevel = "debug"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelError ExternalDeploymentAdmissionBodyRunnerLogLevel = "error"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelInfo  ExternalDeploymentAdmissionBodyRunnerLogLevel = "info"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelWarn  ExternalDeploymentAdmissionBodyRunnerLogLevel = "warn"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyRunnerLogLevel enum.
+func (e ExternalDeploymentAdmissionBodyRunnerLogLevel) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelDebug:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelError:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelInfo:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentStatusResponseMode.
+const (
+	ExternalDeploymentStatusModeDeploy   ExternalDeploymentStatusResponseMode = "deploy"
+	ExternalDeploymentStatusModeDestroy  ExternalDeploymentStatusResponseMode = "destroy"
+	ExternalDeploymentStatusModeRollback ExternalDeploymentStatusResponseMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseMode enum.
+func (e ExternalDeploymentStatusResponseMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusModeDeploy:
+		return true
+	case ExternalDeploymentStatusModeDestroy:
+		return true
+	case ExternalDeploymentStatusModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentStatusResponseStatus.
+const (
+	ExternalDeploymentStatusExecuting ExternalDeploymentStatusResponseStatus = "executing"
+	ExternalDeploymentStatusFailed    ExternalDeploymentStatusResponseStatus = "failed"
+	ExternalDeploymentStatusSucceeded ExternalDeploymentStatusResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseStatus enum.
+func (e ExternalDeploymentStatusResponseStatus) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusExecuting:
+		return true
+	case ExternalDeploymentStatusFailed:
+		return true
+	case ExternalDeploymentStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessLatestMode.
+const (
+	ExternalEnvironmentReadinessLatestModeDeploy   ExternalEnvironmentReadinessLatestMode = "deploy"
+	ExternalEnvironmentReadinessLatestModeDestroy  ExternalEnvironmentReadinessLatestMode = "destroy"
+	ExternalEnvironmentReadinessLatestModeRollback ExternalEnvironmentReadinessLatestMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessLatestMode enum.
+func (e ExternalEnvironmentReadinessLatestMode) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessLatestModeDeploy:
+		return true
+	case ExternalEnvironmentReadinessLatestModeDestroy:
+		return true
+	case ExternalEnvironmentReadinessLatestModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessLatestStatus.
+const (
+	ExternalEnvironmentReadinessLatestStatusExecuting ExternalEnvironmentReadinessLatestStatus = "executing"
+	ExternalEnvironmentReadinessLatestStatusFailed    ExternalEnvironmentReadinessLatestStatus = "failed"
+	ExternalEnvironmentReadinessLatestStatusSucceeded ExternalEnvironmentReadinessLatestStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessLatestStatus enum.
+func (e ExternalEnvironmentReadinessLatestStatus) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessLatestStatusExecuting:
+		return true
+	case ExternalEnvironmentReadinessLatestStatusFailed:
+		return true
+	case ExternalEnvironmentReadinessLatestStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessState.
+const (
+	ExternalEnvironmentReadinessStateBusy         ExternalEnvironmentReadinessState = "busy"
+	ExternalEnvironmentReadinessStateReady        ExternalEnvironmentReadinessState = "ready"
+	ExternalEnvironmentReadinessStateUnreconciled ExternalEnvironmentReadinessState = "unreconciled"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessState enum.
+func (e ExternalEnvironmentReadinessState) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessStateBusy:
+		return true
+	case ExternalEnvironmentReadinessStateReady:
+		return true
+	case ExternalEnvironmentReadinessStateUnreconciled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MetadataKeySchemaType.
 const (
 	MetadataKeySchemaTypeString MetadataKeySchemaType = "string"
@@ -125,6 +367,21 @@ const (
 func (e MetadataKeySchemaType) Valid() bool {
 	switch e {
 	case MetadataKeySchemaTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PendingEnvironmentChangesCode.
+const (
+	ResultMayChange PendingEnvironmentChangesCode = "result_may_change"
+)
+
+// Valid indicates whether the value is a known member of the PendingEnvironmentChangesCode enum.
+func (e PendingEnvironmentChangesCode) Valid() bool {
+	switch e {
+	case ResultMayChange:
 		return true
 	default:
 		return false
@@ -256,6 +513,14 @@ type Deployment struct {
 	// Example: development-01
 	EnvId string `json:"env_id"`
 
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
+
 	// Id The unique deployment id
 	//
 	// Example: 01234567-89ab-cdef-0123-4566789abcdef
@@ -276,6 +541,12 @@ type Deployment struct {
 	//
 	// Example: my-org
 	OrgId OrganizationId `json:"org_id"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// PlanOnly Whether the deployment is executed in plan mode.
 	//
@@ -334,6 +605,18 @@ type DeploymentCreateBody struct {
 	// Example: development
 	EnvId string `json:"env_id"`
 
+	// ExpectedBaseDeploymentId The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`
+	// when the Environment's current Deployment differs at the moment the Deployment is created, also when a queued request
+	// is promoted. Dry runs do not check it.
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+
+	// HaltOnFailure Whether a queued request must not start when the Deployment it waited for failed. That Deployment is the
+	// Environment's last deploy, rollback or destroy at promotion, provided it ended after the request was queued;
+	// plan runs never count, and a later Deployment supersedes an earlier failure. The request then ends `rejected`
+	// with the reason code `previous_deployment_failed` and the queue continues with the next request. A request that
+	// starts at once, a plan-only request and a dry run never halt. Not valid with `when_busy` set to `reject`.
+	HaltOnFailure *bool `json:"halt_on_failure,omitempty"`
+
 	// IsDryRun Whether to just validate the request and not persist or execute it.
 	IsDryRun bool `json:"is_dry_run,omitempty"`
 
@@ -363,6 +646,10 @@ type DeploymentCreateBody struct {
 	// Example: my-project
 	ProjectId string `json:"project_id"`
 
+	// QueueTtlSeconds How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not
+	// exceed its configured maximum. Not valid with `when_busy` set to `reject`.
+	QueueTtlSeconds *int `json:"queue_ttl_seconds,omitempty"`
+
 	// RollbackToDeploymentId Optional ID to rollback to when the deployment mode is 'rollback' or 'rollback_plan'.
 	//
 	// Example: 01234567-89ab-cdef-0123-456789abcdef
@@ -372,6 +659,14 @@ type DeploymentCreateBody struct {
 	//
 	// Example: info
 	RunnerLogLevel *DeploymentCreateBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+
+	// WhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+	// or is still settling the previous Deployment with Core. `queue` (the default) waits in the Environment's
+	// deployment queue and answers 202 with the queue item. `reject` answers 409 with the error code
+	// `environment_busy`. A queued request is resolved like a new request when it reaches the head of the queue.
+	// Requests authorized by an organization token cannot wait and get 409 `environment_busy` either way. Plan-only
+	// requests and dry runs are never queued and ignore this field.
+	WhenBusy *DeploymentCreateBodyWhenBusy `json:"when_busy,omitempty"`
 }
 
 // DeploymentCreateBodyMode The mode of the deployment. Defaults to 'deploy'. Can be set to 'rollback' to rollback to the graph used in
@@ -385,6 +680,14 @@ type DeploymentCreateBodyMode string
 //
 // Example: info
 type DeploymentCreateBodyRunnerLogLevel string
+
+// DeploymentCreateBodyWhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+// or is still settling the previous Deployment with Core. `queue` (the default) waits in the Environment's
+// deployment queue and answers 202 with the queue item. `reject` answers 409 with the error code
+// `environment_busy`. A queued request is resolved like a new request when it reaches the head of the queue.
+// Requests authorized by an organization token cannot wait and get 409 `environment_busy` either way. Plan-only
+// requests and dry runs are never queued and ignore this field.
+type DeploymentCreateBodyWhenBusy string
 
 // DeploymentDiff Describes a diff between the resource graphs of two deployments.
 type DeploymentDiff struct {
@@ -432,6 +735,12 @@ type DeploymentDiffChangeType string
 type DeploymentDryRun struct {
 	// Diff Describes a diff between the resource graphs of two deployments.
 	Diff DeploymentDiff `json:"diff"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// RunnerId The Runner ID that this deployment would have executed on
 	//
@@ -512,6 +821,26 @@ type DeploymentMetrics struct {
 	NumWorkloads int `json:"num_workloads"`
 }
 
+// DeploymentOutcomeAcknowledgement defines model for DeploymentOutcomeAcknowledgement.
+type DeploymentOutcomeAcknowledgement struct {
+	AcknowledgedAt time.Time          `json:"acknowledged_at"`
+	ActorId        openapi_types.UUID `json:"actor_id"`
+	DeploymentId   openapi_types.UUID `json:"deployment_id"`
+	EnvironmentId  openapi_types.UUID `json:"environment_id"`
+	OperationRef   string             `json:"operation_ref"`
+	PluginId       string             `json:"plugin_id"`
+	Reason         string             `json:"reason"`
+
+	// Replayed True when this identical acknowledgement had already been recorded.
+	Replayed bool `json:"replayed"`
+}
+
+// DeploymentOutcomeAcknowledgementBody defines model for DeploymentOutcomeAcknowledgementBody.
+type DeploymentOutcomeAcknowledgementBody struct {
+	// Reason Why the operator is certain the Runner attempt can no longer change the Environment, for example the confirmed removal of its job.
+	Reason string `json:"reason"`
+}
+
 // DeploymentPage A page of deployments
 type DeploymentPage struct {
 	Items []DeploymentSummary `json:"items"`
@@ -519,6 +848,79 @@ type DeploymentPage struct {
 	// NextPageToken The page token to use to request the next page of items
 	NextPageToken *string `json:"next_page_token,omitempty"`
 }
+
+// DeploymentQueueCancelBody defines model for DeploymentQueueCancelBody.
+type DeploymentQueueCancelBody struct {
+	// Reason Why the request is no longer wanted.
+	Reason *string `json:"reason,omitempty"`
+}
+
+// DeploymentQueueItem A deploy or rollback request waiting for its Environment, or the record of how its wait ended.
+type DeploymentQueueItem struct {
+	// Attempts Promotion attempts that failed transiently, for example while Core was unavailable.
+	Attempts  int                `json:"attempts"`
+	CreatedAt time.Time          `json:"created_at"`
+	CreatedBy openapi_types.UUID `json:"created_by"`
+
+	// DeploymentId The Deployment the item became once dispatched.
+	DeploymentId             *openapi_types.UUID `json:"deployment_id,omitempty"`
+	EnvId                    string              `json:"env_id"`
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+	ExpiresAt                time.Time           `json:"expires_at"`
+
+	// HaltOnFailure The item is rejected with `previous_deployment_failed` instead of being promoted when the Deployment it waited
+	// for failed.
+	HaltOnFailure bool               `json:"halt_on_failure"`
+	Id            openapi_types.UUID `json:"id"`
+
+	// LastError The most recent transient promotion failure.
+	LastError *string `json:"last_error,omitempty"`
+
+	// Manifest The manifest associated with a deployment
+	Manifest *DeploymentManifest     `json:"manifest,omitempty"`
+	Mode     DeploymentQueueItemMode `json:"mode"`
+	OrgId    string                  `json:"org_id"`
+
+	// Position The 1-based position in the Environment's queue while queued, otherwise 0.
+	Position  int    `json:"position"`
+	ProjectId string `json:"project_id"`
+
+	// ReasonCode Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,
+	// `outcome_unreconciled`, `deployment_base_changed`, `previous_deployment_failed`, `pin_protection` or
+	// `actor_forbidden`.
+	ReasonCode *string `json:"reason_code,omitempty"`
+
+	// ReasonDeploymentId The Deployment the reason refers to: for `previous_deployment_failed` the failed Deployment the item waited
+	// for, for `outcome_unreconciled` the failed plugin-dispatched Deployment whose outcome is unreconciled, for
+	// `deployment_base_changed` the Environment's current Deployment that replaced the expected base. Absent when
+	// the reason refers to no Deployment.
+	ReasonDeploymentId     *openapi_types.UUID `json:"reason_deployment_id,omitempty"`
+	ReasonMessage          *string             `json:"reason_message,omitempty"`
+	RollbackToDeploymentId *openapi_types.UUID `json:"rollback_to_deployment_id,omitempty"`
+	SettledAt              *time.Time          `json:"settled_at,omitempty"`
+
+	// SettledBy The user who cancelled the item.
+	SettledBy *openapi_types.UUID `json:"settled_by,omitempty"`
+
+	// State `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+	// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+	State DeploymentQueueItemState `json:"state"`
+}
+
+// DeploymentQueueItemMode defines model for DeploymentQueueItem.Mode.
+type DeploymentQueueItemMode string
+
+// DeploymentQueueItemPage A page of deployment queue items
+type DeploymentQueueItemPage struct {
+	Items []DeploymentQueueItem `json:"items"`
+
+	// NextPageToken The page token to use to request the next page of items
+	NextPageToken *string `json:"next_page_token,omitempty"`
+}
+
+// DeploymentQueueItemState `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+type DeploymentQueueItemState string
 
 // DeploymentResultMetadata The metadata produced by the resources involved in the deployment.
 type DeploymentResultMetadata = []DeploymentResultMetadataPerNode
@@ -576,6 +978,14 @@ type DeploymentSummary struct {
 	//
 	// Example: development-01
 	EnvId string `json:"env_id"`
+
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
 
 	// Id The unique deployment id
 	//
@@ -636,6 +1046,54 @@ type DeploymentTFResourceCounts struct {
 	NumResourcesRemoved int `json:"num_resources_removed"`
 }
 
+// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+// that waited in the deployment queue are rejected and must be submitted again.
+type EnvironmentFence struct {
+	// Code The conflict code new Deployments of this Environment are refused with.
+	//
+	// Example: outcome_unreconciled
+	Code EnvironmentFenceCode `json:"code"`
+
+	// DeploymentId The failed plugin-dispatched Deployment that fences the Environment.
+	//
+	// Example: 01234567-89ab-cdef-0123-456789abcdef
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+
+	// Remedy The operator action that lifts the fence:
+	// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+	//
+	//
+	// Example: acknowledge-outcome
+	Remedy EnvironmentFenceRemedy `json:"remedy"`
+
+	// RemedyAvailableAt The end of the Runner dispatch window. `acknowledge-outcome` is refused with 409 before this time. Absent when
+	// no window was recorded, then it is accepted at once.
+	//
+	//
+	// Example: 2025-01-02T04:04:05Z
+	RemedyAvailableAt *time.Time `json:"remedy_available_at,omitempty"`
+
+	// Since When the fencing Deployment failed.
+	//
+	// Example: 2025-01-02T03:04:05Z
+	Since time.Time `json:"since"`
+}
+
+// EnvironmentFenceCode The conflict code new Deployments of this Environment are refused with.
+//
+// Example: outcome_unreconciled
+type EnvironmentFenceCode string
+
+// EnvironmentFenceRemedy The operator action that lifts the fence:
+// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+//
+// Example: acknowledge-outcome
+type EnvironmentFenceRemedy string
+
 // Error A standard error response
 type Error struct {
 	// Details An optional payload of metadata associated with the error.
@@ -652,6 +1110,205 @@ type Error struct {
 	//
 	// Example: Something happened!
 	Message string `json:"message"`
+}
+
+// ExternalDeploymentAdmissionBody defines model for ExternalDeploymentAdmissionBody.
+type ExternalDeploymentAdmissionBody struct {
+	EnvId                    string                                         `json:"env_id"`
+	EnvironmentUuid          openapi_types.UUID                             `json:"environment_uuid"`
+	Fence                    int64                                          `json:"fence"`
+	FirstForwardDeploymentId *openapi_types.UUID                            `json:"first_forward_deployment_id,omitempty"`
+	Mode                     ExternalDeploymentAdmissionBodyMode            `json:"mode"`
+	OperationRef             openapi_types.UUID                             `json:"operation_ref"`
+	Plan                     *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
+	ProjectId                string                                         `json:"project_id"`
+	ProjectUuid              openapi_types.UUID                             `json:"project_uuid"`
+	Rollback                 *ExternalDeploymentAdmissionRollback           `json:"rollback,omitempty"`
+	RunnerLogLevel           *ExternalDeploymentAdmissionBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+}
+
+// ExternalDeploymentAdmissionBodyMode defines model for ExternalDeploymentAdmissionBody.Mode.
+type ExternalDeploymentAdmissionBodyMode string
+
+// ExternalDeploymentAdmissionBodyRunnerLogLevel defines model for ExternalDeploymentAdmissionBody.RunnerLogLevel.
+type ExternalDeploymentAdmissionBodyRunnerLogLevel string
+
+// ExternalDeploymentAdmissionPlan defines model for ExternalDeploymentAdmissionPlan.
+type ExternalDeploymentAdmissionPlan struct {
+	ExpectedModuleVersions map[string]openapi_types.UUID `json:"expected_module_versions"`
+	Fingerprint            string                        `json:"fingerprint"`
+	SnapshotId             openapi_types.UUID            `json:"snapshot_id"`
+}
+
+// ExternalDeploymentAdmissionResponse defines model for ExternalDeploymentAdmissionResponse.
+type ExternalDeploymentAdmissionResponse struct {
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+	Replayed     bool               `json:"replayed"`
+}
+
+// ExternalDeploymentAdmissionRollback defines model for ExternalDeploymentAdmissionRollback.
+type ExternalDeploymentAdmissionRollback struct {
+	ForwardDeploymentId         openapi_types.UUID  `json:"forward_deployment_id"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID `json:"retry_of_rollback_deployment_id,omitempty"`
+}
+
+// ExternalDeploymentPlanBody defines model for ExternalDeploymentPlanBody.
+type ExternalDeploymentPlanBody struct {
+	EnvId           string                             `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID                 `json:"environment_uuid"`
+	ModuleVersions  map[string]ExternalModuleSelection `json:"module_versions"`
+	ProjectId       string                             `json:"project_id"`
+	ProjectUuid     openapi_types.UUID                 `json:"project_uuid"`
+}
+
+// ExternalDeploymentPlanResponse defines model for ExternalDeploymentPlanResponse.
+type ExternalDeploymentPlanResponse struct {
+	// Diff Describes a diff between the resource graphs of two deployments.
+	Diff                      DeploymentDiff            `json:"diff"`
+	EffectiveBaseDeploymentId openapi_types.UUID        `json:"effective_base_deployment_id"`
+	EnvironmentUuid           openapi_types.UUID        `json:"environment_uuid"`
+	Fingerprint               string                    `json:"fingerprint"`
+	Graph                     ExternalGraphStructure    `json:"graph"`
+	Manifest                  ExternalManifestStructure `json:"manifest"`
+	ModuleVersions            []ExternalModuleInventory `json:"module_versions"`
+	SnapshotId                openapi_types.UUID        `json:"snapshot_id"`
+}
+
+// ExternalDeploymentReadinessBody defines model for ExternalDeploymentReadinessBody.
+type ExternalDeploymentReadinessBody struct {
+	Environments []ExternalEnvironmentRef `json:"environments"`
+}
+
+// ExternalDeploymentReadinessResponse defines model for ExternalDeploymentReadinessResponse.
+type ExternalDeploymentReadinessResponse struct {
+	Items []ExternalEnvironmentReadiness `json:"items"`
+}
+
+// ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
+type ExternalDeploymentStatusResponse struct {
+	AdmissionBaseDeploymentId   *openapi_types.UUID                  `json:"admission_base_deployment_id,omitempty"`
+	CompletedAt                 *time.Time                           `json:"completed_at,omitempty"`
+	CreatedAt                   time.Time                            `json:"created_at"`
+	DeploymentId                openapi_types.UUID                   `json:"deployment_id"`
+	DispatchId                  string                               `json:"dispatch_id"`
+	EnvId                       string                               `json:"env_id"`
+	EnvironmentUuid             openapi_types.UUID                   `json:"environment_uuid"`
+	Fence                       int64                                `json:"fence"`
+	FirstForwardDeploymentId    *openapi_types.UUID                  `json:"first_forward_deployment_id,omitempty"`
+	ForwardDeploymentId         *openapi_types.UUID                  `json:"forward_deployment_id,omitempty"`
+	Mode                        ExternalDeploymentStatusResponseMode `json:"mode"`
+	ModuleVersions              map[string]openapi_types.UUID        `json:"module_versions"`
+	OperationRef                openapi_types.UUID                   `json:"operation_ref"`
+	ProjectId                   string                               `json:"project_id"`
+	ProjectUuid                 openapi_types.UUID                   `json:"project_uuid"`
+	ReceiptCreatedAt            time.Time                            `json:"receipt_created_at"`
+	RequestDigest               string                               `json:"request_digest"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID                  `json:"retry_of_rollback_deployment_id,omitempty"`
+	RollbackBaseDeploymentId    *openapi_types.UUID                  `json:"rollback_base_deployment_id,omitempty"`
+	RollbackModuleVersions      map[string]openapi_types.UUID        `json:"rollback_module_versions"`
+
+	// RollbackModules Immutable metadata projected from the retained effective-base Deployment.
+	RollbackModules *[]ExternalModuleInventory `json:"rollback_modules,omitempty"`
+
+	// RollbackRetryProvenanceRecorded Present on rollback status. True only when the retained receipt records validated predecessor provenance. False for read-only legacy lineage projection; terminal outcome and current-head eligibility remain separate admission checks.
+	RollbackRetryProvenanceRecorded *bool                                  `json:"rollback_retry_provenance_recorded,omitempty"`
+	Status                          ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage                   string                                 `json:"status_message"`
+}
+
+// ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.
+type ExternalDeploymentStatusResponseMode string
+
+// ExternalDeploymentStatusResponseStatus defines model for ExternalDeploymentStatusResponse.Status.
+type ExternalDeploymentStatusResponseStatus string
+
+// ExternalEnvironmentReadiness defines model for ExternalEnvironmentReadiness.
+type ExternalEnvironmentReadiness struct {
+	ActiveLeaseUntil          *time.Time                                `json:"active_lease_until,omitempty"`
+	ActiveModules             []ExternalModuleInventory                 `json:"active_modules"`
+	EffectiveBaseDeploymentId *openapi_types.UUID                       `json:"effective_base_deployment_id,omitempty"`
+	EnvId                     string                                    `json:"env_id"`
+	EnvironmentUuid           openapi_types.UUID                        `json:"environment_uuid"`
+	LatestDeploymentId        *openapi_types.UUID                       `json:"latest_deployment_id,omitempty"`
+	LatestMode                *ExternalEnvironmentReadinessLatestMode   `json:"latest_mode,omitempty"`
+	LatestStatus              *ExternalEnvironmentReadinessLatestStatus `json:"latest_status,omitempty"`
+	ProjectId                 string                                    `json:"project_id"`
+	ProjectUuid               openapi_types.UUID                        `json:"project_uuid"`
+	State                     ExternalEnvironmentReadinessState         `json:"state"`
+}
+
+// ExternalEnvironmentReadinessLatestMode defines model for ExternalEnvironmentReadiness.LatestMode.
+type ExternalEnvironmentReadinessLatestMode string
+
+// ExternalEnvironmentReadinessLatestStatus defines model for ExternalEnvironmentReadiness.LatestStatus.
+type ExternalEnvironmentReadinessLatestStatus string
+
+// ExternalEnvironmentReadinessState defines model for ExternalEnvironmentReadiness.State.
+type ExternalEnvironmentReadinessState string
+
+// ExternalEnvironmentRef defines model for ExternalEnvironmentRef.
+type ExternalEnvironmentRef struct {
+	EnvId           string             `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID `json:"environment_uuid"`
+	ProjectId       string             `json:"project_id"`
+	ProjectUuid     openapi_types.UUID `json:"project_uuid"`
+}
+
+// ExternalGraphNodeStructure defines model for ExternalGraphNodeStructure.
+type ExternalGraphNodeStructure struct {
+	Deleted   *bool    `json:"deleted,omitempty"`
+	Drift     *string  `json:"drift,omitempty"`
+	ModuleId  *string  `json:"module_id,omitempty"`
+	ParamKeys []string `json:"param_keys"`
+	Version   *string  `json:"version,omitempty"`
+}
+
+// ExternalGraphStructure defines model for ExternalGraphStructure.
+type ExternalGraphStructure struct {
+	Edges           map[string]map[string]string          `json:"edges"`
+	LeafResources   []string                              `json:"leaf_resources"`
+	Nodes           map[string]ExternalGraphNodeStructure `json:"nodes"`
+	SharedResources map[string]string                     `json:"shared_resources"`
+	Workloads       map[string]string                     `json:"workloads"`
+}
+
+// ExternalManifestResourceStructure defines model for ExternalManifestResourceStructure.
+type ExternalManifestResourceStructure struct {
+	Class     *string  `json:"class,omitempty"`
+	Id        *string  `json:"id,omitempty"`
+	ParamKeys []string `json:"param_keys"`
+	Type      string   `json:"type"`
+}
+
+// ExternalManifestStructure defines model for ExternalManifestStructure.
+type ExternalManifestStructure struct {
+	Shared    map[string]ExternalManifestResourceStructure `json:"shared"`
+	Workloads map[string]ExternalManifestWorkloadStructure `json:"workloads"`
+}
+
+// ExternalManifestWorkloadStructure defines model for ExternalManifestWorkloadStructure.
+type ExternalManifestWorkloadStructure struct {
+	OutputKeys []string                                     `json:"output_keys"`
+	Resources  map[string]ExternalManifestResourceStructure `json:"resources"`
+}
+
+// ExternalModuleInventory defines model for ExternalModuleInventory.
+type ExternalModuleInventory struct {
+	ArtifactDigest  *string             `json:"artifact_digest,omitempty"`
+	ModuleId        string              `json:"module_id"`
+	ModuleUuid      *openapi_types.UUID `json:"module_uuid,omitempty"`
+	SemanticVersion *string             `json:"semantic_version,omitempty"`
+	Version         string              `json:"version"`
+	VersionUuid     *openapi_types.UUID `json:"version_uuid,omitempty"`
+}
+
+// ExternalModuleSelection defines model for ExternalModuleSelection.
+type ExternalModuleSelection struct {
+	ArtifactDigest  string             `json:"artifact_digest"`
+	ModuleUuid      openapi_types.UUID `json:"module_uuid"`
+	SemanticVersion string             `json:"semantic_version"`
+	Version         string             `json:"version"`
+	VersionUuid     openapi_types.UUID `json:"version_uuid"`
 }
 
 // InternalModuleUsage defines model for InternalModuleUsage.
@@ -743,7 +1400,7 @@ type MetadataKeyPage struct {
 type MetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format *string `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.
@@ -789,6 +1446,28 @@ type OpenidConfiguration struct {
 // Example: my-org
 type OrganizationId = string
 
+// PendingEnvironmentChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+// never queued.
+type PendingEnvironmentChanges struct {
+	// Code Example: result_may_change
+	Code PendingEnvironmentChangesCode `json:"code"`
+
+	// Queued Deploy and rollback requests waiting in the Environment's deployment queue.
+	//
+	// Example: 2
+	Queued int `json:"queued"`
+
+	// Running Deploy, rollback or destroy Deployments changing the Environment now.
+	//
+	// Example: 1
+	Running int `json:"running"`
+}
+
+// PendingEnvironmentChangesCode Example: result_may_change
+type PendingEnvironmentChangesCode string
+
 // ResourceClass A resource class requested by the resource graph. 'default' is the default value.
 //
 // Example: classic
@@ -809,7 +1488,7 @@ type ResourceNodesPage struct {
 type UpdateMetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format nullable.Nullable[string] `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.
@@ -840,6 +1519,9 @@ type DeploymentIdPathParam = openapi_types.UUID
 // EnvIdQueryParam defines model for envIdQueryParam.
 type EnvIdQueryParam = string
 
+// IdempotencyKeyHeader defines model for idempotencyKeyHeader.
+type IdempotencyKeyHeader = string
+
 // MetadataKeyNamePathParam defines model for metadataKeyNamePathParam.
 type MetadataKeyNamePathParam = string
 
@@ -852,8 +1534,14 @@ type PageTokenQueryParam = string
 // PerPageQueryParam defines model for perPageQueryParam.
 type PerPageQueryParam = int
 
+// PluginIdPathParam defines model for pluginIdPathParam.
+type PluginIdPathParam = string
+
 // ProjectIdQueryParam defines model for projectIdQueryParam.
 type ProjectIdQueryParam = string
+
+// QueueItemIdPathParam defines model for queueItemIdPathParam.
+type QueueItemIdPathParam = openapi_types.UUID
 
 // RunnerIdPathParam defines model for runnerIdPathParam.
 type RunnerIdPathParam = string
@@ -861,14 +1549,29 @@ type RunnerIdPathParam = string
 // N400BadRequest A standard error response
 type N400BadRequest = Error
 
+// N401Unauthorized A standard error response
+type N401Unauthorized = Error
+
+// N403Forbidden A standard error response
+type N403Forbidden = Error
+
 // N404NotFound A standard error response
 type N404NotFound = Error
 
 // N409Conflict A standard error response
 type N409Conflict = Error
 
+// N413TooLarge A standard error response
+type N413TooLarge = Error
+
+// N503Unavailable A standard error response
+type N503Unavailable = Error
+
 // jwtAuthContextKey is the context key for jwtAuth security scheme
 type jwtAuthContextKey string
+
+// pluginContextContextKey is the context key for pluginContext security scheme
+type pluginContextContextKey string
 
 // userIdHeaderContextKey is the context key for userIdHeader security scheme
 type userIdHeaderContextKey string
@@ -897,6 +1600,24 @@ type ListActiveResourceNodesParams struct {
 
 	// EnvId The Environment ID
 	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+}
+
+// ListDeploymentQueueItemsParams defines parameters for ListDeploymentQueueItems.
+type ListDeploymentQueueItemsParams struct {
+	// ProjectId The Project ID
+	ProjectId *ProjectIdQueryParam `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// EnvId The Environment ID
+	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+
+	// PerPage The maximum number of items to return in a page of results
+	PerPage *PerPageQueryParam `form:"per_page,omitempty" json:"per_page,omitempty"`
+
+	// Page The page token to request from
+	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
+
+	// State Only return items in this state.
+	State *DeploymentQueueItemState `form:"state,omitempty" json:"state,omitempty"`
 }
 
 // ListDeploymentsParams defines parameters for ListDeployments.
@@ -930,6 +1651,7 @@ type ListDeploymentsParamsByStatus string
 type CreateDeploymentParams struct {
 	// IdempotencyKey Ensures that the deployment request is only accepted once per idempotency key per 24 hours. A uuid or similar is recommended.
 	// When the key matches the key in last deployment and the environment and manifest is the same, this will return the last deployment.
+	// When the key matches a queued request, this returns its queue item until it is dispatched, and its Deployment afterwards.
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
@@ -989,6 +1711,12 @@ type ListMetadataKeysParams struct {
 	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
 }
 
+// InternalAcknowledgeDeploymentOutcomeJSONRequestBody defines body for InternalAcknowledgeDeploymentOutcome for application/json ContentType.
+type InternalAcknowledgeDeploymentOutcomeJSONRequestBody = DeploymentOutcomeAcknowledgementBody
+
+// CancelDeploymentQueueItemJSONRequestBody defines body for CancelDeploymentQueueItem for application/json ContentType.
+type CancelDeploymentQueueItemJSONRequestBody = DeploymentQueueCancelBody
+
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
 
@@ -1012,6 +1740,9 @@ type ServerInterface interface {
 	// InternalDeleteDeployments Delete all the deployments for an project_id, env_id combination. The last deployment must be a successful destroy.
 	// (DELETE /internal/orgs/{orgId}/deployments)
 	InternalDeleteDeployments(ctx echo.Context, orgId OrgIdPathParam, params InternalDeleteDeploymentsParams) error
+	// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	// (POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome)
+	InternalAcknowledgeDeploymentOutcome(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error
 	// InternalForceFailDeployment Emergency API for force failing a deployment.
 	// (POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/force-failure)
 	InternalForceFailDeployment(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error
@@ -1021,6 +1752,15 @@ type ServerInterface interface {
 	// ListActiveResourceNodes List active resource nodes
 	// (GET /orgs/{orgId}/active-resources)
 	ListActiveResourceNodes(ctx echo.Context, orgId OrgIdPathParam, params ListActiveResourceNodesParams) error
+	// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+	// (GET /orgs/{orgId}/deployment-queue)
+	ListDeploymentQueueItems(ctx echo.Context, orgId OrgIdPathParam, params ListDeploymentQueueItemsParams) error
+	// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+	// (GET /orgs/{orgId}/deployment-queue/{queueItemId})
+	GetDeploymentQueueItem(ctx echo.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) error
+	// CancelDeploymentQueueItem Cancel a queued deployment request.
+	// (POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel)
+	CancelDeploymentQueueItem(ctx echo.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) error
 	// ListDeployments List deployments in the organization
 	// (GET /orgs/{orgId}/deployments)
 	ListDeployments(ctx echo.Context, orgId OrgIdPathParam, params ListDeploymentsParams) error
@@ -1138,6 +1878,32 @@ func (w *ServerInterfaceWrapper) InternalDeleteDeployments(ctx echo.Context) err
 	return err
 }
 
+// InternalAcknowledgeDeploymentOutcome converts echo context to params.
+func (w *ServerInterfaceWrapper) InternalAcknowledgeDeploymentOutcome(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.InternalAcknowledgeDeploymentOutcome(ctx, orgId, deploymentId)
+	return err
+}
+
 // InternalForceFailDeployment converts echo context to params.
 func (w *ServerInterfaceWrapper) InternalForceFailDeployment(ctx echo.Context) error {
 	var err error
@@ -1228,6 +1994,113 @@ func (w *ServerInterfaceWrapper) ListActiveResourceNodes(ctx echo.Context) error
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListActiveResourceNodes(ctx, orgId, params)
+	return err
+}
+
+// ListDeploymentQueueItems converts echo context to params.
+func (w *ServerInterfaceWrapper) ListDeploymentQueueItems(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDeploymentQueueItemsParams
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "project_id", ctx.QueryParams(), &params.ProjectId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter project_id: %s", err))
+	}
+
+	// ------------- Optional query parameter "env_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "env_id", ctx.QueryParams(), &params.EnvId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter env_id: %s", err))
+	}
+
+	// ------------- Optional query parameter "per_page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "per_page", ctx.QueryParams(), &params.PerPage, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter per_page: %s", err))
+	}
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", ctx.QueryParams(), &params.Page, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter page: %s", err))
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", ctx.QueryParams(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter state: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListDeploymentQueueItems(ctx, orgId, params)
+	return err
+}
+
+// GetDeploymentQueueItem converts echo context to params.
+func (w *ServerInterfaceWrapper) GetDeploymentQueueItem(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "queueItemId" -------------
+	var queueItemId QueueItemIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queueItemId", ctx.Param("queueItemId"), &queueItemId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter queueItemId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetDeploymentQueueItem(ctx, orgId, queueItemId)
+	return err
+}
+
+// CancelDeploymentQueueItem converts echo context to params.
+func (w *ServerInterfaceWrapper) CancelDeploymentQueueItem(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "queueItemId" -------------
+	var queueItemId QueueItemIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queueItemId", ctx.Param("queueItemId"), &queueItemId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter queueItemId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.CancelDeploymentQueueItem(ctx, orgId, queueItemId)
 	return err
 }
 
@@ -1877,6 +2750,9 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments", wrapper.ListDeployments, options.OperationMiddlewares["listDeployments"]...)
 	router.POST(options.BaseURL+"/orgs/:orgId/deployments", wrapper.CreateDeployment, options.OperationMiddlewares["createDeployment"]...)
+	router.GET(options.BaseURL+"/orgs/:orgId/deployment-queue", wrapper.ListDeploymentQueueItems, options.OperationMiddlewares["listDeploymentQueueItems"]...)
+	router.GET(options.BaseURL+"/orgs/:orgId/deployment-queue/:queueItemId", wrapper.GetDeploymentQueueItem, options.OperationMiddlewares["getDeploymentQueueItem"]...)
+	router.POST(options.BaseURL+"/orgs/:orgId/deployment-queue/:queueItemId/actions/cancel", wrapper.CancelDeploymentQueueItem, options.OperationMiddlewares["cancelDeploymentQueueItem"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/last-deployments", wrapper.ListLastDeployments, options.OperationMiddlewares["listLastDeployments"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId", wrapper.GetDeployment, options.OperationMiddlewares["getDeployment"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/actions/wait-for-complete", wrapper.WaitForDeploymentComplete, options.OperationMiddlewares["waitForDeploymentComplete"]...)
@@ -1887,6 +2763,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.POST(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/results", wrapper.UpdateDeploymentResults, options.OperationMiddlewares["updateDeploymentResults"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/tf", wrapper.GetDeploymentTf, options.OperationMiddlewares["getDeploymentTf"]...)
 	router.POST(options.BaseURL+"/internal/orgs/:orgId/deployments/:deploymentId/actions/force-failure", wrapper.InternalForceFailDeployment, options.OperationMiddlewares["internalForceFailDeployment"]...)
+	router.POST(options.BaseURL+"/internal/orgs/:orgId/deployments/:deploymentId/actions/acknowledge-outcome", wrapper.InternalAcknowledgeDeploymentOutcome, options.OperationMiddlewares["internalAcknowledgeDeploymentOutcome"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/resources", wrapper.ListDeploymentResourceNodes, options.OperationMiddlewares["listDeploymentResourceNodes"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/active-resources", wrapper.ListActiveResourceNodes, options.OperationMiddlewares["listActiveResourceNodes"]...)
 	router.POST(options.BaseURL+"/internal/orgs/:orgId/modules/:moduleId/actions/check-usage", wrapper.InternalCheckModuleUsage, options.OperationMiddlewares["internalCheckModuleUsage"]...)
@@ -1903,9 +2780,17 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 
 type N400BadRequestJSONResponse Error
 
+type N401UnauthorizedJSONResponse Error
+
+type N403ForbiddenJSONResponse Error
+
 type N404NotFoundJSONResponse Error
 
 type N409ConflictJSONResponse Error
+
+type N413TooLargeJSONResponse Error
+
+type N503UnavailableJSONResponse Error
 
 type GetJwksRequestObject struct {
 }
@@ -2025,6 +2910,86 @@ func (response InternalDeleteDeployments404JSONResponse) VisitInternalDeleteDepl
 type InternalDeleteDeployments409JSONResponse struct{ N409ConflictJSONResponse }
 
 func (response InternalDeleteDeployments409JSONResponse) VisitInternalDeleteDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InternalAcknowledgeDeploymentOutcomeRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+	Body         *InternalAcknowledgeDeploymentOutcomeJSONRequestBody
+}
+
+type InternalAcknowledgeDeploymentOutcomeResponseObject interface {
+	VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error
+}
+
+type InternalAcknowledgeDeploymentOutcome200JSONResponse DeploymentOutcomeAcknowledgement
+
+func (response InternalAcknowledgeDeploymentOutcome200JSONResponse) VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InternalAcknowledgeDeploymentOutcome201JSONResponse DeploymentOutcomeAcknowledgement
+
+func (response InternalAcknowledgeDeploymentOutcome201JSONResponse) VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InternalAcknowledgeDeploymentOutcome400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response InternalAcknowledgeDeploymentOutcome400JSONResponse) VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InternalAcknowledgeDeploymentOutcome404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response InternalAcknowledgeDeploymentOutcome404JSONResponse) VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InternalAcknowledgeDeploymentOutcome409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response InternalAcknowledgeDeploymentOutcome409JSONResponse) VisitInternalAcknowledgeDeploymentOutcomeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2176,6 +3141,146 @@ func (response ListActiveResourceNodes404JSONResponse) VisitListActiveResourceNo
 	return err
 }
 
+type ListDeploymentQueueItemsRequestObject struct {
+	OrgId  OrgIdPathParam `json:"orgId"`
+	Params ListDeploymentQueueItemsParams
+}
+
+type ListDeploymentQueueItemsResponseObject interface {
+	VisitListDeploymentQueueItemsResponse(w http.ResponseWriter) error
+}
+
+type ListDeploymentQueueItems200JSONResponse DeploymentQueueItemPage
+
+func (response ListDeploymentQueueItems200JSONResponse) VisitListDeploymentQueueItemsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentQueueItems400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response ListDeploymentQueueItems400JSONResponse) VisitListDeploymentQueueItemsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentQueueItemRequestObject struct {
+	OrgId       OrgIdPathParam       `json:"orgId"`
+	QueueItemId QueueItemIdPathParam `json:"queueItemId"`
+}
+
+type GetDeploymentQueueItemResponseObject interface {
+	VisitGetDeploymentQueueItemResponse(w http.ResponseWriter) error
+}
+
+type GetDeploymentQueueItem200JSONResponse DeploymentQueueItem
+
+func (response GetDeploymentQueueItem200JSONResponse) VisitGetDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentQueueItem404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response GetDeploymentQueueItem404JSONResponse) VisitGetDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeploymentQueueItemRequestObject struct {
+	OrgId       OrgIdPathParam       `json:"orgId"`
+	QueueItemId QueueItemIdPathParam `json:"queueItemId"`
+	Body        *CancelDeploymentQueueItemJSONRequestBody
+}
+
+type CancelDeploymentQueueItemResponseObject interface {
+	VisitCancelDeploymentQueueItemResponse(w http.ResponseWriter) error
+}
+
+type CancelDeploymentQueueItem200JSONResponse DeploymentQueueItem
+
+func (response CancelDeploymentQueueItem200JSONResponse) VisitCancelDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeploymentQueueItem400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response CancelDeploymentQueueItem400JSONResponse) VisitCancelDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeploymentQueueItem404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response CancelDeploymentQueueItem404JSONResponse) VisitCancelDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelDeploymentQueueItem409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response CancelDeploymentQueueItem409JSONResponse) VisitCancelDeploymentQueueItemResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListDeploymentsRequestObject struct {
 	OrgId  OrgIdPathParam `json:"orgId"`
 	Params ListDeploymentsParams
@@ -2261,6 +3366,20 @@ func (response CreateDeployment201JSONResponse) VisitCreateDeploymentResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeployment202JSONResponse DeploymentQueueItem
+
+func (response CreateDeployment202JSONResponse) VisitCreateDeploymentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3004,6 +4123,9 @@ type StrictServerInterface interface {
 	// InternalDeleteDeployments Delete all the deployments for an project_id, env_id combination. The last deployment must be a successful destroy.
 	// (DELETE /internal/orgs/{orgId}/deployments)
 	InternalDeleteDeployments(ctx context.Context, request InternalDeleteDeploymentsRequestObject) (InternalDeleteDeploymentsResponseObject, error)
+	// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	// (POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome)
+	InternalAcknowledgeDeploymentOutcome(ctx context.Context, request InternalAcknowledgeDeploymentOutcomeRequestObject) (InternalAcknowledgeDeploymentOutcomeResponseObject, error)
 	// InternalForceFailDeployment Emergency API for force failing a deployment.
 	// (POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/force-failure)
 	InternalForceFailDeployment(ctx context.Context, request InternalForceFailDeploymentRequestObject) (InternalForceFailDeploymentResponseObject, error)
@@ -3013,6 +4135,15 @@ type StrictServerInterface interface {
 	// ListActiveResourceNodes List active resource nodes
 	// (GET /orgs/{orgId}/active-resources)
 	ListActiveResourceNodes(ctx context.Context, request ListActiveResourceNodesRequestObject) (ListActiveResourceNodesResponseObject, error)
+	// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+	// (GET /orgs/{orgId}/deployment-queue)
+	ListDeploymentQueueItems(ctx context.Context, request ListDeploymentQueueItemsRequestObject) (ListDeploymentQueueItemsResponseObject, error)
+	// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+	// (GET /orgs/{orgId}/deployment-queue/{queueItemId})
+	GetDeploymentQueueItem(ctx context.Context, request GetDeploymentQueueItemRequestObject) (GetDeploymentQueueItemResponseObject, error)
+	// CancelDeploymentQueueItem Cancel a queued deployment request.
+	// (POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel)
+	CancelDeploymentQueueItem(ctx context.Context, request CancelDeploymentQueueItemRequestObject) (CancelDeploymentQueueItemResponseObject, error)
 	// ListDeployments List deployments in the organization
 	// (GET /orgs/{orgId}/deployments)
 	ListDeployments(ctx context.Context, request ListDeploymentsRequestObject) (ListDeploymentsResponseObject, error)
@@ -3150,6 +4281,48 @@ func (sh *strictHandler) InternalDeleteDeployments(ctx echo.Context, orgId OrgId
 	return nil
 }
 
+// InternalAcknowledgeDeploymentOutcome operation middleware
+func (sh *strictHandler) InternalAcknowledgeDeploymentOutcome(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error {
+	var request InternalAcknowledgeDeploymentOutcomeRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+
+	var body InternalAcknowledgeDeploymentOutcomeJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InternalAcknowledgeDeploymentOutcome(ctx.Request().Context(), request.(InternalAcknowledgeDeploymentOutcomeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InternalAcknowledgeDeploymentOutcome")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(InternalAcknowledgeDeploymentOutcomeResponseObject); ok {
+		return validResponse.VisitInternalAcknowledgeDeploymentOutcomeResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // InternalForceFailDeployment operation middleware
 func (sh *strictHandler) InternalForceFailDeployment(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error {
 	var request InternalForceFailDeploymentRequestObject
@@ -3223,6 +4396,103 @@ func (sh *strictHandler) ListActiveResourceNodes(ctx echo.Context, orgId OrgIdPa
 		return err
 	} else if validResponse, ok := response.(ListActiveResourceNodesResponseObject); ok {
 		return validResponse.VisitListActiveResourceNodesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListDeploymentQueueItems operation middleware
+func (sh *strictHandler) ListDeploymentQueueItems(ctx echo.Context, orgId OrgIdPathParam, params ListDeploymentQueueItemsParams) error {
+	var request ListDeploymentQueueItemsRequestObject
+
+	request.OrgId = orgId
+	request.Params = params
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeploymentQueueItems(ctx.Request().Context(), request.(ListDeploymentQueueItemsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeploymentQueueItems")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListDeploymentQueueItemsResponseObject); ok {
+		return validResponse.VisitListDeploymentQueueItemsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetDeploymentQueueItem operation middleware
+func (sh *strictHandler) GetDeploymentQueueItem(ctx echo.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) error {
+	var request GetDeploymentQueueItemRequestObject
+
+	request.OrgId = orgId
+	request.QueueItemId = queueItemId
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDeploymentQueueItem(ctx.Request().Context(), request.(GetDeploymentQueueItemRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDeploymentQueueItem")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetDeploymentQueueItemResponseObject); ok {
+		return validResponse.VisitGetDeploymentQueueItemResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// CancelDeploymentQueueItem operation middleware
+func (sh *strictHandler) CancelDeploymentQueueItem(ctx echo.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) error {
+	var request CancelDeploymentQueueItemRequestObject
+
+	request.OrgId = orgId
+	request.QueueItemId = queueItemId
+
+	var body CancelDeploymentQueueItemJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelDeploymentQueueItem(ctx.Request().Context(), request.(CancelDeploymentQueueItemRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelDeploymentQueueItem")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(CancelDeploymentQueueItemResponseObject); ok {
+		return validResponse.VisitCancelDeploymentQueueItemResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -3744,134 +5014,218 @@ func (sh *strictHandler) UpdateMetadataKey(ctx echo.Context, orgId OrgIdPathPara
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"4tfhA7uhX8+G2I53DFI/h32ur6//PwAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

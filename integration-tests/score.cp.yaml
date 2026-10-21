@@ -7,7 +7,7 @@ service:
       port: 8080
 containers:
   platform-orchestrator-cp:
-    image: ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0
+    image: ghcr.io/stellwerk-labs/platform-orchestrator-cp:v2.0.0@sha256:10a06fdd20d904dede6e0b7745eb11da7678f8a82e204ffc596321a2ffa7e698
     command: ["/opt/server/server"]
     livenessProbe:
       httpGet:

@@ -48,6 +48,11 @@ import (
 const sampleLogs = "test log content"
 const orgId = "test-org"
 
+// withoutQueue makes a deploy or rollback request fail fast instead of
+// waiting: the mocked database cannot answer the queue's availability read.
+// The PostgreSQL suites cover the queue path.
+var withoutQueue = ref.Ref(Reject)
+
 func TestApplyRunnerErrorRecordsAndFailsDeploymentAtomically(t *testing.T) {
 	_, server, finish := MockServer(t)
 	defer finish()
@@ -355,7 +360,7 @@ output "two" {
 			OrgId: "my-org",
 			Body: &CreateDeploymentJSONRequestBody{
 				ProjectId: "my-project", EnvId: "my-env",
-				Mode: "deploy",
+				Mode: "deploy", WhenBusy: withoutQueue,
 				Manifest: &DeploymentManifest{
 					Workloads: map[string]DeploymentManifestWorkload{
 						"one": {
@@ -423,6 +428,8 @@ output "two" {
 		t.Run("second deployment", func(t *testing.T) {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
+			mdb.EXPECT().ReadPendingEnvironmentChanges(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", envUuid).
+				Return(model.PendingEnvironmentChanges{Queued: 2}, nil)
 
 			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}, gomock.Any()).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
@@ -575,6 +582,7 @@ output "one" {
 			r201 := r.(CreateDeployment201JSONResponse)
 			if assert.NotNil(t, r201) {
 				assert.Equal(t, dep2Id, r201.Id)
+				assert.Equal(t, &PendingEnvironmentChanges{Code: ResultMayChange, Running: 0, Queued: 2}, r201.PendingChanges, "a plan that queued work will change says so")
 			}
 
 			// assert that we published the message
@@ -841,7 +849,7 @@ output "platform_orchestrator_metadata" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode:                      "rollback",
+			Mode: "rollback", WhenBusy: withoutQueue,
 			RollbackToDeploymentId:    &rollbackToId,
 			EncryptedOutputsRecipient: ref.Ref(encryptedOutputsRecipient),
 			EncryptedLogsRecipient:    ref.Ref(encryptedLogsRecipient),
@@ -1003,7 +1011,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1128,7 +1136,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1253,7 +1261,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1424,7 +1432,7 @@ output "one" {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1503,7 +1511,7 @@ func TestCreateDeployment_fail_graph_error(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1567,7 +1575,7 @@ func TestCreateDeployment_fail_missing_provider(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1622,7 +1630,7 @@ func TestCreateDeployment_catalogue_fail(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -1807,7 +1815,7 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -2274,7 +2282,7 @@ func TestCreateDeployment_invalid_placeholder(t *testing.T) {
 				OrgId: "my-org",
 				Body: &CreateDeploymentJSONRequestBody{
 					ProjectId: "my-project", EnvId: "my-env",
-					Mode: "deploy",
+					Mode: "deploy", WhenBusy: withoutQueue,
 					Manifest: &DeploymentManifest{
 						Workloads: map[string]DeploymentManifestWorkload{
 							"one": {
@@ -2341,7 +2349,7 @@ func TestCreateDeployment_invalid_module_param(t *testing.T) {
 		OrgId: "my-org",
 		Body: &CreateDeploymentJSONRequestBody{
 			ProjectId: "my-project", EnvId: "my-env",
-			Mode: "deploy",
+			Mode: "deploy", WhenBusy: withoutQueue,
 			Manifest: &DeploymentManifest{
 				Workloads: map[string]DeploymentManifestWorkload{
 					"one": {
@@ -2432,6 +2440,7 @@ func TestGetDeploymentBundle(t *testing.T) {
 				{
 					ResourceType: "thing",
 					Id:           "thing1", VersionId: "v2",
+					ModuleSource:     "inline",
 					ModuleSourceCode: ref.Ref("some-module-source"),
 				},
 			},

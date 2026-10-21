@@ -25,7 +25,7 @@ type recordingApplier struct {
 	message     string
 }
 
-func (a *recordingApplier) ApplyRunnerDeploymentResult(context.Context, string, string, uuid.UUID, string, api.DeploymentResultsUpdateBody) error {
+func (a *recordingApplier) ApplyRunnerDeploymentResultEnvelope(context.Context, hmessaging.EventEnvelope, api.DeploymentResultsUpdateBody) error {
 	a.resultCalls++
 	return nil
 }

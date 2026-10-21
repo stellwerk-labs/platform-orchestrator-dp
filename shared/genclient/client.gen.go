@@ -64,6 +64,24 @@ func (e DeploymentCreateBodyRunnerLogLevel) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentCreateBodyWhenBusy.
+const (
+	Queue  DeploymentCreateBodyWhenBusy = "queue"
+	Reject DeploymentCreateBodyWhenBusy = "reject"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentCreateBodyWhenBusy enum.
+func (e DeploymentCreateBodyWhenBusy) Valid() bool {
+	switch e {
+	case Queue:
+		return true
+	case Reject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentDiffChangeType.
 const (
 	DeploymentDiffChangeTypeAdded         DeploymentDiffChangeType = "added"
@@ -88,6 +106,51 @@ func (e DeploymentDiffChangeType) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentQueueItemMode.
+const (
+	DeploymentQueueItemModeDeploy   DeploymentQueueItemMode = "deploy"
+	DeploymentQueueItemModeRollback DeploymentQueueItemMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemMode enum.
+func (e DeploymentQueueItemMode) Valid() bool {
+	switch e {
+	case DeploymentQueueItemModeDeploy:
+		return true
+	case DeploymentQueueItemModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentQueueItemState.
+const (
+	Cancelled  DeploymentQueueItemState = "cancelled"
+	Dispatched DeploymentQueueItemState = "dispatched"
+	Expired    DeploymentQueueItemState = "expired"
+	Queued     DeploymentQueueItemState = "queued"
+	Rejected   DeploymentQueueItemState = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentQueueItemState enum.
+func (e DeploymentQueueItemState) Valid() bool {
+	switch e {
+	case Cancelled:
+		return true
+	case Dispatched:
+		return true
+	case Expired:
+		return true
+	case Queued:
+		return true
+	case Rejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentResultsUpdateBodyStatus.
 const (
 	Failure DeploymentResultsUpdateBodyStatus = "failure"
@@ -106,6 +169,183 @@ func (e DeploymentResultsUpdateBodyStatus) Valid() bool {
 	}
 }
 
+// Defines values for EnvironmentFenceCode.
+const (
+	OutcomeUnreconciled EnvironmentFenceCode = "outcome_unreconciled"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceCode enum.
+func (e EnvironmentFenceCode) Valid() bool {
+	switch e {
+	case OutcomeUnreconciled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EnvironmentFenceRemedy.
+const (
+	AcknowledgeOutcome EnvironmentFenceRemedy = "acknowledge-outcome"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentFenceRemedy enum.
+func (e EnvironmentFenceRemedy) Valid() bool {
+	switch e {
+	case AcknowledgeOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentAdmissionBodyMode.
+const (
+	ExternalDeploymentAdmissionBodyModeDeploy   ExternalDeploymentAdmissionBodyMode = "deploy"
+	ExternalDeploymentAdmissionBodyModeRollback ExternalDeploymentAdmissionBodyMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyMode enum.
+func (e ExternalDeploymentAdmissionBodyMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyModeDeploy:
+		return true
+	case ExternalDeploymentAdmissionBodyModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentAdmissionBodyRunnerLogLevel.
+const (
+	ExternalDeploymentAdmissionBodyRunnerLogLevelDebug ExternalDeploymentAdmissionBodyRunnerLogLevel = "debug"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelError ExternalDeploymentAdmissionBodyRunnerLogLevel = "error"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelInfo  ExternalDeploymentAdmissionBodyRunnerLogLevel = "info"
+	ExternalDeploymentAdmissionBodyRunnerLogLevelWarn  ExternalDeploymentAdmissionBodyRunnerLogLevel = "warn"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentAdmissionBodyRunnerLogLevel enum.
+func (e ExternalDeploymentAdmissionBodyRunnerLogLevel) Valid() bool {
+	switch e {
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelDebug:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelError:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelInfo:
+		return true
+	case ExternalDeploymentAdmissionBodyRunnerLogLevelWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentStatusResponseMode.
+const (
+	ExternalDeploymentStatusModeDeploy   ExternalDeploymentStatusResponseMode = "deploy"
+	ExternalDeploymentStatusModeDestroy  ExternalDeploymentStatusResponseMode = "destroy"
+	ExternalDeploymentStatusModeRollback ExternalDeploymentStatusResponseMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseMode enum.
+func (e ExternalDeploymentStatusResponseMode) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusModeDeploy:
+		return true
+	case ExternalDeploymentStatusModeDestroy:
+		return true
+	case ExternalDeploymentStatusModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalDeploymentStatusResponseStatus.
+const (
+	ExternalDeploymentStatusExecuting ExternalDeploymentStatusResponseStatus = "executing"
+	ExternalDeploymentStatusFailed    ExternalDeploymentStatusResponseStatus = "failed"
+	ExternalDeploymentStatusSucceeded ExternalDeploymentStatusResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ExternalDeploymentStatusResponseStatus enum.
+func (e ExternalDeploymentStatusResponseStatus) Valid() bool {
+	switch e {
+	case ExternalDeploymentStatusExecuting:
+		return true
+	case ExternalDeploymentStatusFailed:
+		return true
+	case ExternalDeploymentStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessLatestMode.
+const (
+	ExternalEnvironmentReadinessLatestModeDeploy   ExternalEnvironmentReadinessLatestMode = "deploy"
+	ExternalEnvironmentReadinessLatestModeDestroy  ExternalEnvironmentReadinessLatestMode = "destroy"
+	ExternalEnvironmentReadinessLatestModeRollback ExternalEnvironmentReadinessLatestMode = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessLatestMode enum.
+func (e ExternalEnvironmentReadinessLatestMode) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessLatestModeDeploy:
+		return true
+	case ExternalEnvironmentReadinessLatestModeDestroy:
+		return true
+	case ExternalEnvironmentReadinessLatestModeRollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessLatestStatus.
+const (
+	ExternalEnvironmentReadinessLatestStatusExecuting ExternalEnvironmentReadinessLatestStatus = "executing"
+	ExternalEnvironmentReadinessLatestStatusFailed    ExternalEnvironmentReadinessLatestStatus = "failed"
+	ExternalEnvironmentReadinessLatestStatusSucceeded ExternalEnvironmentReadinessLatestStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessLatestStatus enum.
+func (e ExternalEnvironmentReadinessLatestStatus) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessLatestStatusExecuting:
+		return true
+	case ExternalEnvironmentReadinessLatestStatusFailed:
+		return true
+	case ExternalEnvironmentReadinessLatestStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExternalEnvironmentReadinessState.
+const (
+	ExternalEnvironmentReadinessStateBusy         ExternalEnvironmentReadinessState = "busy"
+	ExternalEnvironmentReadinessStateReady        ExternalEnvironmentReadinessState = "ready"
+	ExternalEnvironmentReadinessStateUnreconciled ExternalEnvironmentReadinessState = "unreconciled"
+)
+
+// Valid indicates whether the value is a known member of the ExternalEnvironmentReadinessState enum.
+func (e ExternalEnvironmentReadinessState) Valid() bool {
+	switch e {
+	case ExternalEnvironmentReadinessStateBusy:
+		return true
+	case ExternalEnvironmentReadinessStateReady:
+		return true
+	case ExternalEnvironmentReadinessStateUnreconciled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MetadataKeySchemaType.
 const (
 	MetadataKeySchemaTypeString MetadataKeySchemaType = "string"
@@ -115,6 +355,21 @@ const (
 func (e MetadataKeySchemaType) Valid() bool {
 	switch e {
 	case MetadataKeySchemaTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PendingEnvironmentChangesCode.
+const (
+	ResultMayChange PendingEnvironmentChangesCode = "result_may_change"
+)
+
+// Valid indicates whether the value is a known member of the PendingEnvironmentChangesCode enum.
+func (e PendingEnvironmentChangesCode) Valid() bool {
+	switch e {
+	case ResultMayChange:
 		return true
 	default:
 		return false
@@ -246,6 +501,14 @@ type Deployment struct {
 	// Example: development-01
 	EnvId string `json:"env_id"`
 
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
+
 	// Id The unique deployment id
 	//
 	// Example: 01234567-89ab-cdef-0123-4566789abcdef
@@ -266,6 +529,12 @@ type Deployment struct {
 	//
 	// Example: my-org
 	OrgId OrganizationId `json:"org_id"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// PlanOnly Whether the deployment is executed in plan mode.
 	//
@@ -324,6 +593,18 @@ type DeploymentCreateBody struct {
 	// Example: development
 	EnvId string `json:"env_id"`
 
+	// ExpectedBaseDeploymentId The Deployment the request's manifest was derived from. The request fails with the error code `deployment_base_changed`
+	// when the Environment's current Deployment differs at the moment the Deployment is created, also when a queued request
+	// is promoted. Dry runs do not check it.
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+
+	// HaltOnFailure Whether a queued request must not start when the Deployment it waited for failed. That Deployment is the
+	// Environment's last deploy, rollback or destroy at promotion, provided it ended after the request was queued;
+	// plan runs never count, and a later Deployment supersedes an earlier failure. The request then ends `rejected`
+	// with the reason code `previous_deployment_failed` and the queue continues with the next request. A request that
+	// starts at once, a plan-only request and a dry run never halt. Not valid with `when_busy` set to `reject`.
+	HaltOnFailure *bool `json:"halt_on_failure,omitempty"`
+
 	// IsDryRun Whether to just validate the request and not persist or execute it.
 	IsDryRun bool `json:"is_dry_run,omitempty"`
 
@@ -353,6 +634,10 @@ type DeploymentCreateBody struct {
 	// Example: my-project
 	ProjectId string `json:"project_id"`
 
+	// QueueTtlSeconds How long a queued request may wait before it expires. Defaults to the Data Plane's configured queue TTL and must not
+	// exceed its configured maximum. Not valid with `when_busy` set to `reject`.
+	QueueTtlSeconds *int `json:"queue_ttl_seconds,omitempty"`
+
 	// RollbackToDeploymentId Optional ID to rollback to when the deployment mode is 'rollback' or 'rollback_plan'.
 	//
 	// Example: 01234567-89ab-cdef-0123-456789abcdef
@@ -362,6 +647,14 @@ type DeploymentCreateBody struct {
 	//
 	// Example: info
 	RunnerLogLevel *DeploymentCreateBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+
+	// WhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+	// or is still settling the previous Deployment with Core. `queue` (the default) waits in the Environment's
+	// deployment queue and answers 202 with the queue item. `reject` answers 409 with the error code
+	// `environment_busy`. A queued request is resolved like a new request when it reaches the head of the queue.
+	// Requests authorized by an organization token cannot wait and get 409 `environment_busy` either way. Plan-only
+	// requests and dry runs are never queued and ignore this field.
+	WhenBusy *DeploymentCreateBodyWhenBusy `json:"when_busy,omitempty"`
 }
 
 // DeploymentCreateBodyMode The mode of the deployment. Defaults to 'deploy'. Can be set to 'rollback' to rollback to the graph used in
@@ -375,6 +668,14 @@ type DeploymentCreateBodyMode string
 //
 // Example: info
 type DeploymentCreateBodyRunnerLogLevel string
+
+// DeploymentCreateBodyWhenBusy What a deploy or rollback request does when its Environment is busy with another Deployment, has queued requests
+// or is still settling the previous Deployment with Core. `queue` (the default) waits in the Environment's
+// deployment queue and answers 202 with the queue item. `reject` answers 409 with the error code
+// `environment_busy`. A queued request is resolved like a new request when it reaches the head of the queue.
+// Requests authorized by an organization token cannot wait and get 409 `environment_busy` either way. Plan-only
+// requests and dry runs are never queued and ignore this field.
+type DeploymentCreateBodyWhenBusy string
 
 // DeploymentDiff Describes a diff between the resource graphs of two deployments.
 type DeploymentDiff struct {
@@ -422,6 +723,12 @@ type DeploymentDiffChangeType string
 type DeploymentDryRun struct {
 	// Diff Describes a diff between the resource graphs of two deployments.
 	Diff DeploymentDiff `json:"diff"`
+
+	// PendingChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+	// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+	// never queued.
+	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
 
 	// RunnerId The Runner ID that this deployment would have executed on
 	//
@@ -502,6 +809,26 @@ type DeploymentMetrics struct {
 	NumWorkloads int `json:"num_workloads"`
 }
 
+// DeploymentOutcomeAcknowledgement defines model for DeploymentOutcomeAcknowledgement.
+type DeploymentOutcomeAcknowledgement struct {
+	AcknowledgedAt time.Time          `json:"acknowledged_at"`
+	ActorId        openapi_types.UUID `json:"actor_id"`
+	DeploymentId   openapi_types.UUID `json:"deployment_id"`
+	EnvironmentId  openapi_types.UUID `json:"environment_id"`
+	OperationRef   string             `json:"operation_ref"`
+	PluginId       string             `json:"plugin_id"`
+	Reason         string             `json:"reason"`
+
+	// Replayed True when this identical acknowledgement had already been recorded.
+	Replayed bool `json:"replayed"`
+}
+
+// DeploymentOutcomeAcknowledgementBody defines model for DeploymentOutcomeAcknowledgementBody.
+type DeploymentOutcomeAcknowledgementBody struct {
+	// Reason Why the operator is certain the Runner attempt can no longer change the Environment, for example the confirmed removal of its job.
+	Reason string `json:"reason"`
+}
+
 // DeploymentPage A page of deployments
 type DeploymentPage struct {
 	Items []DeploymentSummary `json:"items"`
@@ -509,6 +836,79 @@ type DeploymentPage struct {
 	// NextPageToken The page token to use to request the next page of items
 	NextPageToken *string `json:"next_page_token,omitempty"`
 }
+
+// DeploymentQueueCancelBody defines model for DeploymentQueueCancelBody.
+type DeploymentQueueCancelBody struct {
+	// Reason Why the request is no longer wanted.
+	Reason *string `json:"reason,omitempty"`
+}
+
+// DeploymentQueueItem A deploy or rollback request waiting for its Environment, or the record of how its wait ended.
+type DeploymentQueueItem struct {
+	// Attempts Promotion attempts that failed transiently, for example while Core was unavailable.
+	Attempts  int                `json:"attempts"`
+	CreatedAt time.Time          `json:"created_at"`
+	CreatedBy openapi_types.UUID `json:"created_by"`
+
+	// DeploymentId The Deployment the item became once dispatched.
+	DeploymentId             *openapi_types.UUID `json:"deployment_id,omitempty"`
+	EnvId                    string              `json:"env_id"`
+	ExpectedBaseDeploymentId *openapi_types.UUID `json:"expected_base_deployment_id,omitempty"`
+	ExpiresAt                time.Time           `json:"expires_at"`
+
+	// HaltOnFailure The item is rejected with `previous_deployment_failed` instead of being promoted when the Deployment it waited
+	// for failed.
+	HaltOnFailure bool               `json:"halt_on_failure"`
+	Id            openapi_types.UUID `json:"id"`
+
+	// LastError The most recent transient promotion failure.
+	LastError *string `json:"last_error,omitempty"`
+
+	// Manifest The manifest associated with a deployment
+	Manifest *DeploymentManifest     `json:"manifest,omitempty"`
+	Mode     DeploymentQueueItemMode `json:"mode"`
+	OrgId    string                  `json:"org_id"`
+
+	// Position The 1-based position in the Environment's queue while queued, otherwise 0.
+	Position  int    `json:"position"`
+	ProjectId string `json:"project_id"`
+
+	// ReasonCode Why the item was cancelled, expired or rejected, for example `cancelled`, `expired`, `environment_deleting`,
+	// `outcome_unreconciled`, `deployment_base_changed`, `previous_deployment_failed`, `pin_protection` or
+	// `actor_forbidden`.
+	ReasonCode *string `json:"reason_code,omitempty"`
+
+	// ReasonDeploymentId The Deployment the reason refers to: for `previous_deployment_failed` the failed Deployment the item waited
+	// for, for `outcome_unreconciled` the failed plugin-dispatched Deployment whose outcome is unreconciled, for
+	// `deployment_base_changed` the Environment's current Deployment that replaced the expected base. Absent when
+	// the reason refers to no Deployment.
+	ReasonDeploymentId     *openapi_types.UUID `json:"reason_deployment_id,omitempty"`
+	ReasonMessage          *string             `json:"reason_message,omitempty"`
+	RollbackToDeploymentId *openapi_types.UUID `json:"rollback_to_deployment_id,omitempty"`
+	SettledAt              *time.Time          `json:"settled_at,omitempty"`
+
+	// SettledBy The user who cancelled the item.
+	SettledBy *openapi_types.UUID `json:"settled_by,omitempty"`
+
+	// State `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+	// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+	State DeploymentQueueItemState `json:"state"`
+}
+
+// DeploymentQueueItemMode defines model for DeploymentQueueItem.Mode.
+type DeploymentQueueItemMode string
+
+// DeploymentQueueItemPage A page of deployment queue items
+type DeploymentQueueItemPage struct {
+	Items []DeploymentQueueItem `json:"items"`
+
+	// NextPageToken The page token to use to request the next page of items
+	NextPageToken *string `json:"next_page_token,omitempty"`
+}
+
+// DeploymentQueueItemState `queued` waits for its Environment. `dispatched` became the Deployment named by `deployment_id`. `cancelled`,
+// `expired` and `rejected` ended without a Deployment; `reason_code` and `reason_message` say why.
+type DeploymentQueueItemState string
 
 // DeploymentResultMetadata The metadata produced by the resources involved in the deployment.
 type DeploymentResultMetadata = []DeploymentResultMetadataPerNode
@@ -566,6 +966,14 @@ type DeploymentSummary struct {
 	//
 	// Example: development-01
 	EnvId string `json:"env_id"`
+
+	// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+	// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+	// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+	// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+	// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+	// that waited in the deployment queue are rejected and must be submitted again.
+	EnvironmentFence *EnvironmentFence `json:"environment_fence,omitempty"`
 
 	// Id The unique deployment id
 	//
@@ -626,6 +1034,54 @@ type DeploymentTFResourceCounts struct {
 	NumResourcesRemoved int `json:"num_resources_removed"`
 }
 
+// EnvironmentFence Reported on `listLastDeployments` items only, and only while the item's Environment is fenced: its current
+// Deployment is a failed plugin-dispatched Deployment whose Runner may still be active, because no Runner result
+// proves the attempt stopped. Until the fence ends, every new Deployment of the Environment, queued or not, is
+// refused with the conflict code `code`. It ends when a late authenticated Runner result arrives or when an operator
+// acknowledges the outcome of `deployment_id` with `acknowledge-outcome`. Acknowledging starts nothing: requests
+// that waited in the deployment queue are rejected and must be submitted again.
+type EnvironmentFence struct {
+	// Code The conflict code new Deployments of this Environment are refused with.
+	//
+	// Example: outcome_unreconciled
+	Code EnvironmentFenceCode `json:"code"`
+
+	// DeploymentId The failed plugin-dispatched Deployment that fences the Environment.
+	//
+	// Example: 01234567-89ab-cdef-0123-456789abcdef
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+
+	// Remedy The operator action that lifts the fence:
+	// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+	//
+	//
+	// Example: acknowledge-outcome
+	Remedy EnvironmentFenceRemedy `json:"remedy"`
+
+	// RemedyAvailableAt The end of the Runner dispatch window. `acknowledge-outcome` is refused with 409 before this time. Absent when
+	// no window was recorded, then it is accepted at once.
+	//
+	//
+	// Example: 2025-01-02T04:04:05Z
+	RemedyAvailableAt *time.Time `json:"remedy_available_at,omitempty"`
+
+	// Since When the fencing Deployment failed.
+	//
+	// Example: 2025-01-02T03:04:05Z
+	Since time.Time `json:"since"`
+}
+
+// EnvironmentFenceCode The conflict code new Deployments of this Environment are refused with.
+//
+// Example: outcome_unreconciled
+type EnvironmentFenceCode string
+
+// EnvironmentFenceRemedy The operator action that lifts the fence:
+// `POST /internal/orgs/{orgId}/deployments/{deployment_id}/actions/acknowledge-outcome`.
+//
+// Example: acknowledge-outcome
+type EnvironmentFenceRemedy string
+
 // Error A standard error response
 type Error struct {
 	// Details An optional payload of metadata associated with the error.
@@ -642,6 +1098,205 @@ type Error struct {
 	//
 	// Example: Something happened!
 	Message string `json:"message"`
+}
+
+// ExternalDeploymentAdmissionBody defines model for ExternalDeploymentAdmissionBody.
+type ExternalDeploymentAdmissionBody struct {
+	EnvId                    string                                         `json:"env_id"`
+	EnvironmentUuid          openapi_types.UUID                             `json:"environment_uuid"`
+	Fence                    int64                                          `json:"fence"`
+	FirstForwardDeploymentId *openapi_types.UUID                            `json:"first_forward_deployment_id,omitempty"`
+	Mode                     ExternalDeploymentAdmissionBodyMode            `json:"mode"`
+	OperationRef             openapi_types.UUID                             `json:"operation_ref"`
+	Plan                     *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
+	ProjectId                string                                         `json:"project_id"`
+	ProjectUuid              openapi_types.UUID                             `json:"project_uuid"`
+	Rollback                 *ExternalDeploymentAdmissionRollback           `json:"rollback,omitempty"`
+	RunnerLogLevel           *ExternalDeploymentAdmissionBodyRunnerLogLevel `json:"runner_log_level,omitempty"`
+}
+
+// ExternalDeploymentAdmissionBodyMode defines model for ExternalDeploymentAdmissionBody.Mode.
+type ExternalDeploymentAdmissionBodyMode string
+
+// ExternalDeploymentAdmissionBodyRunnerLogLevel defines model for ExternalDeploymentAdmissionBody.RunnerLogLevel.
+type ExternalDeploymentAdmissionBodyRunnerLogLevel string
+
+// ExternalDeploymentAdmissionPlan defines model for ExternalDeploymentAdmissionPlan.
+type ExternalDeploymentAdmissionPlan struct {
+	ExpectedModuleVersions map[string]openapi_types.UUID `json:"expected_module_versions"`
+	Fingerprint            string                        `json:"fingerprint"`
+	SnapshotId             openapi_types.UUID            `json:"snapshot_id"`
+}
+
+// ExternalDeploymentAdmissionResponse defines model for ExternalDeploymentAdmissionResponse.
+type ExternalDeploymentAdmissionResponse struct {
+	DeploymentId openapi_types.UUID `json:"deployment_id"`
+	Replayed     bool               `json:"replayed"`
+}
+
+// ExternalDeploymentAdmissionRollback defines model for ExternalDeploymentAdmissionRollback.
+type ExternalDeploymentAdmissionRollback struct {
+	ForwardDeploymentId         openapi_types.UUID  `json:"forward_deployment_id"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID `json:"retry_of_rollback_deployment_id,omitempty"`
+}
+
+// ExternalDeploymentPlanBody defines model for ExternalDeploymentPlanBody.
+type ExternalDeploymentPlanBody struct {
+	EnvId           string                             `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID                 `json:"environment_uuid"`
+	ModuleVersions  map[string]ExternalModuleSelection `json:"module_versions"`
+	ProjectId       string                             `json:"project_id"`
+	ProjectUuid     openapi_types.UUID                 `json:"project_uuid"`
+}
+
+// ExternalDeploymentPlanResponse defines model for ExternalDeploymentPlanResponse.
+type ExternalDeploymentPlanResponse struct {
+	// Diff Describes a diff between the resource graphs of two deployments.
+	Diff                      DeploymentDiff            `json:"diff"`
+	EffectiveBaseDeploymentId openapi_types.UUID        `json:"effective_base_deployment_id"`
+	EnvironmentUuid           openapi_types.UUID        `json:"environment_uuid"`
+	Fingerprint               string                    `json:"fingerprint"`
+	Graph                     ExternalGraphStructure    `json:"graph"`
+	Manifest                  ExternalManifestStructure `json:"manifest"`
+	ModuleVersions            []ExternalModuleInventory `json:"module_versions"`
+	SnapshotId                openapi_types.UUID        `json:"snapshot_id"`
+}
+
+// ExternalDeploymentReadinessBody defines model for ExternalDeploymentReadinessBody.
+type ExternalDeploymentReadinessBody struct {
+	Environments []ExternalEnvironmentRef `json:"environments"`
+}
+
+// ExternalDeploymentReadinessResponse defines model for ExternalDeploymentReadinessResponse.
+type ExternalDeploymentReadinessResponse struct {
+	Items []ExternalEnvironmentReadiness `json:"items"`
+}
+
+// ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
+type ExternalDeploymentStatusResponse struct {
+	AdmissionBaseDeploymentId   *openapi_types.UUID                  `json:"admission_base_deployment_id,omitempty"`
+	CompletedAt                 *time.Time                           `json:"completed_at,omitempty"`
+	CreatedAt                   time.Time                            `json:"created_at"`
+	DeploymentId                openapi_types.UUID                   `json:"deployment_id"`
+	DispatchId                  string                               `json:"dispatch_id"`
+	EnvId                       string                               `json:"env_id"`
+	EnvironmentUuid             openapi_types.UUID                   `json:"environment_uuid"`
+	Fence                       int64                                `json:"fence"`
+	FirstForwardDeploymentId    *openapi_types.UUID                  `json:"first_forward_deployment_id,omitempty"`
+	ForwardDeploymentId         *openapi_types.UUID                  `json:"forward_deployment_id,omitempty"`
+	Mode                        ExternalDeploymentStatusResponseMode `json:"mode"`
+	ModuleVersions              map[string]openapi_types.UUID        `json:"module_versions"`
+	OperationRef                openapi_types.UUID                   `json:"operation_ref"`
+	ProjectId                   string                               `json:"project_id"`
+	ProjectUuid                 openapi_types.UUID                   `json:"project_uuid"`
+	ReceiptCreatedAt            time.Time                            `json:"receipt_created_at"`
+	RequestDigest               string                               `json:"request_digest"`
+	RetryOfRollbackDeploymentId *openapi_types.UUID                  `json:"retry_of_rollback_deployment_id,omitempty"`
+	RollbackBaseDeploymentId    *openapi_types.UUID                  `json:"rollback_base_deployment_id,omitempty"`
+	RollbackModuleVersions      map[string]openapi_types.UUID        `json:"rollback_module_versions"`
+
+	// RollbackModules Immutable metadata projected from the retained effective-base Deployment.
+	RollbackModules *[]ExternalModuleInventory `json:"rollback_modules,omitempty"`
+
+	// RollbackRetryProvenanceRecorded Present on rollback status. True only when the retained receipt records validated predecessor provenance. False for read-only legacy lineage projection; terminal outcome and current-head eligibility remain separate admission checks.
+	RollbackRetryProvenanceRecorded *bool                                  `json:"rollback_retry_provenance_recorded,omitempty"`
+	Status                          ExternalDeploymentStatusResponseStatus `json:"status"`
+	StatusMessage                   string                                 `json:"status_message"`
+}
+
+// ExternalDeploymentStatusResponseMode defines model for ExternalDeploymentStatusResponse.Mode.
+type ExternalDeploymentStatusResponseMode string
+
+// ExternalDeploymentStatusResponseStatus defines model for ExternalDeploymentStatusResponse.Status.
+type ExternalDeploymentStatusResponseStatus string
+
+// ExternalEnvironmentReadiness defines model for ExternalEnvironmentReadiness.
+type ExternalEnvironmentReadiness struct {
+	ActiveLeaseUntil          *time.Time                                `json:"active_lease_until,omitempty"`
+	ActiveModules             []ExternalModuleInventory                 `json:"active_modules"`
+	EffectiveBaseDeploymentId *openapi_types.UUID                       `json:"effective_base_deployment_id,omitempty"`
+	EnvId                     string                                    `json:"env_id"`
+	EnvironmentUuid           openapi_types.UUID                        `json:"environment_uuid"`
+	LatestDeploymentId        *openapi_types.UUID                       `json:"latest_deployment_id,omitempty"`
+	LatestMode                *ExternalEnvironmentReadinessLatestMode   `json:"latest_mode,omitempty"`
+	LatestStatus              *ExternalEnvironmentReadinessLatestStatus `json:"latest_status,omitempty"`
+	ProjectId                 string                                    `json:"project_id"`
+	ProjectUuid               openapi_types.UUID                        `json:"project_uuid"`
+	State                     ExternalEnvironmentReadinessState         `json:"state"`
+}
+
+// ExternalEnvironmentReadinessLatestMode defines model for ExternalEnvironmentReadiness.LatestMode.
+type ExternalEnvironmentReadinessLatestMode string
+
+// ExternalEnvironmentReadinessLatestStatus defines model for ExternalEnvironmentReadiness.LatestStatus.
+type ExternalEnvironmentReadinessLatestStatus string
+
+// ExternalEnvironmentReadinessState defines model for ExternalEnvironmentReadiness.State.
+type ExternalEnvironmentReadinessState string
+
+// ExternalEnvironmentRef defines model for ExternalEnvironmentRef.
+type ExternalEnvironmentRef struct {
+	EnvId           string             `json:"env_id"`
+	EnvironmentUuid openapi_types.UUID `json:"environment_uuid"`
+	ProjectId       string             `json:"project_id"`
+	ProjectUuid     openapi_types.UUID `json:"project_uuid"`
+}
+
+// ExternalGraphNodeStructure defines model for ExternalGraphNodeStructure.
+type ExternalGraphNodeStructure struct {
+	Deleted   *bool    `json:"deleted,omitempty"`
+	Drift     *string  `json:"drift,omitempty"`
+	ModuleId  *string  `json:"module_id,omitempty"`
+	ParamKeys []string `json:"param_keys"`
+	Version   *string  `json:"version,omitempty"`
+}
+
+// ExternalGraphStructure defines model for ExternalGraphStructure.
+type ExternalGraphStructure struct {
+	Edges           map[string]map[string]string          `json:"edges"`
+	LeafResources   []string                              `json:"leaf_resources"`
+	Nodes           map[string]ExternalGraphNodeStructure `json:"nodes"`
+	SharedResources map[string]string                     `json:"shared_resources"`
+	Workloads       map[string]string                     `json:"workloads"`
+}
+
+// ExternalManifestResourceStructure defines model for ExternalManifestResourceStructure.
+type ExternalManifestResourceStructure struct {
+	Class     *string  `json:"class,omitempty"`
+	Id        *string  `json:"id,omitempty"`
+	ParamKeys []string `json:"param_keys"`
+	Type      string   `json:"type"`
+}
+
+// ExternalManifestStructure defines model for ExternalManifestStructure.
+type ExternalManifestStructure struct {
+	Shared    map[string]ExternalManifestResourceStructure `json:"shared"`
+	Workloads map[string]ExternalManifestWorkloadStructure `json:"workloads"`
+}
+
+// ExternalManifestWorkloadStructure defines model for ExternalManifestWorkloadStructure.
+type ExternalManifestWorkloadStructure struct {
+	OutputKeys []string                                     `json:"output_keys"`
+	Resources  map[string]ExternalManifestResourceStructure `json:"resources"`
+}
+
+// ExternalModuleInventory defines model for ExternalModuleInventory.
+type ExternalModuleInventory struct {
+	ArtifactDigest  *string             `json:"artifact_digest,omitempty"`
+	ModuleId        string              `json:"module_id"`
+	ModuleUuid      *openapi_types.UUID `json:"module_uuid,omitempty"`
+	SemanticVersion *string             `json:"semantic_version,omitempty"`
+	Version         string              `json:"version"`
+	VersionUuid     *openapi_types.UUID `json:"version_uuid,omitempty"`
+}
+
+// ExternalModuleSelection defines model for ExternalModuleSelection.
+type ExternalModuleSelection struct {
+	ArtifactDigest  string             `json:"artifact_digest"`
+	ModuleUuid      openapi_types.UUID `json:"module_uuid"`
+	SemanticVersion string             `json:"semantic_version"`
+	Version         string             `json:"version"`
+	VersionUuid     openapi_types.UUID `json:"version_uuid"`
 }
 
 // InternalModuleUsage defines model for InternalModuleUsage.
@@ -733,7 +1388,7 @@ type MetadataKeyPage struct {
 type MetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format *string `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.
@@ -779,6 +1434,28 @@ type OpenidConfiguration struct {
 // Example: my-org
 type OrganizationId = string
 
+// PendingEnvironmentChanges Reported only on the response that creates a plan-only Deployment or answers a dry run, and only when Deployments
+// that change the Environment run or wait in its deployment queue. The plan or diff describes the Environment as it
+// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
+// never queued.
+type PendingEnvironmentChanges struct {
+	// Code Example: result_may_change
+	Code PendingEnvironmentChangesCode `json:"code"`
+
+	// Queued Deploy and rollback requests waiting in the Environment's deployment queue.
+	//
+	// Example: 2
+	Queued int `json:"queued"`
+
+	// Running Deploy, rollback or destroy Deployments changing the Environment now.
+	//
+	// Example: 1
+	Running int `json:"running"`
+}
+
+// PendingEnvironmentChangesCode Example: result_may_change
+type PendingEnvironmentChangesCode string
+
 // ResourceClass A resource class requested by the resource graph. 'default' is the default value.
 //
 // Example: classic
@@ -799,7 +1476,7 @@ type ResourceNodesPage struct {
 type UpdateMetadataKeySchema struct {
 	// Format The format of the metadata key.
 	//
-	// Example: true
+	// Example: date-time
 	Format nullable.Nullable[string] `json:"format,omitempty"`
 
 	// Pattern A regular expression pattern for the metadata key.
@@ -830,6 +1507,9 @@ type DeploymentIdPathParam = openapi_types.UUID
 // EnvIdQueryParam defines model for envIdQueryParam.
 type EnvIdQueryParam = string
 
+// IdempotencyKeyHeader defines model for idempotencyKeyHeader.
+type IdempotencyKeyHeader = string
+
 // MetadataKeyNamePathParam defines model for metadataKeyNamePathParam.
 type MetadataKeyNamePathParam = string
 
@@ -842,17 +1522,35 @@ type PageTokenQueryParam = string
 // PerPageQueryParam defines model for perPageQueryParam.
 type PerPageQueryParam = int
 
+// PluginIdPathParam defines model for pluginIdPathParam.
+type PluginIdPathParam = string
+
 // ProjectIdQueryParam defines model for projectIdQueryParam.
 type ProjectIdQueryParam = string
 
+// QueueItemIdPathParam defines model for queueItemIdPathParam.
+type QueueItemIdPathParam = openapi_types.UUID
+
 // N400BadRequest A standard error response
 type N400BadRequest = Error
+
+// N401Unauthorized A standard error response
+type N401Unauthorized = Error
+
+// N403Forbidden A standard error response
+type N403Forbidden = Error
 
 // N404NotFound A standard error response
 type N404NotFound = Error
 
 // N409Conflict A standard error response
 type N409Conflict = Error
+
+// N413TooLarge A standard error response
+type N413TooLarge = Error
+
+// N503Unavailable A standard error response
+type N503Unavailable = Error
 
 // InternalDeleteDeploymentsParams defines parameters for InternalDeleteDeployments.
 type InternalDeleteDeploymentsParams struct {
@@ -878,6 +1576,24 @@ type ListActiveResourceNodesParams struct {
 
 	// EnvId The Environment ID
 	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+}
+
+// ListDeploymentQueueItemsParams defines parameters for ListDeploymentQueueItems.
+type ListDeploymentQueueItemsParams struct {
+	// ProjectId The Project ID
+	ProjectId *ProjectIdQueryParam `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// EnvId The Environment ID
+	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+
+	// PerPage The maximum number of items to return in a page of results
+	PerPage *PerPageQueryParam `form:"per_page,omitempty" json:"per_page,omitempty"`
+
+	// Page The page token to request from
+	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
+
+	// State Only return items in this state.
+	State *DeploymentQueueItemState `form:"state,omitempty" json:"state,omitempty"`
 }
 
 // ListDeploymentsParams defines parameters for ListDeployments.
@@ -911,6 +1627,7 @@ type ListDeploymentsParamsByStatus string
 type CreateDeploymentParams struct {
 	// IdempotencyKey Ensures that the deployment request is only accepted once per idempotency key per 24 hours. A uuid or similar is recommended.
 	// When the key matches the key in last deployment and the environment and manifest is the same, this will return the last deployment.
+	// When the key matches a queued request, this returns its queue item until it is dispatched, and its Deployment afterwards.
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
@@ -970,6 +1687,27 @@ type ListMetadataKeysParams struct {
 	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
 }
 
+// PlanExternalDeploymentParams defines parameters for PlanExternalDeployment.
+type PlanExternalDeploymentParams struct {
+	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
+// GetExternalDeploymentReadinessParams defines parameters for GetExternalDeploymentReadiness.
+type GetExternalDeploymentReadinessParams struct {
+	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
+// AdmitExternalDeploymentParams defines parameters for AdmitExternalDeployment.
+type AdmitExternalDeploymentParams struct {
+	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
+// InternalAcknowledgeDeploymentOutcomeJSONRequestBody defines body for InternalAcknowledgeDeploymentOutcome for application/json ContentType.
+type InternalAcknowledgeDeploymentOutcomeJSONRequestBody = DeploymentOutcomeAcknowledgementBody
+
+// CancelDeploymentQueueItemJSONRequestBody defines body for CancelDeploymentQueueItem for application/json ContentType.
+type CancelDeploymentQueueItemJSONRequestBody = DeploymentQueueCancelBody
+
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
 
@@ -981,6 +1719,15 @@ type CreateMetadataKeyJSONRequestBody = MetadataKeyCreateBody
 
 // UpdateMetadataKeyJSONRequestBody defines body for UpdateMetadataKey for application/json ContentType.
 type UpdateMetadataKeyJSONRequestBody = MetadataKeyUpdateBody
+
+// PlanExternalDeploymentJSONRequestBody defines body for PlanExternalDeployment for application/json ContentType.
+type PlanExternalDeploymentJSONRequestBody = ExternalDeploymentPlanBody
+
+// GetExternalDeploymentReadinessJSONRequestBody defines body for GetExternalDeploymentReadiness for application/json ContentType.
+type GetExternalDeploymentReadinessJSONRequestBody = ExternalDeploymentReadinessBody
+
+// AdmitExternalDeploymentJSONRequestBody defines body for AdmitExternalDeployment for application/json ContentType.
+type AdmitExternalDeploymentJSONRequestBody = ExternalDeploymentAdmissionBody
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -1071,6 +1818,34 @@ type ClientInterface interface {
 	// Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 	InternalDeleteDeployments(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InternalAcknowledgeDeploymentOutcomeWithBody Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithBody(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcome(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// InternalForceFailDeployment Emergency API for force failing a deployment.
 	//
 	// This should only be used once you have confirmed that the underlying runner job has stopped, failed, or will
@@ -1094,6 +1869,38 @@ type ClientInterface interface {
 	// Corresponds with GET /orgs/{orgId}/active-resources (the `ListActiveResourceNodes` operationId).
 	ListActiveResourceNodes(ctx context.Context, orgId OrgIdPathParam, params *ListActiveResourceNodesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+	ListDeploymentQueueItems(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+	GetDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelDeploymentQueueItemWithBody Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithBody(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelDeploymentQueueItem Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListDeployments List deployments in the organization
 	//
 	// Corresponds with GET /orgs/{orgId}/deployments (the `ListDeployments` operationId).
@@ -1101,12 +1908,46 @@ type ClientInterface interface {
 
 	// CreateDeploymentWithBody Create a new deployment in the target project and environment.
 	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+	// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+	// resolved against the Environment state at promotion.
+	//
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
 	CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, params *CreateDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateDeployment Create a new deployment in the target project and environment.
+	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+	// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+	// resolved against the Environment state at promotion.
+	//
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1254,6 +2095,68 @@ type ClientInterface interface {
 	//
 	// Corresponds with PATCH /orgs/{orgId}/metadata-keys/{metadataKeyName} (the `UpdateMetadataKey` operationId).
 	UpdateMetadataKey(ctx context.Context, orgId OrgIdPathParam, metadataKeyName MetadataKeyNamePathParam, body UpdateMetadataKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PlanExternalDeploymentWithBody Plan exact module versions through the normal deployment planner without exposing parameter values.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+	PlanExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PlanExternalDeployment Plan exact module versions through the normal deployment planner without exposing parameter values.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+	PlanExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, body PlanExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentReadinessWithBody Read immutable deployment readiness and active module inventory for exact Environment references.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+	GetExternalDeploymentReadinessWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentReadiness Read immutable deployment readiness and active module inventory for exact Environment references.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+	GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AdmitExternalDeploymentWithBody Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AdmitExternalDeployment Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentDispatch Recover immutable Deployment receipt status after a lost admission response.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+	GetExternalDeploymentDispatch(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeployment Get an ordinary Deployment only within its exact authorized Environment.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
+	GetExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentLogs Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+	GetExternalDeploymentLogs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExternalDeploymentOutputs Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+	GetExternalDeploymentOutputs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetJwks Show JSON Web Keys Set (JWKS).
@@ -1291,6 +2194,54 @@ func (c *Client) GetOpenidConfiguration(ctx context.Context, reqEditors ...Reque
 // Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 func (c *Client) InternalDeleteDeployments(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInternalDeleteDeploymentsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalAcknowledgeDeploymentOutcomeWithBody Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *Client) InternalAcknowledgeDeploymentOutcomeWithBody(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(c.Server, orgId, deploymentId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalAcknowledgeDeploymentOutcome Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *Client) InternalAcknowledgeDeploymentOutcome(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalAcknowledgeDeploymentOutcomeRequest(c.Server, orgId, deploymentId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,6 +2305,78 @@ func (c *Client) ListActiveResourceNodes(ctx context.Context, orgId OrgIdPathPar
 	return c.Client.Do(req)
 }
 
+// ListDeploymentQueueItems List deployment queue items in the organization in queue order.
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+func (c *Client) ListDeploymentQueueItems(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDeploymentQueueItemsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetDeploymentQueueItem Get a deployment queue item, including the manifest it requested.
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+func (c *Client) GetDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDeploymentQueueItemRequest(c.Server, orgId, queueItemId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CancelDeploymentQueueItemWithBody Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *Client) CancelDeploymentQueueItemWithBody(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelDeploymentQueueItemRequestWithBody(c.Server, orgId, queueItemId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CancelDeploymentQueueItem Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *Client) CancelDeploymentQueueItem(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelDeploymentQueueItemRequest(c.Server, orgId, queueItemId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListDeployments List deployments in the organization
 //
 // Corresponds with GET /orgs/{orgId}/deployments (the `ListDeployments` operationId).
@@ -1371,6 +2394,23 @@ func (c *Client) ListDeployments(ctx context.Context, orgId OrgIdPathParam, para
 
 // CreateDeploymentWithBody Create a new deployment in the target project and environment.
 //
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+// resolved against the Environment state at promotion.
+//
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
@@ -1387,6 +2427,23 @@ func (c *Client) CreateDeploymentWithBody(ctx context.Context, orgId OrgIdPathPa
 }
 
 // CreateDeployment Create a new deployment in the target project and environment.
+//
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+// resolved against the Environment state at promotion.
+//
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -1725,6 +2782,168 @@ func (c *Client) UpdateMetadataKey(ctx context.Context, orgId OrgIdPathParam, me
 	return c.Client.Do(req)
 }
 
+// PlanExternalDeploymentWithBody Plan exact module versions through the normal deployment planner without exposing parameter values.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+func (c *Client) PlanExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPlanExternalDeploymentRequestWithBody(c.Server, orgId, pluginId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PlanExternalDeployment Plan exact module versions through the normal deployment planner without exposing parameter values.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+func (c *Client) PlanExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, body PlanExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPlanExternalDeploymentRequest(c.Server, orgId, pluginId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentReadinessWithBody Read immutable deployment readiness and active module inventory for exact Environment references.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+func (c *Client) GetExternalDeploymentReadinessWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentReadinessRequestWithBody(c.Server, orgId, pluginId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentReadiness Read immutable deployment readiness and active module inventory for exact Environment references.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+func (c *Client) GetExternalDeploymentReadiness(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentReadinessRequest(c.Server, orgId, pluginId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AdmitExternalDeploymentWithBody Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *Client) AdmitExternalDeploymentWithBody(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdmitExternalDeploymentRequestWithBody(c.Server, orgId, pluginId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AdmitExternalDeployment Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *Client) AdmitExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdmitExternalDeploymentRequest(c.Server, orgId, pluginId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentDispatch Recover immutable Deployment receipt status after a lost admission response.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+func (c *Client) GetExternalDeploymentDispatch(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentDispatchRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, dispatchId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeployment Get an ordinary Deployment only within its exact authorized Environment.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
+func (c *Client) GetExternalDeployment(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentLogs Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+func (c *Client) GetExternalDeploymentLogs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentLogsRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExternalDeploymentOutputs Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+func (c *Client) GetExternalDeploymentOutputs(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExternalDeploymentOutputsRequest(c.Server, orgId, pluginId, projectUUID, environmentUUID, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // NewGetJwksRequest constructs an http.Request for the GetJwks method
 func NewGetJwksRequest(server string) (*http.Request, error) {
 	var err error
@@ -1860,6 +3079,60 @@ func NewInternalDeleteDeploymentsRequest(server string, orgId OrgIdPathParam, pa
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewInternalAcknowledgeDeploymentOutcomeRequest calls the generic InternalAcknowledgeDeploymentOutcome builder with application/json body
+func NewInternalAcknowledgeDeploymentOutcomeRequest(server string, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(server, orgId, deploymentId, "application/json", bodyReader)
+}
+
+// NewInternalAcknowledgeDeploymentOutcomeRequestWithBody constructs an http.Request for the InternalAcknowledgeDeploymentOutcome method, with any body, and a specified content type
+func NewInternalAcknowledgeDeploymentOutcomeRequestWithBody(server string, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/orgs/%s/deployments/%s/actions/acknowledge-outcome", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -2042,6 +3315,210 @@ func NewListActiveResourceNodesRequest(server string, orgId OrgIdPathParam, para
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListDeploymentQueueItemsRequest constructs an http.Request for the ListDeploymentQueueItems method
+func NewListDeploymentQueueItemsRequest(server string, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.ProjectId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "project_id", *params.ProjectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnvId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "env_id", *params.EnvId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PerPage != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "per_page", *params.PerPage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetDeploymentQueueItemRequest constructs an http.Request for the GetDeploymentQueueItem method
+func NewGetDeploymentQueueItemRequest(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "queueItemId", queueItemId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCancelDeploymentQueueItemRequest calls the generic CancelDeploymentQueueItem builder with application/json body
+func NewCancelDeploymentQueueItemRequest(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCancelDeploymentQueueItemRequestWithBody(server, orgId, queueItemId, "application/json", bodyReader)
+}
+
+// NewCancelDeploymentQueueItemRequestWithBody constructs an http.Request for the CancelDeploymentQueueItem method, with any body, and a specified content type
+func NewCancelDeploymentQueueItemRequestWithBody(server string, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "queueItemId", queueItemId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/deployment-queue/%s/actions/cancel", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -3071,6 +4548,455 @@ func NewUpdateMetadataKeyRequestWithBody(server string, orgId OrgIdPathParam, me
 	return req, nil
 }
 
+// NewPlanExternalDeploymentRequest calls the generic PlanExternalDeployment builder with application/json body
+func NewPlanExternalDeploymentRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, body PlanExternalDeploymentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPlanExternalDeploymentRequestWithBody(server, orgId, pluginId, params, "application/json", bodyReader)
+}
+
+// NewPlanExternalDeploymentRequestWithBody constructs an http.Request for the PlanExternalDeployment method, with any body, and a specified content type
+func NewPlanExternalDeploymentRequestWithBody(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/external-deployment-plans", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentReadinessRequest calls the generic GetExternalDeploymentReadiness builder with application/json body
+func NewGetExternalDeploymentReadinessRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewGetExternalDeploymentReadinessRequestWithBody(server, orgId, pluginId, params, "application/json", bodyReader)
+}
+
+// NewGetExternalDeploymentReadinessRequestWithBody constructs an http.Request for the GetExternalDeploymentReadiness method, with any body, and a specified content type
+func NewGetExternalDeploymentReadinessRequestWithBody(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/external-deployment-readiness", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewAdmitExternalDeploymentRequest calls the generic AdmitExternalDeployment builder with application/json body
+func NewAdmitExternalDeploymentRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAdmitExternalDeploymentRequestWithBody(server, orgId, pluginId, params, "application/json", bodyReader)
+}
+
+// NewAdmitExternalDeploymentRequestWithBody constructs an http.Request for the AdmitExternalDeployment method, with any body, and a specified content type
+func NewAdmitExternalDeploymentRequestWithBody(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/external-deployments", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentDispatchRequest constructs an http.Request for the GetExternalDeploymentDispatch method
+func NewGetExternalDeploymentDispatchRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "dispatchId", dispatchId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployment-dispatches/%s", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentRequest constructs an http.Request for the GetExternalDeployment method
+func NewGetExternalDeploymentRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployments/%s", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentLogsRequest constructs an http.Request for the GetExternalDeploymentLogs method
+func NewGetExternalDeploymentLogsRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployments/%s/logs", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetExternalDeploymentOutputsRequest constructs an http.Request for the GetExternalDeploymentOutputs method
+func NewGetExternalDeploymentOutputsRequest(server string, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginId", pluginId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "projectUUID", projectUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "environmentUUID", environmentUUID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam4 string
+
+	pathParam4, err = runtime.StyleParamWithOptions("simple", false, "deploymentId", deploymentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/plugins/%s/projects/%s/envs/%s/external-deployments/%s/outputs", pathParam0, pathParam1, pathParam2, pathParam3, pathParam4)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -3136,6 +5062,34 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with DELETE /internal/orgs/{orgId}/deployments (the `InternalDeleteDeployments` operationId).
 	InternalDeleteDeploymentsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *InternalDeleteDeploymentsParams, reqEditors ...RequestEditorFn) (*InternalDeleteDeploymentsResponse, error)
 
+	// InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error)
+
+	// InternalAcknowledgeDeploymentOutcomeWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+	//
+	// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+	// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+	// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+	// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+	// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+	// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+	InternalAcknowledgeDeploymentOutcomeWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error)
+
 	// InternalForceFailDeploymentWithResponse Emergency API for force failing a deployment.
 	//
 	// This should only be used once you have confirmed that the underlying runner job has stopped, failed, or will
@@ -3165,6 +5119,42 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /orgs/{orgId}/active-resources (the `ListActiveResourceNodes` operationId).
 	ListActiveResourceNodesWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListActiveResourceNodesParams, reqEditors ...RequestEditorFn) (*ListActiveResourceNodesResponse, error)
 
+	// ListDeploymentQueueItemsWithResponse List deployment queue items in the organization in queue order.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+	ListDeploymentQueueItemsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*ListDeploymentQueueItemsResponse, error)
+
+	// GetDeploymentQueueItemWithResponse Get a deployment queue item, including the manifest it requested.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+	GetDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*GetDeploymentQueueItemResponse, error)
+
+	// CancelDeploymentQueueItemWithBodyWithResponse Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error)
+
+	// CancelDeploymentQueueItemWithResponse Cancel a queued deployment request.
+	//
+	// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+	// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+	// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+	CancelDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error)
+
 	// ListDeploymentsWithResponse List deployments in the organization
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -3174,12 +5164,46 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDeploymentWithBodyWithResponse Create a new deployment in the target project and environment.
 	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+	// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+	// resolved against the Environment state at promotion.
+	//
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
 	CreateDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, params *CreateDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDeploymentResponse, error)
 
 	// CreateDeploymentWithResponse Create a new deployment in the target project and environment.
+	//
+	// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+	// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+	// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+	// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+	// resolved against the Environment state at promotion.
+	//
+	// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+	// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+	// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+	// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+	// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+	// diff may still change.
+	//
+	// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+	// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+	// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3351,6 +5375,76 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PATCH /orgs/{orgId}/metadata-keys/{metadataKeyName} (the `UpdateMetadataKey` operationId).
 	UpdateMetadataKeyWithResponse(ctx context.Context, orgId OrgIdPathParam, metadataKeyName MetadataKeyNamePathParam, body UpdateMetadataKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMetadataKeyResponse, error)
+
+	// PlanExternalDeploymentWithBodyWithResponse Plan exact module versions through the normal deployment planner without exposing parameter values.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+	PlanExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PlanExternalDeploymentResponse, error)
+
+	// PlanExternalDeploymentWithResponse Plan exact module versions through the normal deployment planner without exposing parameter values.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+	PlanExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, body PlanExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*PlanExternalDeploymentResponse, error)
+
+	// GetExternalDeploymentReadinessWithBodyWithResponse Read immutable deployment readiness and active module inventory for exact Environment references.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+	GetExternalDeploymentReadinessWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error)
+
+	// GetExternalDeploymentReadinessWithResponse Read immutable deployment readiness and active module inventory for exact Environment references.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+	GetExternalDeploymentReadinessWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error)
+
+	// AdmitExternalDeploymentWithBodyWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error)
+
+	// AdmitExternalDeploymentWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+	AdmitExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error)
+
+	// GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+	GetExternalDeploymentDispatchWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*GetExternalDeploymentDispatchResponse, error)
+
+	// GetExternalDeploymentWithResponse Get an ordinary Deployment only within its exact authorized Environment.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
+	GetExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentResponse, error)
+
+	// GetExternalDeploymentLogsWithResponse Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+	GetExternalDeploymentLogsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentLogsResponse, error)
+
+	// GetExternalDeploymentOutputsWithResponse Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+	GetExternalDeploymentOutputsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentOutputsResponse, error)
 }
 
 type GetJwksResponse struct {
@@ -3498,6 +5592,75 @@ func (r InternalDeleteDeploymentsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r InternalDeleteDeploymentsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InternalAcknowledgeDeploymentOutcomeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentOutcomeAcknowledgement
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *DeploymentOutcomeAcknowledgement
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON200() *DeploymentOutcomeAcknowledgement {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON201() *DeploymentOutcomeAcknowledgement {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r InternalAcknowledgeDeploymentOutcomeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalAcknowledgeDeploymentOutcomeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalAcknowledgeDeploymentOutcomeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InternalAcknowledgeDeploymentOutcomeResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3662,6 +5825,164 @@ func (r ListActiveResourceNodesResponse) ContentType() string {
 	return ""
 }
 
+type ListDeploymentQueueItemsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItemPage
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListDeploymentQueueItemsResponse) GetJSON200() *DeploymentQueueItemPage {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListDeploymentQueueItemsResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetBody returns the raw response body bytes
+func (r ListDeploymentQueueItemsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDeploymentQueueItemsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDeploymentQueueItemsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDeploymentQueueItemsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetDeploymentQueueItemResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItem
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetDeploymentQueueItemResponse) GetJSON200() *DeploymentQueueItem {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetDeploymentQueueItemResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetDeploymentQueueItemResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDeploymentQueueItemResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDeploymentQueueItemResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDeploymentQueueItemResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CancelDeploymentQueueItemResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeploymentQueueItem
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON200() *DeploymentQueueItem {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CancelDeploymentQueueItemResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r CancelDeploymentQueueItemResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelDeploymentQueueItemResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelDeploymentQueueItemResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CancelDeploymentQueueItemResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListDeploymentsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3724,6 +6045,8 @@ type CreateDeploymentResponse struct {
 	JSON200 *DeploymentDryRun
 	// JSON201 the response for an HTTP 201 `application/json` response
 	JSON201 *Deployment
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *DeploymentQueueItem
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *N400BadRequest
 	// JSON409 the response for an HTTP 409 `application/json` response
@@ -3738,6 +6061,11 @@ func (r CreateDeploymentResponse) GetJSON200() *DeploymentDryRun {
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
 func (r CreateDeploymentResponse) GetJSON201() *Deployment {
 	return r.JSON201
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r CreateDeploymentResponse) GetJSON202() *DeploymentQueueItem {
+	return r.JSON202
 }
 
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
@@ -4541,6 +6869,426 @@ func (r UpdateMetadataKeyResponse) ContentType() string {
 	return ""
 }
 
+type PlanExternalDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentPlanResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PlanExternalDeploymentResponse) GetJSON200() *ExternalDeploymentPlanResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r PlanExternalDeploymentResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r PlanExternalDeploymentResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r PlanExternalDeploymentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PlanExternalDeploymentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PlanExternalDeploymentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PlanExternalDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentReadinessResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentReadinessResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExternalDeploymentReadinessResponse) GetJSON200() *ExternalDeploymentReadinessResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetExternalDeploymentReadinessResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentReadinessResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentReadinessResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentReadinessResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentReadinessResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type AdmitExternalDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentAdmissionResponse
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ExternalDeploymentAdmissionResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *N400BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *N403Forbidden
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON200() *ExternalDeploymentAdmissionResponse {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON201() *ExternalDeploymentAdmissionResponse {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON400() *N400BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON403() *N403Forbidden {
+	return r.JSON403
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r AdmitExternalDeploymentResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r AdmitExternalDeploymentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r AdmitExternalDeploymentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AdmitExternalDeploymentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AdmitExternalDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentDispatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentStatusResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExternalDeploymentDispatchResponse) GetJSON200() *ExternalDeploymentStatusResponse {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentDispatchResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentDispatchResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentDispatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentDispatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentDispatchResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExternalDeploymentStatusResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExternalDeploymentResponse) GetJSON200() *ExternalDeploymentStatusResponse {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentLogsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *N413TooLarge
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON413() *N413TooLarge {
+	return r.JSON413
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetExternalDeploymentLogsResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentLogsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentLogsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentLogsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentLogsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExternalDeploymentOutputsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *N401Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *N404NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *N409Conflict
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *N413TooLarge
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *N503Unavailable
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON401() *N401Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON404() *N404NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON409() *N409Conflict {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON413() *N413TooLarge {
+	return r.JSON413
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetExternalDeploymentOutputsResponse) GetJSON503() *N503Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExternalDeploymentOutputsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExternalDeploymentOutputsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExternalDeploymentOutputsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExternalDeploymentOutputsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetJwksWithResponse Show JSON Web Keys Set (JWKS).
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4578,6 +7326,46 @@ func (c *ClientWithResponses) InternalDeleteDeploymentsWithResponse(ctx context.
 		return nil, err
 	}
 	return ParseInternalDeleteDeploymentsResponse(rsp)
+}
+
+// InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *ClientWithResponses) InternalAcknowledgeDeploymentOutcomeWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	rsp, err := c.InternalAcknowledgeDeploymentOutcomeWithBody(ctx, orgId, deploymentId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp)
+}
+
+// InternalAcknowledgeDeploymentOutcomeWithResponse Acknowledge the unknown Runner outcome of a failed plugin-dispatched Deployment.
+//
+// Records, exactly once and with the acting user, that an operator has confirmed the Runner attempt of this
+// failed plugin-dispatched Deployment can no longer change its Environment. Only the current Environment head
+// without Runner stop evidence is accepted, after its Runner dispatch window closed. The acknowledgement lets
+// the next Deployment of that Environment proceed. It does not change the Deployment's status or history.
+// Requires the `deployment.outcome.acknowledge` permission for the Environment; the system user and organization
+// tokens are rejected. Repeating the identical request returns the stored acknowledgement.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/deployments/{deploymentId}/actions/acknowledge-outcome (the `InternalAcknowledgeDeploymentOutcome` operationId).
+func (c *ClientWithResponses) InternalAcknowledgeDeploymentOutcomeWithResponse(ctx context.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, body InternalAcknowledgeDeploymentOutcomeJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	rsp, err := c.InternalAcknowledgeDeploymentOutcome(ctx, orgId, deploymentId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp)
 }
 
 // InternalForceFailDeploymentWithResponse Emergency API for force failing a deployment.
@@ -4627,6 +7415,66 @@ func (c *ClientWithResponses) ListActiveResourceNodesWithResponse(ctx context.Co
 	return ParseListActiveResourceNodesResponse(rsp)
 }
 
+// ListDeploymentQueueItemsWithResponse List deployment queue items in the organization in queue order.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue (the `ListDeploymentQueueItems` operationId).
+func (c *ClientWithResponses) ListDeploymentQueueItemsWithResponse(ctx context.Context, orgId OrgIdPathParam, params *ListDeploymentQueueItemsParams, reqEditors ...RequestEditorFn) (*ListDeploymentQueueItemsResponse, error) {
+	rsp, err := c.ListDeploymentQueueItems(ctx, orgId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDeploymentQueueItemsResponse(rsp)
+}
+
+// GetDeploymentQueueItemWithResponse Get a deployment queue item, including the manifest it requested.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/deployment-queue/{queueItemId} (the `GetDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) GetDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, reqEditors ...RequestEditorFn) (*GetDeploymentQueueItemResponse, error) {
+	rsp, err := c.GetDeploymentQueueItem(ctx, orgId, queueItemId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDeploymentQueueItemResponse(rsp)
+}
+
+// CancelDeploymentQueueItemWithBodyWithResponse Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) CancelDeploymentQueueItemWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error) {
+	rsp, err := c.CancelDeploymentQueueItemWithBody(ctx, orgId, queueItemId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelDeploymentQueueItemResponse(rsp)
+}
+
+// CancelDeploymentQueueItemWithResponse Cancel a queued deployment request.
+//
+// Cancels a request that is still waiting. Requires the `deployment_write` permission on its Environment. Repeating the
+// identical cancellation returns the cancelled item. A request that is being promoted at this moment answers 409 with the
+// error code `queue_item_dispatching`; read the item again to see whether it was dispatched.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/deployment-queue/{queueItemId}/actions/cancel (the `CancelDeploymentQueueItem` operationId).
+func (c *ClientWithResponses) CancelDeploymentQueueItemWithResponse(ctx context.Context, orgId OrgIdPathParam, queueItemId QueueItemIdPathParam, body CancelDeploymentQueueItemJSONRequestBody, reqEditors ...RequestEditorFn) (*CancelDeploymentQueueItemResponse, error) {
+	rsp, err := c.CancelDeploymentQueueItem(ctx, orgId, queueItemId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelDeploymentQueueItemResponse(rsp)
+}
+
 // ListDeploymentsWithResponse List deployments in the organization
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4642,6 +7490,23 @@ func (c *ClientWithResponses) ListDeploymentsWithResponse(ctx context.Context, o
 
 // CreateDeploymentWithBodyWithResponse Create a new deployment in the target project and environment.
 //
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+// resolved against the Environment state at promotion.
+//
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /orgs/{orgId}/deployments (the `CreateDeployment` operationId).
@@ -4654,6 +7519,23 @@ func (c *ClientWithResponses) CreateDeploymentWithBodyWithResponse(ctx context.C
 }
 
 // CreateDeploymentWithResponse Create a new deployment in the target project and environment.
+//
+// Deploy and rollback requests mutate the Environment and run one at a time. A request that finds the Environment
+// busy waits in the Environment's deployment queue and the response is 202 with the queue item, unless it sets
+// `when_busy` to `reject`: then it fails with 409 and the error code `environment_busy`. Requests authorized by an
+// organization token cannot wait and always get that 409. Queued requests are promoted strictly in order and
+// resolved against the Environment state at promotion.
+//
+// Plan-only requests and dry runs are never queued and ignore `when_busy`, `queue_ttl_seconds` and
+// `halt_on_failure`. A dry run is answered while Deployments run or wait. A plan-only request starts while
+// requests wait in the queue, but not while a deploy, rollback, destroy or another plan runs, because their Runners
+// would contend for the Environment's state lock; it then fails with 409 `environment_busy`. Either response
+// carries `pending_changes` when Deployments that run or wait will change the Environment first, so the plan or
+// diff may still change.
+//
+// Conflicts carry a stable error code: `environment_busy`, `deployment_queue_full`, `outcome_unreconciled` (a failed
+// plugin-dispatched Deployment awaits acknowledgement of its outcome), `environment_deleting` and
+// `deployment_base_changed`. Other conflicts keep the code `HTTP-409`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -4940,6 +7822,136 @@ func (c *ClientWithResponses) UpdateMetadataKeyWithResponse(ctx context.Context,
 	return ParseUpdateMetadataKeyResponse(rsp)
 }
 
+// PlanExternalDeploymentWithBodyWithResponse Plan exact module versions through the normal deployment planner without exposing parameter values.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+func (c *ClientWithResponses) PlanExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PlanExternalDeploymentResponse, error) {
+	rsp, err := c.PlanExternalDeploymentWithBody(ctx, orgId, pluginId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePlanExternalDeploymentResponse(rsp)
+}
+
+// PlanExternalDeploymentWithResponse Plan exact module versions through the normal deployment planner without exposing parameter values.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-plans (the `PlanExternalDeployment` operationId).
+func (c *ClientWithResponses) PlanExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *PlanExternalDeploymentParams, body PlanExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*PlanExternalDeploymentResponse, error) {
+	rsp, err := c.PlanExternalDeployment(ctx, orgId, pluginId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePlanExternalDeploymentResponse(rsp)
+}
+
+// GetExternalDeploymentReadinessWithBodyWithResponse Read immutable deployment readiness and active module inventory for exact Environment references.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentReadinessWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error) {
+	rsp, err := c.GetExternalDeploymentReadinessWithBody(ctx, orgId, pluginId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentReadinessResponse(rsp)
+}
+
+// GetExternalDeploymentReadinessWithResponse Read immutable deployment readiness and active module inventory for exact Environment references.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployment-readiness (the `GetExternalDeploymentReadiness` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentReadinessWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *GetExternalDeploymentReadinessParams, body GetExternalDeploymentReadinessJSONRequestBody, reqEditors ...RequestEditorFn) (*GetExternalDeploymentReadinessResponse, error) {
+	rsp, err := c.GetExternalDeploymentReadiness(ctx, orgId, pluginId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentReadinessResponse(rsp)
+}
+
+// AdmitExternalDeploymentWithBodyWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *ClientWithResponses) AdmitExternalDeploymentWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error) {
+	rsp, err := c.AdmitExternalDeploymentWithBody(ctx, orgId, pluginId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdmitExternalDeploymentResponse(rsp)
+}
+
+// AdmitExternalDeploymentWithResponse Admit one Core-authorized immutable plan or rollback through the normal Deployment path.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{orgId}/plugins/{pluginId}/external-deployments (the `AdmitExternalDeployment` operationId).
+func (c *ClientWithResponses) AdmitExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, params *AdmitExternalDeploymentParams, body AdmitExternalDeploymentJSONRequestBody, reqEditors ...RequestEditorFn) (*AdmitExternalDeploymentResponse, error) {
+	rsp, err := c.AdmitExternalDeployment(ctx, orgId, pluginId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdmitExternalDeploymentResponse(rsp)
+}
+
+// GetExternalDeploymentDispatchWithResponse Recover immutable Deployment receipt status after a lost admission response.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployment-dispatches/{dispatchId} (the `GetExternalDeploymentDispatch` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentDispatchWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, dispatchId string, reqEditors ...RequestEditorFn) (*GetExternalDeploymentDispatchResponse, error) {
+	rsp, err := c.GetExternalDeploymentDispatch(ctx, orgId, pluginId, projectUUID, environmentUUID, dispatchId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentDispatchResponse(rsp)
+}
+
+// GetExternalDeploymentWithResponse Get an ordinary Deployment only within its exact authorized Environment.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId} (the `GetExternalDeployment` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentResponse, error) {
+	rsp, err := c.GetExternalDeployment(ctx, orgId, pluginId, projectUUID, environmentUUID, deploymentId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentResponse(rsp)
+}
+
+// GetExternalDeploymentLogsWithResponse Retrieve bounded decrypted logs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/logs (the `GetExternalDeploymentLogs` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentLogsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentLogsResponse, error) {
+	rsp, err := c.GetExternalDeploymentLogs(ctx, orgId, pluginId, projectUUID, environmentUUID, deploymentId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentLogsResponse(rsp)
+}
+
+// GetExternalDeploymentOutputsWithResponse Retrieve bounded decrypted outputs for an exact plugin-owned Deployment after fresh Core user authorization.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{orgId}/plugins/{pluginId}/projects/{projectUUID}/envs/{environmentUUID}/external-deployments/{deploymentId}/outputs (the `GetExternalDeploymentOutputs` operationId).
+func (c *ClientWithResponses) GetExternalDeploymentOutputsWithResponse(ctx context.Context, orgId OrgIdPathParam, pluginId PluginIdPathParam, projectUUID openapi_types.UUID, environmentUUID openapi_types.UUID, deploymentId DeploymentIdPathParam, reqEditors ...RequestEditorFn) (*GetExternalDeploymentOutputsResponse, error) {
+	rsp, err := c.GetExternalDeploymentOutputs(ctx, orgId, pluginId, projectUUID, environmentUUID, deploymentId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExternalDeploymentOutputsResponse(rsp)
+}
+
 // ParseGetJwksResponse parses an HTTP response from a GetJwksWithResponse call
 func ParseGetJwksResponse(rsp *http.Response) (*GetJwksResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5022,6 +8034,60 @@ func ParseInternalDeleteDeploymentsResponse(rsp *http.Response) (*InternalDelete
 	switch {
 	case rsp.StatusCode == 204:
 		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalAcknowledgeDeploymentOutcomeResponse parses an HTTP response from a InternalAcknowledgeDeploymentOutcomeWithResponse call
+func ParseInternalAcknowledgeDeploymentOutcomeResponse(rsp *http.Response) (*InternalAcknowledgeDeploymentOutcomeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalAcknowledgeDeploymentOutcomeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentOutcomeAcknowledgement
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest DeploymentOutcomeAcknowledgement
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest N400BadRequest
@@ -5162,6 +8228,119 @@ func ParseListActiveResourceNodesResponse(rsp *http.Response) (*ListActiveResour
 	return response, nil
 }
 
+// ParseListDeploymentQueueItemsResponse parses an HTTP response from a ListDeploymentQueueItemsWithResponse call
+func ParseListDeploymentQueueItemsResponse(rsp *http.Response) (*ListDeploymentQueueItemsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDeploymentQueueItemsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItemPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDeploymentQueueItemResponse parses an HTTP response from a GetDeploymentQueueItemWithResponse call
+func ParseGetDeploymentQueueItemResponse(rsp *http.Response) (*GetDeploymentQueueItemResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDeploymentQueueItemResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelDeploymentQueueItemResponse parses an HTTP response from a CancelDeploymentQueueItemWithResponse call
+func ParseCancelDeploymentQueueItemResponse(rsp *http.Response) (*CancelDeploymentQueueItemResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelDeploymentQueueItemResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListDeploymentsResponse parses an HTTP response from a ListDeploymentsWithResponse call
 func ParseListDeploymentsResponse(rsp *http.Response) (*ListDeploymentsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5229,6 +8408,13 @@ func ParseCreateDeploymentResponse(rsp *http.Response) (*CreateDeploymentRespons
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest DeploymentQueueItem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest N400BadRequest
@@ -5792,6 +8978,321 @@ func ParseUpdateMetadataKeyResponse(rsp *http.Response) (*UpdateMetadataKeyRespo
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePlanExternalDeploymentResponse parses an HTTP response from a PlanExternalDeploymentWithResponse call
+func ParsePlanExternalDeploymentResponse(rsp *http.Response) (*PlanExternalDeploymentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PlanExternalDeploymentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentPlanResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentReadinessResponse parses an HTTP response from a GetExternalDeploymentReadinessWithResponse call
+func ParseGetExternalDeploymentReadinessResponse(rsp *http.Response) (*GetExternalDeploymentReadinessResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentReadinessResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentReadinessResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAdmitExternalDeploymentResponse parses an HTTP response from a AdmitExternalDeploymentWithResponse call
+func ParseAdmitExternalDeploymentResponse(rsp *http.Response) (*AdmitExternalDeploymentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AdmitExternalDeploymentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentAdmissionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ExternalDeploymentAdmissionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest N403Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentDispatchResponse parses an HTTP response from a GetExternalDeploymentDispatchWithResponse call
+func ParseGetExternalDeploymentDispatchResponse(rsp *http.Response) (*GetExternalDeploymentDispatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentDispatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentStatusResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentResponse parses an HTTP response from a GetExternalDeploymentWithResponse call
+func ParseGetExternalDeploymentResponse(rsp *http.Response) (*GetExternalDeploymentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExternalDeploymentStatusResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentLogsResponse parses an HTTP response from a GetExternalDeploymentLogsWithResponse call
+func ParseGetExternalDeploymentLogsResponse(rsp *http.Response) (*GetExternalDeploymentLogsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentLogsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest N413TooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExternalDeploymentOutputsResponse parses an HTTP response from a GetExternalDeploymentOutputsWithResponse call
+func ParseGetExternalDeploymentOutputsResponse(rsp *http.Response) (*GetExternalDeploymentOutputsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExternalDeploymentOutputsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest N413TooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest N503Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

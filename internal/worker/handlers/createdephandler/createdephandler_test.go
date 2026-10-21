@@ -70,6 +70,13 @@ func prepUnitTest(t *testing.T) (*CreateDepHandler, *mockmodel.MockDatabaser, *m
 		ctrl.Finish()
 	})
 	db := mockmodel.NewMockDatabaser(ctrl)
+	db.EXPECT().BeginDeploymentDispatch(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, dep *model.DeploymentSummary) (time.Time, error) {
+		first := dep.CreatedAt
+		if first.IsZero() {
+			first = time.Now()
+		}
+		return first.Add(model.RunnerExecutionBudget), nil
+	}).AnyTimes()
 	tx := mockmodel.NewMockTxWithCommit(ctrl)
 	db.EXPECT().BeginTx(gomock.Any(), gomock.Any()).Return(tx, nil).AnyTimes()
 	tx.EXPECT().Commit().Return(nil).AnyTimes()
