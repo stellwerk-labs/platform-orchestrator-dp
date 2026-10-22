@@ -350,7 +350,7 @@ class ContentTests(unittest.TestCase):
                 self.assertNotIn(token, result.stdout + result.stderr)
 
     def kin_source_pair(self):
-        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off")
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.10", GOWORK="off", GOENV="off")
         metadata = json.loads(subprocess.check_output(
             ["go", "mod", "download", "-json", content.KIN_MODULE + "@" + content.KIN_VERSION],
             env=environment, text=True, timeout=30))
@@ -378,7 +378,7 @@ class ContentTests(unittest.TestCase):
         data = elf("arm64") + pair + b"\0"
         finding = {"RuleID": "generic-api-key", "Match": match.decode(), "Secret": match[10:25].decode()}
         sums = " ".join((content.KIN_MODULE, content.KIN_VERSION, content.KIN_SUM)) + "\n"
-        buildinfo = "fixture: go1.26.2\n\tdep\t" + "\t".join((content.KIN_MODULE, content.KIN_VERSION, content.KIN_SUM)) + "\n"
+        buildinfo = "fixture: go1.26.10\n\tdep\t" + "\t".join((content.KIN_MODULE, content.KIN_VERSION, content.KIN_SUM)) + "\n"
         self.assertTrue(content.known_binary_finding(data, finding, sums, buildinfo))
         changed_context = bytearray(data)
         changed_context[len(elf("arm64"))] ^= 1
@@ -391,7 +391,7 @@ class ContentTests(unittest.TestCase):
             (data, finding, sums.replace(content.KIN_SUM, "h1:changed="), buildinfo),
             (data, finding, sums, buildinfo.replace(content.KIN_VERSION, "v0.144.1")),
             (data, finding, sums, buildinfo.replace(content.KIN_SUM, "h1:changed=")),
-            (data, finding, sums, buildinfo.replace("go1.26.2", "go1.26.3")),
+            (data, finding, sums, buildinfo.replace("go1.26.10", "go1.26.3")),
             (data, finding, sums, buildinfo + "\t=>\t./replacement\n"),
             (b"not-ELF\0" + pair, finding, sums, buildinfo),
             (data + b"\0" + match, finding, sums, buildinfo),
@@ -404,7 +404,7 @@ class ContentTests(unittest.TestCase):
         pair = self.kin_source_pair()
         application = self.root / "elf-application"
         application.mkdir()
-        (application / "go.mod").write_text("module example.org/elf-fixture\n\ngo 1.26.2\n\nrequire "
+        (application / "go.mod").write_text("module example.org/elf-fixture\n\ngo 1.26.10\n\nrequire "
                                            + content.KIN_MODULE + " " + content.KIN_VERSION + "\n")
         (application / "go.sum").write_bytes((ROOT / "go.sum").read_bytes())
         (application / "main.go").write_text('package main\nimport ("fmt"; _ "github.com/getkin/kin-openapi/openapi3")\n'
@@ -412,7 +412,7 @@ class ContentTests(unittest.TestCase):
         directory = self.root / "real-elf-scan"
         directory.mkdir()
         executable = directory / "server"
-        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off",
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.10", GOWORK="off", GOENV="off",
                            GOOS="linux", GOARCH="arm64", CGO_ENABLED="0", GOMAXPROCS="2")
         subprocess.run(["go", "build", "-p=2", "-mod=mod", "-trimpath", "-o", str(executable), "."],
                        cwd=application, env=environment, check=True, capture_output=True, timeout=120)
@@ -455,7 +455,7 @@ class ContentTests(unittest.TestCase):
         for name in ("go.mod", "go.sum"):
             shutil.copyfile(ROOT / name, source / name)
         modules = {}
-        environment = dict(os.environ, GOTOOLCHAIN="go1.26.2", GOWORK="off", GOENV="off")
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.10", GOWORK="off", GOENV="off")
         for module, (version, checksum) in content.NOTICE_MODULES.items():
             metadata = json.loads(subprocess.check_output(
                 ["go", "mod", "download", "-json", module + "@" + version], env=environment, timeout=30))
@@ -639,11 +639,11 @@ class ContentTests(unittest.TestCase):
         application, dependency = self.root / "application", self.root / "dependency"
         application.mkdir()
         dependency.mkdir()
-        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.2\n\nrequire example.org/dependency v1.0.0\nreplace example.org/dependency => ../dependency\n")
+        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.10\n\nrequire example.org/dependency v1.0.0\nreplace example.org/dependency => ../dependency\n")
         (application / "main.go").write_text('package main\nimport "example.org/dependency"\nfunc main() { dependency.Value() }\n')
-        (dependency / "go.mod").write_text("module example.org/dependency\n\ngo 1.26.2\n")
+        (dependency / "go.mod").write_text("module example.org/dependency\n\ngo 1.26.10\n")
         (dependency / "value.go").write_text("package dependency\nfunc Value() {}\n")
-        goroot = Path(subprocess.check_output(["go", "env", "GOROOT"], env=dict(os.environ, GOTOOLCHAIN="go1.26.2"), text=True).strip())
+        goroot = Path(subprocess.check_output(["go", "env", "GOROOT"], env=dict(os.environ, GOTOOLCHAIN="go1.26.10"), text=True).strip())
         (dependency / "LICENSE").write_bytes((goroot / "LICENSE").read_bytes())
         (dependency / "PATENTS").write_text("An explicit fixture patent notice.\n")
         for arch in ("amd64", "arm64"):
@@ -669,7 +669,7 @@ class ContentTests(unittest.TestCase):
         (repo / "shared").mkdir()
         module = "github.com/stellwerk-labs/platform-orchestrator-iam/shared"
         (repo / "LICENSE").write_bytes((ROOT / "LICENSE").read_bytes())
-        (repo / "shared/go.mod").write_text("module " + module + "\n\ngo 1.26.2\n")
+        (repo / "shared/go.mod").write_text("module " + module + "\n\ngo 1.26.10\n")
         (repo / "shared/value.go").write_text("package shared\nfunc Value() {}\n")
         for args in (["init", "-q"], ["add", "."],
                      ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.org",
@@ -681,7 +681,7 @@ class ContentTests(unittest.TestCase):
         self.assertEqual(receipt["sourceCommit"], sha)
         application = self.root / "application"
         application.mkdir()
-        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.2\n\nrequire " +
+        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.10\n\nrequire " +
                                           module + " v1.0.0\nreplace " + module + " => ../sdk\n")
         (application / "main.go").write_text('package main\nimport "' + module + '"\nfunc main() { shared.Value() }\n')
         result = subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"), str(self.root / "notices"), "./..."],
@@ -731,7 +731,7 @@ class ContentTests(unittest.TestCase):
     def test_real_nullable_production_graph_keeps_original_and_supplement(self):
         application = self.root / "application"
         application.mkdir()
-        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.2\n\nrequire github.com/oapi-codegen/nullable v1.2.0\n")
+        (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.10\n\nrequire github.com/oapi-codegen/nullable v1.2.0\n")
         (application / "go.sum").write_text("github.com/oapi-codegen/nullable v1.2.0 h1:VflFkDW980KhBPiFF7nWSyjg+r4Obqj8lXipV0UkP5w=\n"
                                            "github.com/oapi-codegen/nullable v1.2.0/go.mod h1:KUZ3vUzkmEKY90ksAmit2+5juDIhIZhfDl+0PwOQlFY=\n")
         (application / "main.go").write_text('package main\nimport _ "github.com/oapi-codegen/nullable"\nfunc main() {}\n')
