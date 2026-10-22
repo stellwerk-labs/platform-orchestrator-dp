@@ -24,3 +24,15 @@ assert_image "registry.example:5000/runner@sha256:$digest" \
 assert_image "stellwerk-labs/platform-orchestrator-runner:test" \
   "stellwerk-labs/platform-orchestrator-runner:test"
 printf 'Runner integration image references: 4 cases passed\n'
+
+node_image=kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+create_command=$(make --no-print-directory -s -n -C "$repo_dir/integration-tests" create-cluster NAME=owned-fixture)
+[[ "$create_command" == *"--name \"owned-fixture\" --image \"$node_image\""* ]]
+[[ "$create_command" == *'--kubeconfig "runner-cluster/kubeconfig.yaml"'* ]]
+
+override_image="registry.example/node@sha256:$digest"
+override_command=$(make --no-print-directory -s -n -C "$repo_dir/integration-tests" create-cluster \
+  NAME=owned-fixture KIND_NODE_IMAGE="$override_image" KIND_CREATE_ARGS=--retain)
+[[ "$override_command" == *"--image \"$override_image\" --retain"* ]]
+[[ "$override_command" != *"$node_image"* ]]
+printf 'Kind integration node image and explicit kubeconfig: 2 cases passed\n'

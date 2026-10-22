@@ -14,6 +14,11 @@ Normal CI now checks source dependencies with pinned govulncheck 1.9.0 and fails
 on reachable known vulnerabilities. A passing source scan is not a guarantee
 against unknown vulnerabilities or a substitute for deployment qualification.
 
+Integration tests pin the kind node image to Kubernetes 1.36.4 by digest and
+install checksum-verified kind and kubectl versions in CI. They no longer follow
+an installed kind client's changing default Kubernetes version. The kubeconfig
+stays in the owned fixture directory, not the user's current cluster context.
+
 ## Compatibility and release checks
 
 Existing published versions and artifacts remain immutable. Use a new patch
