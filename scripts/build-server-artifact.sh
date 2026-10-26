@@ -10,5 +10,7 @@ case "${SOURCE_DATE_EPOCH:-0}" in ""|*[!0-9]*) echo "invalid source epoch" >&2; 
 export GOTOOLCHAIN="$release_go_version" GOWORK=off GOENV=off CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" GOAMD64=v1 GOARM64=v8.0
 unset GOFLAGS GOEXPERIMENT
 mkdir -p /opt/server
-go build -trimpath -buildvcs=false -ldflags="-s -w" -o /opt/server/server ./cmd/server
+# Retain linker symbols for binary vulnerability analysis; omit only DWARF.
+go build -trimpath -buildvcs=false -ldflags="-w" -o /opt/server/server ./cmd/server
+(unset GOOS GOARCH GOAMD64 GOARM64; sh scripts/check-go-security.sh binary /opt/server/server)
 sh scripts/collect-licenses.sh /opt/licenses ./cmd/server
