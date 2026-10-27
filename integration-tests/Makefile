@@ -4,6 +4,8 @@ KUBECTL := kubectl --kubeconfig $(KUBECONFIG)
 KUBECTL_INTERNAL := kubectl --kubeconfig $(KUBECONFIG_INTERNAL)
 NAME ?= runner
 CLUSTER_NAME := kind-$(NAME)
+KIND_NODE_IMAGE ?= kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+KIND_CREATE_ARGS ?=
 COMPOSE_PROJECT_NAME ?= integration-tests
 export COMPOSE_PROJECT_NAME
 PUBLIC_PORT ?= 8080
@@ -89,7 +91,7 @@ prepare-tests: create-cluster write-cluster-config configure-cluster
 create-cluster:
 	docker version
 	kind version
-	kind create cluster --name $(NAME) --wait 5m --kubeconfig $(KUBECONFIG)
+	kind create cluster --name "$(NAME)" --image "$(KIND_NODE_IMAGE)" $(KIND_CREATE_ARGS) --wait 5m --kubeconfig "$(KUBECONFIG)"
 
 
 ## create kubeconfig to access runner cluster

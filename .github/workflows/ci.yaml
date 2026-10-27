@@ -125,7 +125,7 @@ jobs:
       - name: Setup pinned artifact Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.26.10"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch
@@ -304,7 +304,7 @@ jobs:
       - name: Setup pinned artifact Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.26.10"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch
@@ -497,6 +497,9 @@ jobs:
           cd shared
           go vet ./...
 
+      - name: Check known Go vulnerabilities
+        run: sh scripts/check-go-security.sh
+
       - name: Unit tests
         run: make test-unit
 
@@ -566,6 +569,20 @@ jobs:
 
       - name: Setup Helm
         uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
+
+      - name: Install verified integration cluster tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/integration-tools"
+          mkdir -p "$bin"
+          curl --proto '=https' --tlsv1.2 -fsSLo "$bin/kind" https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          curl --proto '=https' --tlsv1.2 -fsSLo "$bin/kubectl" https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl
+          printf '%s  %s\n' \
+            aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d "$bin/kind" \
+            8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a "$bin/kubectl" | sha256sum --check --strict
+          chmod +x "$bin/kind" "$bin/kubectl"
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Run integration tests
         run: make test-integration
@@ -655,7 +672,7 @@ jobs:
         if: steps.release.outputs.version != ''
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.26.10"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch

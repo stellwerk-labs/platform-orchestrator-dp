@@ -36,7 +36,7 @@ if document.get("spdxVersion") != "SPDX-2.3":
 packages = document.get("packages", [])
 names = {package.get("name") for package in packages}
 expected = {line.split("|")[0] for line in pathlib.Path(modules).read_text().splitlines()}
-if not expected <= names or not any(package.get("name") == "stdlib" and package.get("versionInfo") == "go1.26.2" for package in packages):
+if not expected <= names or not any(package.get("name") == "stdlib" and package.get("versionInfo") == "go1.26.10" for package in packages):
     raise SystemExit("SBOM does not cover production Go graph and pinned Go distribution")
 document["name"] = "server-linux-" + arch
 document["documentNamespace"] = "https://stellwerk.dev/sbom/" + manifest.replace(":", "/") + "/linux/" + arch
