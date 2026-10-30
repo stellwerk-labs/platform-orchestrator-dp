@@ -53,6 +53,29 @@ func TestModuleArtifactRequirementsRejectMissingMetadata(t *testing.T) {
 	require.ErrorContains(t, err, "no immutable version metadata")
 }
 
+func TestModuleArtifactRequirementsPreserveExactResourceTypeContract(t *testing.T) {
+	contract := uuid.New()
+	body := []byte(`{"modules":[{"id":"database","version_id":"2.0.0","resource_type_version":2,"resource_type_version_uuid":"` + contract.String() + `","output_schema":{}}]}`)
+	artifacts, err := decodeCatalogueArtifacts(body, nil)
+	require.NoError(t, err)
+	coordinate := platform_orchestrator_graph.ResourceCoordinate{Type: "database", Class: "default", Id: "shared.db"}
+	graph := &platform_orchestrator_graph.Graph[*graphs.GraphNodeModuleConfig]{Nodes: map[platform_orchestrator_graph.ResourceCoordinate]platform_orchestrator_graph.ResourceNode[*graphs.GraphNodeModuleConfig]{
+		coordinate: {ModuleConfiguration: &graphs.GraphNodeModuleConfig{DefinitionId: "database", VersionId: "2.0.0"}},
+	}}
+	requirements, err := moduleArtifactRequirements(graph, artifacts, false)
+	require.NoError(t, err)
+	require.Len(t, requirements, 1)
+	require.Equal(t, &contract, requirements[0].ResourceTypeVersionUUID)
+	require.NotNil(t, requirements[0].ResourceTypeVersion)
+	require.Equal(t, int64(2), *requirements[0].ResourceTypeVersion)
+	require.NotNil(t, requirements[0].OutputSchema, "explicit empty declaration is not absence")
+	encoded, err := json.Marshal(requirements)
+	require.NoError(t, err)
+	var restored []model.ModuleArtifactRequirement
+	require.NoError(t, json.Unmarshal(encoded, &restored))
+	require.Equal(t, requirements, restored, "queued execution and rollback must retain the same interface")
+}
+
 func TestModuleArtifactRequirementsOmitAbsentDigestWithoutInventingClaim(t *testing.T) {
 	for _, generation := range []string{"v0", "v1", "managed"} {
 		t.Run(generation, func(t *testing.T) {

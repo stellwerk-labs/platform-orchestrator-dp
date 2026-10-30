@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	v1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 

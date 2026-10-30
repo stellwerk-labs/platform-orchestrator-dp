@@ -13,7 +13,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers"
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 // DeploymentQueue promotes an Environment's queued Deployments.

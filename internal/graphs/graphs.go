@@ -12,8 +12,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 )
 
@@ -31,8 +32,11 @@ func init() {
 // then the Definition field is used only during graph and terraform creation to lookup dependencies, module source,
 // params and other fields from the active definition.
 type GraphNodeModuleConfig struct {
-	DefinitionId string `json:"definition_id"`
-	VersionId    string `json:"version_id"`
+	DraftTest               *DraftTestReference `json:"draft_test,omitempty"`
+	DefinitionId            string              `json:"definition_id"`
+	VersionId               string              `json:"version_id"`
+	ResourceTypeVersion     *int64              `json:"resource_type_version,omitempty"`
+	ResourceTypeVersionUUID *uuid.UUID          `json:"resource_type_version_uuid,omitempty"`
 	// HasInlineSource is an optimisation field that allows to efficiently gather the source of the inline modules
 	// from a graph when we are constructing the TF bundle. Without this, we would need to pull all modules, or
 	// include all the module sources in the TF file stored in the DB which could be fairly large.
@@ -48,7 +52,7 @@ type GraphNodeModuleConfig struct {
 	// ProviderSubsMap holds the resolved substitutions for each provider local ref used by this module, to be used when building the tofu.
 	ProviderSubsMap map[string]map[string]platform_orchestrator_graph.PlaceholderSub `json:"provider_subs_map,omitempty"`
 
-	Definition *platformorchestratorcp.InternalModuleCatalogueModule `json:"-"`
+	Definition *platformorchestratorcp.InternalExecutionCatalogueModule `json:"-"`
 }
 
 const providerSubsEncodingVersion = 1
@@ -239,9 +243,13 @@ func FindPinnedDefinitions(g *platform_orchestrator_graph.Graph[*GraphNodeModule
 
 // buildModuleDefinitionIndex converts the catalogue of module definitions from the control plane into a definition index
 // needed by the platform orchestrator graph library.
-func buildModuleDefinitionIndex(definitions []platformorchestratorcp.InternalModuleCatalogueModule) *platform_orchestrator_graph.ModuleDefinitionIndex[*GraphNodeModuleConfig] {
+func buildModuleDefinitionIndex(definitions []platformorchestratorcp.InternalExecutionCatalogueModule) (*platform_orchestrator_graph.ModuleDefinitionIndex[*GraphNodeModuleConfig], error) {
 	out := make([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig], 0, len(definitions))
 	for _, d := range definitions {
+		reference, err := DraftTestReferenceFromCatalogue(d)
+		if err != nil {
+			return nil, err
+		}
 		rules := make([]platform_orchestrator_graph.Rule, 0, len(d.Rules))
 		for _, rule := range d.Rules {
 			rules = append(rules, platform_orchestrator_graph.Rule{
@@ -252,20 +260,27 @@ func buildModuleDefinitionIndex(definitions []platformorchestratorcp.InternalMod
 		out = append(out, platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			ResourceType: d.ResourceType,
 			Configuration: &GraphNodeModuleConfig{
-				DefinitionId:    d.Id,
-				VersionId:       d.VersionId,
+				DefinitionId:        d.Id,
+				DraftTest:           reference,
+				VersionId:           d.VersionId,
+				ResourceTypeVersion: d.ResourceTypeVersion, ResourceTypeVersionUUID: d.ResourceTypeVersionUuid,
 				Definition:      &d,
 				HasInlineSource: d.ModuleSourceCode != nil,
 			},
 			Rules: rules,
 		})
 	}
-	return platform_orchestrator_graph.NewModuleDefinitionIndex(out)
+	return platform_orchestrator_graph.NewModuleDefinitionIndex(out), nil
 }
 
 // AssignModuleDefinitionsToGraphNodes assigns the pinned definition versions to the nodes of the last graph so that
 // the platform-orchestrator graph library can identify and resolve definition drift.
-func AssignModuleDefinitionsToGraphNodes(g *platform_orchestrator_graph.Graph[*GraphNodeModuleConfig], moduleDefinitions []platformorchestratorcp.InternalModuleCatalogueModule) int {
+func AssignModuleDefinitionsToGraphNodes(g *platform_orchestrator_graph.Graph[*GraphNodeModuleConfig], moduleDefinitions []platformorchestratorcp.InternalExecutionCatalogueModule) (int, error) {
+	for _, definition := range moduleDefinitions {
+		if _, err := DraftTestReferenceFromCatalogue(definition); err != nil {
+			return 0, err
+		}
+	}
 	type key struct {
 		D, V string
 	}
@@ -283,6 +298,13 @@ func AssignModuleDefinitionsToGraphNodes(g *platform_orchestrator_graph.Graph[*G
 				n.Error = new(platform_orchestrator_graph.ErrNoRuleMatch)
 				missing++
 			} else {
+				reference, err := DraftTestReferenceFromCatalogue(moduleDefinitions[i])
+				if err != nil {
+					return 0, err
+				}
+				if !reflect.DeepEqual(reference, n.ModuleConfiguration.DraftTest) {
+					return 0, fmt.Errorf("retained module %s has conflicting Draft test provenance", n.ModuleConfiguration.DefinitionId)
+				}
 				n.ModuleConfiguration.Definition = &moduleDefinitions[i]
 				n.ModuleConfiguration.HasInlineSource = moduleDefinitions[i].ModuleSourceCode != nil
 				// NOTE: also specify that we are ok with the node changing its entire definition and being replaced. This
@@ -293,17 +315,28 @@ func AssignModuleDefinitionsToGraphNodes(g *platform_orchestrator_graph.Graph[*G
 			g.Nodes[coordinate] = n
 		}
 	}
-	return missing
+	return missing, nil
 }
 
-func BuildGraph(ctx context.Context, manifest platform_orchestrator_graph.Manifest, moduleDefinitions []platformorchestratorcp.InternalModuleCatalogueModule, lastGraph *platform_orchestrator_graph.Graph[*GraphNodeModuleConfig]) (*platform_orchestrator_graph.Graph[*GraphNodeModuleConfig], error) {
+func BuildGraph(ctx context.Context, manifest platform_orchestrator_graph.Manifest, moduleDefinitions []platformorchestratorcp.InternalExecutionCatalogueModule, lastGraph *platform_orchestrator_graph.Graph[*GraphNodeModuleConfig]) (*platform_orchestrator_graph.Graph[*GraphNodeModuleConfig], error) {
+	for _, definition := range moduleDefinitions {
+		if _, err := DraftTestReferenceFromCatalogue(definition); err != nil {
+			return nil, err
+		}
+	}
 	if lastGraph != nil {
 		// Assign pinned definitions to the graph to determine drift resolution
 		// we don't care about missing versions at this point because these are only for the drift calculation.
-		_ = AssignModuleDefinitionsToGraphNodes(lastGraph, moduleDefinitions)
+		if _, err := AssignModuleDefinitionsToGraphNodes(lastGraph, moduleDefinitions); err != nil {
+			return nil, err
+		}
 	}
 
-	newGraph, err := platform_orchestrator_graph.SeedAndExpandAll(ctx, manifest, *buildModuleDefinitionIndex(moduleDefinitions), lastGraph)
+	index, err := buildModuleDefinitionIndex(moduleDefinitions)
+	if err != nil {
+		return nil, err
+	}
+	newGraph, err := platform_orchestrator_graph.SeedAndExpandAll(ctx, manifest, *index, lastGraph)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to seed and expand graph")
 	}
@@ -330,15 +363,10 @@ func AddDeletedNodes(newGraph *platform_orchestrator_graph.Graph[*GraphNodeModul
 			// graph unless the flag says we must.
 			if n.ModuleConfiguration != nil && (!n.ModuleConfiguration.Deleted || includeDeletedFromLastGraph) {
 				// Clone the module configuration and set deleted=true
+				deletedConfiguration := cloneModuleConfiguration(n.ModuleConfiguration, true)
+				deletedConfiguration.HasInlineSource = false
 				newGraph.Nodes[rc] = platform_orchestrator_graph.ResourceNode[*GraphNodeModuleConfig]{
-					ModuleConfiguration: &GraphNodeModuleConfig{
-						DefinitionId:                       n.ModuleConfiguration.DefinitionId,
-						VersionId:                          n.ModuleConfiguration.VersionId,
-						Deleted:                            true,
-						Definition:                         n.ModuleConfiguration.Definition,
-						ProviderFullIdToHashVariantMapping: n.ModuleConfiguration.ProviderFullIdToHashVariantMapping,
-						ProviderSubsMap:                    n.ModuleConfiguration.ProviderSubsMap,
-					},
+					ModuleConfiguration: deletedConfiguration,
 				}
 				newGraph.Edges[rc] = lastGraph.Edges[rc]
 			}
@@ -371,15 +399,9 @@ func AddProviderMappingToNodes(g *platform_orchestrator_graph.Graph[*GraphNodeMo
 
 		if pm := n.ModuleConfiguration.Definition.ProviderMapping; len(pm) > 0 {
 			// Create a new ModuleConfiguration for this node to avoid sharing state between nodes
-			n.ModuleConfiguration = &GraphNodeModuleConfig{
-				DefinitionId:                       n.ModuleConfiguration.DefinitionId,
-				VersionId:                          n.ModuleConfiguration.VersionId,
-				HasInlineSource:                    n.ModuleConfiguration.HasInlineSource,
-				Deleted:                            n.ModuleConfiguration.Deleted,
-				Definition:                         n.ModuleConfiguration.Definition,
-				ProviderFullIdToHashVariantMapping: make(map[string]string),
-				ProviderSubsMap:                    make(map[string]map[string]platform_orchestrator_graph.PlaceholderSub),
-			}
+			n.ModuleConfiguration = cloneModuleConfiguration(n.ModuleConfiguration, n.ModuleConfiguration.Deleted)
+			n.ModuleConfiguration.ProviderFullIdToHashVariantMapping = make(map[string]string)
+			n.ModuleConfiguration.ProviderSubsMap = make(map[string]map[string]platform_orchestrator_graph.PlaceholderSub)
 			for _, localRef := range slices.Sorted(maps.Keys(pm)) {
 				pi, ok := provIndex[pm[localRef]]
 				if !ok {
@@ -476,4 +498,10 @@ func validateModuleParams(ctx context.Context, g *platform_orchestrator_graph.Gr
 		}
 	}
 	return nil
+}
+
+func cloneModuleConfiguration(configuration *GraphNodeModuleConfig, deleted bool) *GraphNodeModuleConfig {
+	clone := *configuration
+	clone.Deleted = deleted
+	return &clone
 }

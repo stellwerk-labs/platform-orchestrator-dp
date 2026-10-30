@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
@@ -35,40 +36,51 @@ func ObjectKey(orgID string, deploymentID uuid.UUID) string {
 	return orgID + "/" + deploymentID.String()
 }
 
-func Build(ctx context.Context, database model.Databaser, controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, deploymentID uuid.UUID) (*bytes.Buffer, error) {
+func Build(ctx context.Context, database model.Databaser, controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, deploymentID uuid.UUID, executionClient ...platformorchestratorcp.ClientWithResponsesInterface) (*bytes.Buffer, error) {
 	deployment, _, tofu, rawGraph, err := database.GetDeployment(ctx, nil, orgID, deploymentID, model.GetModeDefault)
 	if err != nil {
 		return nil, err
 	}
-	return buildForDeployment(ctx, controlPlaneClient, orgID, deployment, tofu, rawGraph, deployment.ModuleArtifacts)
+	return buildForDeployment(ctx, controlPlaneClient, orgID, deployment, tofu, rawGraph, deployment.ModuleArtifacts, executionClient...)
 }
 
-func BuildForDeployment(ctx context.Context, controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, deployment *model.DeploymentSummary, tofu model.RawTofu, rawGraph model.EncodedDeploymentGraph) (*bytes.Buffer, error) {
-	return buildForDeployment(ctx, controlPlaneClient, orgID, deployment, tofu, rawGraph, deployment.ModuleArtifacts)
+func BuildForDeployment(
+	ctx context.Context,
+	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface,
+	orgID string,
+	deployment *model.DeploymentSummary,
+	tofu model.RawTofu,
+	rawGraph model.EncodedDeploymentGraph,
+	executionClient ...platformorchestratorcp.ClientWithResponsesInterface,
+) (*bytes.Buffer, error) {
+	return buildForDeployment(ctx, controlPlaneClient, orgID, deployment, tofu, rawGraph, deployment.ModuleArtifacts, executionClient...)
 }
 
-func buildForDeployment(ctx context.Context, controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface, orgID string, deployment *model.DeploymentSummary, tofu model.RawTofu, rawGraph model.EncodedDeploymentGraph, artifacts []model.ModuleArtifactRequirement) (*bytes.Buffer, error) {
+func buildForDeployment(
+	ctx context.Context,
+	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface,
+	orgID string,
+	deployment *model.DeploymentSummary,
+	tofu model.RawTofu,
+	rawGraph model.EncodedDeploymentGraph,
+	artifacts []model.ModuleArtifactRequirement,
+	executionClient ...platformorchestratorcp.ClientWithResponsesInterface,
+) (*bytes.Buffer, error) {
 	graph, err := graphs.FromJson(bytes.NewReader(rawGraph))
 	if err != nil {
 		return nil, err
 	}
 
-	versionsToGet := make([]string, 0)
-	for coordinate := range graph.DepthFirstIterate(platformorchestratorgraph.DepthFirstIteratePreOrder) {
-		node := graph.Nodes[coordinate]
-		if node.ModuleConfiguration != nil && node.ModuleConfiguration.HasInlineSource {
-			versionsToGet = append(versionsToGet, fmt.Sprintf("%s@%s", node.ModuleConfiguration.DefinitionId, node.ModuleConfiguration.VersionId))
-		}
+	versionsToGet, retained, err := inlineMaterialCoordinates(graph, deployment.DeploymentEnvUuid)
+	if err != nil {
+		return nil, err
 	}
-	slices.Sort(versionsToGet)
-	versionsToGet = slices.Compact(versionsToGet)
 
-	var inlineModules []platformorchestratorcp.InternalModuleCatalogueModule
+	var inlineModules []platformorchestratorcp.InternalExecutionCatalogueModule
 	if len(versionsToGet) > 0 {
 		request := platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 			AreRulesIgnored: true, PinnedModuleVersions: versionsToGet,
 		}
-		var response *platformorchestratorcp.GenerateInternalModuleCatalogueResponse
 		var requestEditors []platformorchestratorcp.RequestEditorFn
 		allowNonDeployableVersions := deployment.Mode == model.DeploymentModeRollback || slices.ContainsFunc(artifacts, func(artifact model.ModuleArtifactRequirement) bool {
 			return artifact.RetainedArtifactException
@@ -87,20 +99,87 @@ func buildForDeployment(ctx context.Context, controlPlaneClient platformorchestr
 			}
 			return nil
 		})
-		response, err = controlPlaneClient.GenerateInternalModuleCatalogueWithResponse(ctx, orgID, deployment.ProjectId, deployment.EnvId, request, requestEditors...)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to generate module catalogue")
+		var catalogue *platformorchestratorcp.InternalExecutionCatalogue
+		if len(retained) > 0 {
+			if len(executionClient) != 1 || executionClient[0] == nil {
+				return nil, errors.New("runtime identity is required to reconstruct retained Draft test sources")
+			}
+			response, callErr := executionClient[0].GenerateInternalExecutionCatalogueWithResponse(ctx, orgID, deployment.ProjectId, deployment.EnvId, nil,
+				platformorchestratorcp.InternalExecutionCatalogueGenerateBody{
+					AreRulesIgnored: true, MaterialOnly: true, PinnedModuleVersions: versionsToGet, RetainedDraftTestSnapshots: retained,
+				}, requestEditors...)
+			if callErr != nil {
+				return nil, errors.Wrap(callErr, "failed to fetch retained execution material")
+			}
+			if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+				return nil, errors.Errorf("retained execution material unavailable (HTTP %d)", response.StatusCode())
+			}
+			catalogue = response.JSON200
+		} else {
+			response, callErr := controlPlaneClient.GenerateInternalModuleCatalogueWithResponse(ctx, orgID, deployment.ProjectId, deployment.EnvId, nil, request, requestEditors...)
+			if callErr != nil {
+				return nil, errors.Wrap(callErr, "failed to generate module catalogue")
+			}
+			if response.StatusCode() != http.StatusOK {
+				return nil, errors.Errorf("unexpected status code %d when fetching module catalogue", response.StatusCode())
+			}
+			catalogue, err = graphs.DecodeExecutionCatalogue(response.Body, response.JSON200)
+			if err != nil {
+				return nil, err
+			}
 		}
-		if response.StatusCode() != http.StatusOK {
-			return nil, errors.Errorf("unexpected status code %d when fetching module catalogue: %s", response.StatusCode(), string(response.Body))
+		if err := validateRetainedDraftSources(artifacts, catalogue.Modules); err != nil {
+			return nil, err
 		}
-		inlineModules, err = selectInlineModules(versionsToGet, response.JSON200.Modules)
+		if err := validateResourceTypeContracts(artifacts, catalogue.Modules); err != nil {
+			return nil, err
+		}
+		inlineModules, err = selectInlineModules(versionsToGet, catalogue.Modules)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return compressWithArtifacts(tofu, inlineModules, artifacts)
+}
+
+// Retained deployments must never acquire a different interface while their
+// inline sources are reconstructed. Historical records without a contract
+// identity remain readable and do not gain an invented binding.
+func validateResourceTypeContracts(artifacts []model.ModuleArtifactRequirement, modules []platformorchestratorcp.InternalExecutionCatalogueModule) error {
+	byCoordinate := make(map[string]platformorchestratorcp.InternalExecutionCatalogueModule, len(modules))
+	for _, module := range modules {
+		byCoordinate[module.Id+"@"+module.VersionId] = module
+	}
+	for _, artifact := range artifacts {
+		if artifact.ResourceTypeVersionUUID == nil && artifact.ResourceTypeVersion == nil {
+			continue
+		}
+		module, found := byCoordinate[artifact.ModuleID+"@"+artifact.Version]
+		if !found {
+			// External sources are already frozen in the retained Terraform; only
+			// inline sources are requested from the catalogue for reconstruction.
+			continue
+		}
+		if artifact.ResourceTypeVersionUUID == nil || artifact.ResourceTypeVersion == nil ||
+			module.ResourceTypeVersionUuid == nil || module.ResourceTypeVersion == nil ||
+			*artifact.ResourceTypeVersionUUID != *module.ResourceTypeVersionUuid ||
+			*artifact.ResourceTypeVersion != *module.ResourceTypeVersion {
+			return errors.Errorf("immutable Resource Type contract changed for module %s@%s", artifact.ModuleID, artifact.Version)
+		}
+		expected, err := json.Marshal(artifact.OutputSchema)
+		if err != nil {
+			return errors.Wrap(err, "failed to encode retained output interface")
+		}
+		actual, err := json.Marshal(module.OutputSchema)
+		if err != nil {
+			return errors.Wrap(err, "failed to encode selected output interface")
+		}
+		if !bytes.Equal(expected, actual) {
+			return errors.Errorf("immutable output interface changed for module %s@%s", artifact.ModuleID, artifact.Version)
+		}
+	}
+	return nil
 }
 
 func restrictedVersionConfirmations(artifacts []model.ModuleArtifactRequirement, versions []string) []string {
@@ -115,7 +194,7 @@ func restrictedVersionConfirmations(artifacts []model.ModuleArtifactRequirement,
 	return slices.Compact(confirmations)
 }
 
-func selectInlineModules(versions []string, modules []platformorchestratorcp.InternalModuleCatalogueModule) ([]platformorchestratorcp.InternalModuleCatalogueModule, error) {
+func selectInlineModules(versions []string, modules []platformorchestratorcp.InternalExecutionCatalogueModule) ([]platformorchestratorcp.InternalExecutionCatalogueModule, error) {
 	requested := make(map[string]struct{}, len(versions))
 	for _, version := range versions {
 		moduleID, versionID, ok := strings.Cut(version, "@")
@@ -125,7 +204,7 @@ func selectInlineModules(versions []string, modules []platformorchestratorcp.Int
 		requested[version] = struct{}{}
 	}
 
-	selected := make([]platformorchestratorcp.InternalModuleCatalogueModule, 0, len(requested))
+	selected := make([]platformorchestratorcp.InternalExecutionCatalogueModule, 0, len(requested))
 	found := make(map[string]struct{}, len(requested))
 	for _, module := range modules {
 		coordinate := fmt.Sprintf("%s@%s", module.Id, module.VersionId)
@@ -149,7 +228,7 @@ func selectInlineModules(versions []string, modules []platformorchestratorcp.Int
 	return selected, nil
 }
 
-func compressWithArtifacts(content []byte, inlineModules []platformorchestratorcp.InternalModuleCatalogueModule, artifacts []model.ModuleArtifactRequirement) (*bytes.Buffer, error) {
+func compressWithArtifacts(content []byte, inlineModules []platformorchestratorcp.InternalExecutionCatalogueModule, artifacts []model.ModuleArtifactRequirement) (*bytes.Buffer, error) {
 	buffer := new(bytes.Buffer)
 	gzipWriter := gzip.NewWriter(buffer)
 	tarWriter := tar.NewWriter(gzipWriter)
@@ -197,4 +276,49 @@ func compressWithArtifacts(content []byte, inlineModules []platformorchestratorc
 		return nil, errors.Wrap(err, "failed to close gzip writer")
 	}
 	return buffer, nil
+}
+
+func validateRetainedDraftSources(artifacts []model.ModuleArtifactRequirement, modules []platformorchestratorcp.InternalExecutionCatalogueModule) error {
+	for _, module := range modules {
+		reference, err := graphs.DraftTestReferenceFromCatalogue(module)
+		if err != nil {
+			return err
+		}
+		var expected *graphs.DraftTestReference
+		for _, artifact := range artifacts {
+			if artifact.ModuleID == module.Id && artifact.Version == module.VersionId {
+				expected = artifact.DraftTest
+				break
+			}
+		}
+		if !reflect.DeepEqual(expected, reference) {
+			return errors.Errorf("retained Draft test provenance changed for %s@%s", module.Id, module.VersionId)
+		}
+	}
+	return nil
+}
+
+func inlineMaterialCoordinates(graph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig], environment uuid.UUID) ([]string, []platformorchestratorcp.ModuleDraftTestCoordinate, error) {
+	retained, err := graphs.RetainedDraftTestCoordinates(graph, environment)
+	if err != nil {
+		return nil, nil, err
+	}
+	versionsToGet := make([]string, 0)
+	requiredDrafts := make(map[uuid.UUID]bool)
+	for coordinate := range graph.DepthFirstIterate(platformorchestratorgraph.DepthFirstIteratePreOrder) {
+		node := graph.Nodes[coordinate]
+		if node.ModuleConfiguration != nil && !node.ModuleConfiguration.Deleted && node.ModuleConfiguration.HasInlineSource {
+			versionsToGet = append(versionsToGet, fmt.Sprintf("%s@%s", node.ModuleConfiguration.DefinitionId, node.ModuleConfiguration.VersionId))
+			if node.ModuleConfiguration.DraftTest != nil {
+				requiredDrafts[node.ModuleConfiguration.DraftTest.SnapshotUUID] = true
+			}
+		}
+	}
+	retained = slices.DeleteFunc(retained, func(coordinate platformorchestratorcp.ModuleDraftTestCoordinate) bool {
+		return !requiredDrafts[coordinate.SnapshotUuid]
+	})
+	slices.Sort(versionsToGet)
+	versionsToGet = slices.Compact(versionsToGet)
+
+	return versionsToGet, retained, nil
 }

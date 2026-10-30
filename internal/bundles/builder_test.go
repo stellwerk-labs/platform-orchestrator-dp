@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
@@ -34,6 +36,23 @@ func TestRestrictedConfirmationIsBoundToFrozenArtifactCoordinate(t *testing.T) {
 	}
 	assert.Equal(t, []string{versionUUID.String()}, restrictedVersionConfirmations(artifacts, []string{"checkout@1.0.0", "unconfirmed@1.0.0", "zero@1.0.0"}))
 	assert.Empty(t, restrictedVersionConfirmations(artifacts, []string{"checkout@3.0.0"}))
+}
+
+func TestResourceTypeContractReconstructionRejectsSubstitution(t *testing.T) {
+	id, replacement := uuid.New(), uuid.New()
+	number := int64(2)
+	output := map[string]any{"type": "object"}
+	declared := platformorchestratorcp.ModuleOutputSchema(output)
+	artifacts := []model.ModuleArtifactRequirement{{ModuleID: "database", Version: "2.0.0", ResourceTypeVersion: &number, ResourceTypeVersionUUID: &id, OutputSchema: &output}}
+	modules := []platformorchestratorcp.InternalExecutionCatalogueModule{{Id: "database", VersionId: "2.0.0", ResourceTypeVersion: &number, ResourceTypeVersionUuid: &id, OutputSchema: &declared}}
+	require.NoError(t, validateResourceTypeContracts(artifacts, modules))
+	modules[0].ResourceTypeVersionUuid = &replacement
+	require.ErrorContains(t, validateResourceTypeContracts(artifacts, modules), "immutable Resource Type contract changed")
+	modules[0].ResourceTypeVersionUuid = &id
+	modules[0].OutputSchema = nil
+	require.ErrorContains(t, validateResourceTypeContracts(artifacts, modules), "immutable output interface changed")
+	artifacts[0].ResourceTypeVersion, artifacts[0].ResourceTypeVersionUUID, artifacts[0].OutputSchema = nil, nil, nil
+	require.NoError(t, validateResourceTypeContracts(artifacts, modules), "retained legacy records remain readable")
 }
 
 func TestCompressWithArtifactsIncludesRunnerVerificationManifest(t *testing.T) {
@@ -77,14 +96,14 @@ func TestSelectInlineModulesIgnoresExtraPinnedCatalogueVersions(t *testing.T) {
 		Source:         externalGitSource,
 		ArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
-	modules := []platformorchestratorcp.InternalModuleCatalogueModule{
+	modules := []platformorchestratorcp.InternalExecutionCatalogueModule{
 		{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline", ModuleSourceCode: &inlineSource},
 		{Id: "storefront-deployment", VersionId: "1.1.0", ModuleSource: externalGitSource},
 	}
 
 	selected, err := selectInlineModules([]string{"checkout@1.0.0", "checkout@1.0.0"}, modules)
 	require.NoError(t, err)
-	require.Equal(t, []platformorchestratorcp.InternalModuleCatalogueModule{modules[0]}, selected)
+	require.Equal(t, []platformorchestratorcp.InternalExecutionCatalogueModule{modules[0]}, selected)
 
 	bundle, err := compressWithArtifacts([]byte("terraform {}"), selected, []model.ModuleArtifactRequirement{externalArtifact})
 	require.NoError(t, err)
@@ -121,20 +140,88 @@ func TestSelectInlineModulesIgnoresExtraPinnedCatalogueVersions(t *testing.T) {
 
 func TestSelectInlineModulesRequiresEachRequestedVersionExactlyOnceWithSource(t *testing.T) {
 	source := "terraform {}"
-	valid := platformorchestratorcp.InternalModuleCatalogueModule{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline", ModuleSourceCode: &source}
+	valid := platformorchestratorcp.InternalExecutionCatalogueModule{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline", ModuleSourceCode: &source}
 	for _, test := range []struct {
 		name    string
-		modules []platformorchestratorcp.InternalModuleCatalogueModule
+		modules []platformorchestratorcp.InternalExecutionCatalogueModule
 	}{
 		{name: "missing", modules: nil},
-		{name: "duplicate", modules: []platformorchestratorcp.InternalModuleCatalogueModule{valid, valid}},
-		{name: "missing source", modules: []platformorchestratorcp.InternalModuleCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline"}}},
-		{name: "wrong source kind", modules: []platformorchestratorcp.InternalModuleCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "registry", ModuleSourceCode: &source}}},
-		{name: "empty source", modules: []platformorchestratorcp.InternalModuleCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline", ModuleSourceCode: new(string)}}},
+		{name: "duplicate", modules: []platformorchestratorcp.InternalExecutionCatalogueModule{valid, valid}},
+		{name: "missing source", modules: []platformorchestratorcp.InternalExecutionCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline"}}},
+		{name: "wrong source kind", modules: []platformorchestratorcp.InternalExecutionCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "registry", ModuleSourceCode: &source}}},
+		{name: "empty source", modules: []platformorchestratorcp.InternalExecutionCatalogueModule{{Id: "checkout", VersionId: "1.0.0", ModuleSource: "inline", ModuleSourceCode: new(string)}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := selectInlineModules([]string{"checkout@1.0.0"}, test.modules)
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestRetainedDraftSourceValidationRejectsChangedOrMissingProvenance(t *testing.T) {
+	source := `output "name" { value = "A" }`
+	contract, number := uuid.New(), int64(1)
+	definition := platformorchestratorcp.ModuleVersionPublishBody{SemanticVersion: "1.2.0", ModuleSource: "inline", ModuleSourceCode: &source}
+	snapshot := &platformorchestratorcp.ModuleDraftTestSnapshot{
+		Id:                      uuid.New(),
+		ModuleUuid:              uuid.New(),
+		DraftId:                 uuid.New(),
+		DraftRevision:           1,
+		ProjectUuid:             uuid.New(),
+		EnvironmentUuid:         uuid.New(),
+		ModuleSlug:              "storage",
+		OrgId:                   "example",
+		Provenance:              platformorchestratorcp.DraftTest,
+		ResourceTypeVersion:     1,
+		ResourceTypeVersionUuid: contract,
+		Definition:              definition,
+	}
+	module := platformorchestratorcp.InternalExecutionCatalogueModule{
+		Id:                      "storage",
+		OrgId:                   "example",
+		ModuleUuid:              snapshot.ModuleUuid,
+		VersionUuid:             snapshot.Id,
+		VersionId:               snapshot.Id.String(),
+		ResourceTypeVersion:     &number,
+		ResourceTypeVersionUuid: &contract,
+		DraftTest:               snapshot,
+		ModuleSource:            "inline",
+		ModuleSourceCode:        &source,
+	}
+	provenance, err := graphs.DraftTestReferenceFromCatalogue(module)
+	require.NoError(t, err)
+	artifacts := []model.ModuleArtifactRequirement{{ModuleID: module.Id, ModuleUUID: module.ModuleUuid, Version: module.VersionId, VersionUUID: module.VersionUuid, DraftTest: provenance}}
+	require.NoError(t, validateRetainedDraftSources(artifacts, []platformorchestratorcp.InternalExecutionCatalogueModule{module}))
+	changed := module
+	different := "changed source B"
+	changed.ModuleSourceCode = &different
+	require.Error(t, validateRetainedDraftSources(artifacts, []platformorchestratorcp.InternalExecutionCatalogueModule{changed}))
+	missing := module
+	missing.DraftTest = nil
+	require.Error(t, validateRetainedDraftSources(artifacts, []platformorchestratorcp.InternalExecutionCatalogueModule{missing}))
+	foreign := *provenance
+	foreign.EnvironmentUUID = uuid.New()
+	artifacts[0].DraftTest = &foreign
+	require.Error(t, validateRetainedDraftSources(artifacts, []platformorchestratorcp.InternalExecutionCatalogueModule{module}))
+}
+
+func TestInlineMaterialRetainsOnlySourcesRequiredByLiveNodes(t *testing.T) {
+	environment, project, module := uuid.New(), uuid.New(), uuid.New()
+	a := &graphs.DraftTestReference{ModuleUUID: module, SnapshotUUID: uuid.New(), DraftUUID: uuid.New(), DraftRevision: 1, EnvironmentUUID: environment, ProjectUUID: project}
+	b := *a
+	b.SnapshotUUID = uuid.New()
+	b.DraftRevision = 2
+	first := graph.ResourceCoordinate{Type: "greeting", Class: "default", Id: "shared.live"}
+	deleted := graph.ResourceCoordinate{Type: "greeting", Class: "default", Id: "shared.removed"}
+	stored := &graph.Graph[*graphs.GraphNodeModuleConfig]{Nodes: map[graph.ResourceCoordinate]graph.ResourceNode[*graphs.GraphNodeModuleConfig]{
+		first:   {ModuleConfiguration: &graphs.GraphNodeModuleConfig{DefinitionId: "greeting", VersionId: a.SnapshotUUID.String(), DraftTest: a, HasInlineSource: true}},
+		deleted: {ModuleConfiguration: &graphs.GraphNodeModuleConfig{DefinitionId: "greeting", VersionId: b.SnapshotUUID.String(), DraftTest: &b, Deleted: true, HasInlineSource: false}},
+	}, Edges: map[graph.ResourceCoordinate]map[string]graph.ResourceCoordinate{}}
+	versions, retained, err := inlineMaterialCoordinates(stored, environment)
+	require.NoError(t, err)
+	require.Equal(t, []string{"greeting@" + a.SnapshotUUID.String()}, versions)
+	require.Equal(t, []platformorchestratorcp.ModuleDraftTestCoordinate{{ModuleUuid: module, SnapshotUuid: a.SnapshotUUID}}, retained, "deleted provider context must not be reconstructed as a live executable")
+	b.EnvironmentUUID = uuid.New()
+	_, _, err = inlineMaterialCoordinates(stored, environment)
+	require.Error(t, err, "even deleted references may not borrow another Environment's provenance")
 }

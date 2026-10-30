@@ -3,7 +3,7 @@ package events
 import (
 	"time"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 type CloudEvent[e any] struct {

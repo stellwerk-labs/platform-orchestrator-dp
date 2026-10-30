@@ -311,6 +311,26 @@ class ContentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             content.notices(files, "amd64", MODULE)
 
+    def test_own_sdk_v2_and_v3_require_exact_root_license(self):
+        for suffix in ("shared/v2", "shared/v3"):
+            with self.subTest(suffix=suffix):
+                files = license_bundle("amd64")
+                name = MODULE + "/" + suffix
+                files["licenses/" + name + "/LICENSE"] = files["licenses/application/LICENSE"]
+                modules = sorted((MODULE + "|", name + "|" + ("v2.1.1" if suffix == "shared/v2" else "v3.0.0"), "example.org/dependency|v1.0.0"))
+                files["licenses/modules.txt"] = ("\n".join(modules) + "\n").encode()
+                def manifest():
+                    entries = {key.removeprefix("licenses/"): value for key, value in files.items()
+                               if key != "licenses/manifest.sha256"}
+                    return "".join(hashlib.sha256(value).hexdigest() + "  ./" + key + "\n"
+                                   for key, value in sorted(entries.items())).encode()
+                files["licenses/manifest.sha256"] = manifest()
+                content.notices(files, "amd64", MODULE)
+                files["licenses/" + name + "/LICENSE"] = b"unrelated license"
+                files["licenses/manifest.sha256"] = manifest()
+                with self.assertRaises(ValueError):
+                    content.notices(files, "amd64", MODULE)
+
     def test_architecture_mismatch_fails(self):
         with self.assertRaises(ValueError):
             self.export(extra={"opt/server/server": elf("arm64")})

@@ -15,10 +15,11 @@ import (
 	"github.com/stellwerk-labs/golib/hlogger"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 type DeploymentMode string
@@ -119,15 +120,19 @@ type CreateDeploymentParams struct {
 }
 
 type ModuleArtifactRequirement struct {
-	ModuleID                  string    `json:"module_id"`
-	ModuleUUID                uuid.UUID `json:"module_uuid,omitempty"`
-	Version                   string    `json:"version"`
-	VersionUUID               uuid.UUID `json:"version_uuid,omitempty"`
-	SemanticVersion           string    `json:"semantic_version,omitempty"`
-	MigrationGeneration       string    `json:"migration_generation,omitempty"`
-	Source                    string    `json:"source"`
-	ArtifactDigest            string    `json:"artifact_digest,omitempty"`
-	RetainedArtifactException bool      `json:"retained_artifact_exception,omitempty"`
+	DraftTest                 *graphs.DraftTestReference `json:"draft_test,omitempty"`
+	ModuleID                  string                     `json:"module_id"`
+	ModuleUUID                uuid.UUID                  `json:"module_uuid,omitempty"`
+	Version                   string                     `json:"version"`
+	VersionUUID               uuid.UUID                  `json:"version_uuid,omitempty"`
+	SemanticVersion           string                     `json:"semantic_version,omitempty"`
+	MigrationGeneration       string                     `json:"migration_generation,omitempty"`
+	Source                    string                     `json:"source"`
+	ArtifactDigest            string                     `json:"artifact_digest,omitempty"`
+	RetainedArtifactException bool                       `json:"retained_artifact_exception,omitempty"`
+	ResourceTypeVersion       *int64                     `json:"resource_type_version,omitempty"`
+	ResourceTypeVersionUUID   *uuid.UUID                 `json:"resource_type_version_uuid,omitempty"`
+	OutputSchema              *map[string]any            `json:"output_schema,omitempty"`
 	// Captured only after exact-version confirmation and scoped authorization.
 	// Background bundle reconstruction must not drop this operation's authority.
 	ConfirmedRestrictedVersionUUID *uuid.UUID `json:"confirmed_restricted_version_uuid,omitempty"`

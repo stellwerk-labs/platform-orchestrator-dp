@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"

@@ -53,6 +53,7 @@ func (s *Server) deploymentQueueConfig() DeploymentQueueConfig {
 // sent it. A queued request stores this intent, never a resolved graph, and
 // is resolved like a new request when it reaches the head of its queue.
 type deploymentRequest struct {
+	DraftTestSnapshots        map[string]uuid.UUID                `json:"draft_test_snapshots,omitempty"`
 	Manifest                  *DeploymentManifest                 `json:"manifest,omitempty"`
 	RollbackToDeploymentID    *uuid.UUID                          `json:"rollback_to_deployment_id,omitempty"`
 	ModuleVersions            map[string]string                   `json:"module_versions,omitempty"`

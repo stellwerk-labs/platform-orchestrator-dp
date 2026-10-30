@@ -10,7 +10,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +62,30 @@ func TestDeploymentAdmissionClientDoesNotFollowRedirectsOrReadUnboundedBodies(t 
 		context.Background(), "org", uuid.New(), platformorchestratorcp.DeploymentAdmissionRequest{},
 	)
 	require.ErrorIs(t, err, errDeploymentAdmissionResponseTooLarge)
+}
+
+// This exercises the real generated client's wire behavior, not catalogue policy.
+func TestExecutionCatalogueClientUsesAuthenticatedAdmissionOrigin(t *testing.T) {
+	tokenFile := t.TempDir() + "/token"
+	require.NoError(t, os.WriteFile(tokenFile, []byte("scoped-token"), 0o600))
+	var received atomic.Int64
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+		assert.Equal(t, "/internal/orgs/org/projects/project/envs/development/module-execution-catalogue", r.URL.Path)
+		assert.Equal(t, "Bearer scoped-token", r.Header.Get("Authorization"))
+		assert.Empty(t, r.Header.Get("From"), "only the authenticated gateway may supply this identity")
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"modules":[],"providers":[]}`))
+		assert.NoError(t, err)
+	}))
+	defer gateway.Close()
+	service, err := NewOrdinaryDeploymentAdmissionService(nil, gateway.URL, tokenFile, gateway.Client())
+	require.NoError(t, err)
+	require.NotNil(t, service.ExecutionCatalogueClient())
+	response, err := service.ExecutionCatalogueClient().GenerateInternalExecutionCatalogueWithResponse(t.Context(), "org", "project", "development", nil, platformorchestratorcp.InternalExecutionCatalogueGenerateBody{})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode())
+	require.Equal(t, int64(1), received.Load())
+	var disabled *OrdinaryDeploymentAdmissionService
+	require.Nil(t, disabled.ExecutionCatalogueClient())
 }

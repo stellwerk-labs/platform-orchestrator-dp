@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/hcl/v2/hclwrite"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,7 +131,7 @@ func TestBuildTofuFromGraph_with_selectors(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 					Dependencies: map[string]platformorchestratorcp.ModuleDependencyManifest{
 						"c": {Type: "child"},
@@ -142,7 +142,7 @@ func TestBuildTofuFromGraph_with_selectors(t *testing.T) {
 				},
 			}},
 			{ResourceType: "child", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-child-def", VersionId: "v1", ModuleSource: "some/source",
 				},
 			}},
@@ -254,7 +254,7 @@ func TestBuildTofuFromGraph_with_dynamic_providers(t *testing.T) {
 		*platform_orchestrator_graph.NewModuleDefinitionIndex([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}},
 				Configuration: &GraphNodeModuleConfig{
-					DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+					DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 						Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 						ProviderMapping: map[string]string{
 							"example": "example.dynamic",
@@ -266,7 +266,7 @@ func TestBuildTofuFromGraph_with_dynamic_providers(t *testing.T) {
 				}},
 			{ResourceType: "child", Rules: []platform_orchestrator_graph.Rule{{}},
 				Configuration: &GraphNodeModuleConfig{
-					DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+					DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 						Id: "my-child-def", VersionId: "v1", ModuleSource: "some/source",
 						ProviderMapping: map[string]string{
 							"example": "example.static",
@@ -389,7 +389,7 @@ func TestBuildTofuFromGraph_with_bad_dynamic_providers(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 					ProviderMapping: map[string]string{
 						"example": "example.dynamic",
@@ -411,7 +411,7 @@ func TestBuildTofuFromGraph_with_bad_dynamic_providers(t *testing.T) {
 func TestBuildTofuFromGraph_with_deleted_resource_static_provider(t *testing.T) {
 	index := *platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 		{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-			DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+			DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 				Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 				ProviderMapping: map[string]string{
 					"example": "example.static",
@@ -492,7 +492,7 @@ output "work" {
 func TestBuildTofuFromGraph_with_deleted_resource_dynamic_provider(t *testing.T) {
 	index := *platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 		{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-			DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+			DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 				Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 				ProviderMapping: map[string]string{
 					"example": "example.dynamic",
@@ -503,7 +503,7 @@ func TestBuildTofuFromGraph_with_deleted_resource_dynamic_provider(t *testing.T)
 			},
 		}},
 		{ResourceType: "child", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-			DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+			DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 				Id: "my-child-def", VersionId: "v1", ModuleSource: "some/source",
 				ProviderMapping: map[string]string{
 					"example": "example.static",
@@ -565,7 +565,7 @@ func TestBuildTofuFromGraph_with_provider_block(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 					ProviderMapping: map[string]string{
 						"eg": "eg.default",
@@ -646,7 +646,7 @@ func TestBuildTofuFromGraph_with_self_placeholder(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "parent", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "parent-dev", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "parent-dev", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "parent-def", VersionId: "v1", ModuleSource: "some/source",
 					Coprovisioned: []platformorchestratorcp.ModuleCoProvisionManifest{
 						{
@@ -659,7 +659,7 @@ func TestBuildTofuFromGraph_with_self_placeholder(t *testing.T) {
 				},
 			}},
 			{ResourceType: "child", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "child-def", VersionId: "v1", ModuleSource: "some/source",
 				},
 			}},
@@ -727,7 +727,7 @@ func TestBuildTofuFromGraph_with_self_placeholder_cycle(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "parent", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "parent-dev", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "parent-dev", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "parent-def", VersionId: "v1", ModuleSource: "some/source",
 					ModuleInputs: map[string]interface{}{
 						"x": "${self.outputs.x}",
@@ -761,7 +761,7 @@ func TestBuildTofuFromGraph_with_duplicate_dynamic_providers(t *testing.T) {
 		},
 		*platform_orchestrator_graph.NewModuleDefinitionIndex[*GraphNodeModuleConfig]([]platform_orchestrator_graph.ModuleDefinition[*GraphNodeModuleConfig]{
 			{ResourceType: "thing", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-def", VersionId: "v1", ModuleSource: "some/source",
 					ProviderMapping: map[string]string{
 						"example": "example.dynamic",
@@ -772,7 +772,7 @@ func TestBuildTofuFromGraph_with_duplicate_dynamic_providers(t *testing.T) {
 				},
 			}},
 			{ResourceType: "child", Rules: []platform_orchestrator_graph.Rule{{}}, Configuration: &GraphNodeModuleConfig{
-				DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalModuleCatalogueModule{
+				DefinitionId: "my-child-def", VersionId: "v1", Definition: &platformorchestratorcp.InternalExecutionCatalogueModule{
 					Id: "my-child-def", VersionId: "v1", ModuleSource: "some/source",
 				},
 			}},

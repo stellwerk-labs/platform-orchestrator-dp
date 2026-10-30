@@ -12,6 +12,7 @@ import (
 )
 
 type DeploymentAdmissionReceipt struct {
+	DraftTestSnapshots              map[string]uuid.UUID
 	OrgID                           string
 	AdmissionID                     uuid.UUID
 	ProjectUUID                     uuid.UUID
@@ -60,21 +61,21 @@ func readDeploymentAdmissionReceipt(ctx context.Context, tx Tx, orgID string, ad
 		return nil, errors.New("transaction is required")
 	}
 	query := `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at
+        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
         FROM deployment_admission_receipts WHERE org_id=$1 AND admission_id=$2`
 	args := []any{orgID, admissionID}
 	if deploymentID != uuid.Nil {
 		query = `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-            core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at
+            core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
             FROM deployment_admission_receipts WHERE deployment_id=$1`
 		args = []any{deploymentID}
 	}
 	receipt := new(DeploymentAdmissionReceipt)
-	var moduleVersions, carryForwardVersions, confirmedRestrictedVersions json.RawMessage
+	var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests json.RawMessage
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&receipt.OrgID, &receipt.AdmissionID, &receipt.ProjectUUID, &receipt.EnvironmentUUID, &receipt.ActorID,
 		&receipt.RequestDigest, &receipt.Mode, &moduleVersions, &carryForwardVersions, &confirmedRestrictedVersions, &receipt.CoreEpoch, &receipt.Disposition,
-		&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt,
+		&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, NewErrNotFound("Deployment admission receipt not found")
@@ -89,6 +90,9 @@ func readDeploymentAdmissionReceipt(ctx context.Context, tx Tx, orgID string, ad
 	}
 	if err := json.Unmarshal(confirmedRestrictedVersions, &receipt.ConfirmedRestrictedVersionUUIDs); err != nil {
 		return nil, errors.Wrap(err, "failed to decode Deployment admission restricted Version confirmations")
+	}
+	if err := json.Unmarshal(draftTests, &receipt.DraftTestSnapshots); err != nil {
+		return nil, errors.Wrap(err, "failed to decode immutable Draft test selection")
 	}
 	return receipt, nil
 }
@@ -122,12 +126,16 @@ func PrepareDeploymentAdmissionReceipt(ctx context.Context, tx Tx, receipt Deplo
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to encode Deployment admission restricted Version confirmations")
 	}
+	draftTests, err := json.Marshal(receipt.DraftTestSnapshots)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to encode immutable Draft test selection")
+	}
 	if err := tx.QueryRowContext(ctx, `INSERT INTO deployment_admission_receipts
-        (org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,core_epoch,disposition,deployment_id,terminal_outcome)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING created_at`,
+        (org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,core_epoch,disposition,deployment_id,terminal_outcome,draft_test_snapshots)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING created_at`,
 		receipt.OrgID, receipt.AdmissionID, receipt.ProjectUUID, receipt.EnvironmentUUID, receipt.ActorID,
 		receipt.RequestDigest, receipt.Mode, moduleVersions, carryForwardVersions, confirmedRestrictedVersions,
-		receipt.CoreEpoch, receipt.Disposition, receipt.DeploymentID, nullableString(receipt.TerminalOutcome),
+		receipt.CoreEpoch, receipt.Disposition, receipt.DeploymentID, nullableString(receipt.TerminalOutcome), draftTests,
 	).Scan(&receipt.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to create Deployment admission receipt")
 	}
@@ -143,8 +151,9 @@ func receiptIntentIdentity(receipt *DeploymentAdmissionReceipt) any {
 		ModuleVersions                                     map[string]uuid.UUID
 		CarryForwardModuleVersions                         map[string]uuid.UUID
 		ConfirmedRestrictedVersionUUIDs                    []uuid.UUID
+		DraftTestSnapshots                                 map[string]uuid.UUID
 	}{receipt.OrgID, receipt.AdmissionID, receipt.ProjectUUID, receipt.EnvironmentUUID, receipt.ActorID, receipt.RequestDigest,
-		receipt.Mode, receipt.ModuleVersions, receipt.CarryForwardModuleVersions, receipt.ConfirmedRestrictedVersionUUIDs}
+		receipt.Mode, receipt.ModuleVersions, receipt.CarryForwardModuleVersions, receipt.ConfirmedRestrictedVersionUUIDs, canonicalDraftTestSelection(receipt.DraftTestSnapshots)}
 }
 
 func BindDeploymentAdmissionReceipt(ctx context.Context, tx Tx, intent DeploymentAdmissionReceipt, deploymentID uuid.UUID, coreEpoch int64) (*DeploymentAdmissionReceipt, error) {
@@ -202,7 +211,7 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 		return nil, NewErrBadRequest("transaction, bounded receipt limit and recovery cutoff are required")
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at
+        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
         FROM deployment_admission_receipts
         WHERE core_settled_at IS NULL AND created_at <= $2
         ORDER BY created_at,org_id,admission_id LIMIT $1`, limit, createdBefore)
@@ -213,10 +222,10 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 	receipts := make([]DeploymentAdmissionReceipt, 0)
 	for rows.Next() {
 		var receipt DeploymentAdmissionReceipt
-		var moduleVersions, carryForwardVersions, confirmedRestrictedVersions json.RawMessage
+		var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests json.RawMessage
 		if err := rows.Scan(&receipt.OrgID, &receipt.AdmissionID, &receipt.ProjectUUID, &receipt.EnvironmentUUID, &receipt.ActorID,
 			&receipt.RequestDigest, &receipt.Mode, &moduleVersions, &carryForwardVersions, &confirmedRestrictedVersions, &receipt.CoreEpoch, &receipt.Disposition,
-			&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt); err != nil {
+			&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests); err != nil {
 			return nil, errors.Wrap(err, "failed to scan unsettled Deployment admission")
 		}
 		if err := json.Unmarshal(moduleVersions, &receipt.ModuleVersions); err != nil {
@@ -227,6 +236,9 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 		}
 		if err := json.Unmarshal(confirmedRestrictedVersions, &receipt.ConfirmedRestrictedVersionUUIDs); err != nil {
 			return nil, errors.Wrap(err, "failed to decode unsettled Deployment admission restricted Version confirmations")
+		}
+		if err := json.Unmarshal(draftTests, &receipt.DraftTestSnapshots); err != nil {
+			return nil, errors.Wrap(err, "failed to decode unsettled Draft test selection")
 		}
 		receipts = append(receipts, receipt)
 	}
@@ -263,4 +275,11 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func canonicalDraftTestSelection(selection map[string]uuid.UUID) map[string]uuid.UUID {
+	if len(selection) == 0 {
+		return nil
+	}
+	return selection
 }

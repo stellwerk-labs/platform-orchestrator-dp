@@ -14,8 +14,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genevents"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genevents"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"go.uber.org/zap"
 
@@ -28,7 +28,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers"
 
-	dpevents "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	dpevents "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 // destroyRetryDelay paces redelivery while the Environment is busy. A running
@@ -196,7 +196,7 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 	newDep, messages, _, err := api.CreateDeploymentWithOptions(
 		ctx, logger, userid.InternalSystemUuid, orgId, projectId, envId, env, model.DeploymentModeDestroy, opt.Empty[uuid.UUID](),
 		api.DeploymentManifest{Workloads: map[string]api.DeploymentManifestWorkload{}}, nil, nil, nil, false, nil,
-		h.cpClient, h.db, tx, api.DeploymentOptions{Admission: attempt},
+		h.cpClient, h.db, tx, api.DeploymentOptions{Admission: attempt, ExecutionCatalogue: h.admissions.ExecutionCatalogueClient()},
 	)
 	if err != nil {
 		_ = tx.Rollback()

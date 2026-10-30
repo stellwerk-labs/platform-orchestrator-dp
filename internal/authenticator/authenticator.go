@@ -13,7 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	strictecho "github.com/oapi-codegen/runtime/strictmiddleware/echo"
 	"github.com/pkg/errors"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"

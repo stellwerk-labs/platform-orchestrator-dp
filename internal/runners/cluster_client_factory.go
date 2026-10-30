@@ -9,7 +9,7 @@ import (
 	"net/url"
 
 	"github.com/pkg/errors"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"go.uber.org/zap"
 	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"

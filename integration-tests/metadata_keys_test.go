@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genclient"
 )
 
 func TestMetadataKeys(t *testing.T) {

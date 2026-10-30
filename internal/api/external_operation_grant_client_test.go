@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	platformorchestratorcpv2 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	platformorchestratorcpv3 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +33,7 @@ func TestCoreExternalDeploymentGrantClientUsesBearerAndExactIntent(t *testing.T)
 		assert.Equal(t, http.MethodPost, request.Method)
 		assert.Equal(t, "/orgs/acme/plugins/dev.example.rollouts/operations/"+operationID.String()+"/check", request.URL.Path)
 		assert.Equal(t, "Bearer "+testBearer, request.Header.Get("Authorization"))
-		var body platformorchestratorcpv2.PluginDispatchCheck
+		var body platformorchestratorcpv3.PluginDispatchCheck
 		if assert.NoError(t, json.NewDecoder(request.Body).Decode(&body)) {
 			assert.Equal(t, grant.Fence, body.Fence)
 			assert.Equal(t, grant.ServiceAction, string(body.Action))
@@ -41,7 +41,7 @@ func TestCoreExternalDeploymentGrantClientUsesBearerAndExactIntent(t *testing.T)
 			assert.Equal(t, grant.RequestDigest, body.RequestDigest)
 		}
 		response.Header().Set("Content-Type", "application/json")
-		assert.NoError(t, json.NewEncoder(response).Encode(platformorchestratorcpv2.PluginDispatchAuthorization{
+		assert.NoError(t, json.NewEncoder(response).Encode(platformorchestratorcpv3.PluginDispatchAuthorization{
 			OperationId: operationID, Fence: grant.Fence, Action: grant.ServiceAction,
 			DispatchId: grant.DispatchID, PluginId: claims.PluginID, OrgId: claims.OrgID,
 			ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID,
@@ -71,7 +71,7 @@ func TestCoreExternalDeploymentGrantClientFailsClosedOnResponseMismatch(t *testi
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(response).Encode(platformorchestratorcpv2.PluginDispatchAuthorization{
+		_ = json.NewEncoder(response).Encode(platformorchestratorcpv3.PluginDispatchAuthorization{
 			OperationId: operationID, Fence: grant.Fence, Action: ExternalDeploymentRollbackAction,
 			DispatchId: grant.DispatchID, PluginId: claims.PluginID, OrgId: claims.OrgID,
 			ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID,

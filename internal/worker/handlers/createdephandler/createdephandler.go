@@ -15,7 +15,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/bundles"
@@ -27,7 +27,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 // magicNoOpRunnerId is a temporary constant we use in testing to force the create-dep handler to retry all errors so
@@ -40,6 +40,7 @@ type CreateDepHandler struct {
 	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
 	runnerFactory      runners.RunnerFactory
 	bundleStore        RunnerBundleStore
+	executionClient    platformorchestratorcp.ClientWithResponsesInterface
 }
 
 type RunnerBundleStore interface {
@@ -55,12 +56,14 @@ func Setup(
 	runnerCommandTTL time.Duration,
 	runnerGatewayConfiguration runners.RunnerGatewayConfiguration,
 	bundleStore RunnerBundleStore,
+	executionClient platformorchestratorcp.ClientWithResponsesInterface,
 ) (*CreateDepHandler, error) {
 	return &CreateDepHandler{
 		db:                 db,
 		publisher:          pub,
 		controlPlaneClient: cp,
 		bundleStore:        bundleStore,
+		executionClient:    executionClient,
 		runnerFactory: runners.NewDefaultRunnerFactory(
 			logger,
 			awsTemporaryAuth,
@@ -200,7 +203,7 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		return h.scheduleStatusCheck(ctx, d)
 	}
 	if h.bundleStore != nil {
-		archive, err := bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id)
+		archive, err := bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id, h.executionClient)
 		if err != nil {
 			return hmessaging.NewRetryError(errors.Wrap(err, "failed to build runner bundle"))
 		}

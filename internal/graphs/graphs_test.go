@@ -8,15 +8,18 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	"github.com/google/uuid"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGraphNodeModuleConfigJSONIsDeterministic(t *testing.T) {
+	contract, version := uuid.New(), int64(2)
 	config := &GraphNodeModuleConfig{
 		DefinitionId: "workload", VersionId: "1.0.0",
+		ResourceTypeVersion: &version, ResourceTypeVersionUUID: &contract,
 		ProviderSubsMap: map[string]map[string]platform_orchestrator_graph.PlaceholderSub{
 			"random": {},
 			"deepmerge": {
@@ -38,6 +41,8 @@ func TestGraphNodeModuleConfigJSONIsDeterministic(t *testing.T) {
 	var decoded GraphNodeModuleConfig
 	require.NoError(t, json.Unmarshal(first, &decoded))
 	assert.Equal(t, config.ProviderSubsMap, decoded.ProviderSubsMap)
+	assert.Equal(t, config.ResourceTypeVersionUUID, decoded.ResourceTypeVersionUUID)
+	assert.Equal(t, config.ResourceTypeVersion, decoded.ResourceTypeVersion)
 }
 
 func TestGraphNodeModuleConfigReadsLegacyProviderSubsMap(t *testing.T) {
@@ -100,7 +105,7 @@ func TestValidateModuleParamInner_param_not_defined(t *testing.T) {
 			Params: map[string]interface{}{"a": "1"},
 			ModuleConfiguration: &GraphNodeModuleConfig{
 				DefinitionId: "my-def", VersionId: "v1",
-				Definition: &genclient.InternalModuleCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{}},
+				Definition: &genclient.InternalExecutionCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{}},
 			},
 		},
 	), "node 'type=,class=,id=': uses module my-def@v1 which does not define module_param 'a'")
@@ -114,7 +119,7 @@ func TestValidateModuleParamInner_expect_required_param(t *testing.T) {
 			Params: map[string]interface{}{"a": "1"},
 			ModuleConfiguration: &GraphNodeModuleConfig{
 				DefinitionId: "my-def", VersionId: "v1",
-				Definition: &genclient.InternalModuleCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
+				Definition: &genclient.InternalExecutionCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
 					"key": {Type: genclient.String},
 				}},
 			},
@@ -130,7 +135,7 @@ func TestValidateModuleParamInner_incorrect_type(t *testing.T) {
 			Params: map[string]interface{}{"key": 42},
 			ModuleConfiguration: &GraphNodeModuleConfig{
 				DefinitionId: "my-def", VersionId: "v1",
-				Definition: &genclient.InternalModuleCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
+				Definition: &genclient.InternalExecutionCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
 					"key": {Type: genclient.String},
 				}},
 			},
@@ -146,7 +151,7 @@ func TestValidateModuleParamInner_undefined_param(t *testing.T) {
 			Params: map[string]interface{}{"a": "1"},
 			ModuleConfiguration: &GraphNodeModuleConfig{
 				DefinitionId: "my-def", VersionId: "v1",
-				Definition: &genclient.InternalModuleCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
+				Definition: &genclient.InternalExecutionCatalogueModule{ModuleParams: map[string]genclient.ModuleParamItem{
 					"key": {Type: genclient.String, IsOptional: true},
 				}},
 			},
@@ -162,7 +167,7 @@ func TestAddProviderMappingToNodes_success(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.default",
 						},
@@ -211,7 +216,7 @@ func TestAddProviderMappingToNodes_same_config_same_hash(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.default",
 						},
@@ -222,7 +227,7 @@ func TestAddProviderMappingToNodes_same_config_same_hash(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.default",
 						},
@@ -271,7 +276,7 @@ func TestAddProviderMappingToNodes_different_configs_different_hash(t *testing.T
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.prod",
 						},
@@ -282,7 +287,7 @@ func TestAddProviderMappingToNodes_different_configs_different_hash(t *testing.T
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.dev",
 						},
@@ -345,7 +350,7 @@ func TestAddProviderMappingToNodes_unknown_provider_error(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "postgres-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"postgres": "postgresql.nonexistent",
 						},
@@ -373,7 +378,7 @@ func TestAddProviderMappingToNodes_multiple_providers_same_node(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "app-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{
 							"aws":   "aws.default",
 							"vault": "vault.default",
@@ -430,7 +435,7 @@ func TestAddProviderMappingToNodes_empty_provider_mapping(t *testing.T) {
 				ModuleConfiguration: &GraphNodeModuleConfig{
 					DefinitionId: "simple-module",
 					VersionId:    "v1",
-					Definition: &genclient.InternalModuleCatalogueModule{
+					Definition: &genclient.InternalExecutionCatalogueModule{
 						ProviderMapping: map[string]string{},
 					},
 				},

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

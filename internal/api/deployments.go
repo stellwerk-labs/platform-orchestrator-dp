@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"reflect"
@@ -26,7 +27,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/golib/htelemetry"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"go.uber.org/zap"
@@ -42,7 +43,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 const (
@@ -191,6 +192,10 @@ var validWorkloadNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,61}[a-z0
 var validSharedAliasPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$`)
 
 func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentRequestObject) (CreateDeploymentResponseObject, error) {
+	return s.createDeployment(ctx, request, nil)
+}
+
+func (s *Server) createDeployment(ctx context.Context, request CreateDeploymentRequestObject, draftTests map[string]uuid.UUID) (CreateDeploymentResponseObject, error) {
 	ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)
 	ids.OrgId = request.OrgId
 	ids.ProjectId = request.Body.ProjectId
@@ -315,6 +320,7 @@ func (s *Server) CreateDeployment(ctx context.Context, request CreateDeploymentR
 	}
 
 	deploymentRequest := deploymentRequest{
+		DraftTestSnapshots:        maps.Clone(draftTests),
 		Manifest:                  request.Body.Manifest,
 		RollbackToDeploymentID:    request.Body.RollbackToDeploymentId,
 		ModuleVersions:            request.Body.ModuleVersions,
@@ -450,13 +456,20 @@ func (s *Server) createRequestedDeployment(
 func (s *Server) deploymentOptions(ctx context.Context, actor uuid.UUID, orgID string, env platformorchestratorcp.Environment, mode model.DeploymentMode, request deploymentRequest, admissionKey string, dryRun bool) DeploymentOptions {
 	options := DeploymentOptions{
 		ExplicitModuleVersions:  request.ModuleVersions,
+		DraftTestSnapshots:      request.DraftTestSnapshots,
 		RestrictedConfirmations: request.RestrictedConfirmations,
+	}
+	if s.DeploymentAdmissions != nil {
+		options.ExecutionCatalogue = s.DeploymentAdmissions.ExecutionCatalogueClient()
 	}
 	if !dryRun && model.RequiresEnvironmentLease(mode) {
 		options.Admission = s.DeploymentAdmissions.NewAttempt(orgID, ref.DerefOr(env.ProjectUuid, uuid.Nil), env.Uuid, actor, mode, admissionKey)
 	}
-	if len(request.ModuleVersions) > 0 || len(request.RestrictedConfirmations) > 0 {
+	if len(request.ModuleVersions) > 0 || len(request.RestrictedConfirmations) > 0 || len(request.DraftTestSnapshots) > 0 {
 		options.AuthorizeModuleVersion = func(_ string, explicitlySelected bool, artifact catalogueArtifact) error {
+			if artifact.DraftTest != nil && request.DraftTestSnapshots[artifact.ModuleUUID.String()] == artifact.VersionUUID {
+				return s.checkOrgAuthorization(ctx, actor, orgID, "module.version.publish")
+			}
 			switch artifact.Status {
 			case "proposed":
 				if explicitlySelected {
@@ -629,7 +642,7 @@ func (s *Server) GetDeploymentBundle(ctx context.Context, request GetDeploymentB
 	ids.EnvId = deployment.EnvId
 	ids.RunnerId = deployment.RunnerId
 
-	if archive, err := bundles.BuildForDeployment(ctx, s.ControlPlaneClient, request.OrgId, deployment, tofu, rawGraph); err != nil {
+	if archive, err := bundles.BuildForDeployment(ctx, s.ControlPlaneClient, request.OrgId, deployment, tofu, rawGraph, s.DeploymentAdmissions.ExecutionCatalogueClient()); err != nil {
 		return nil, errors.Wrap(err, "failed to build bundle")
 	} else {
 		return GetDeploymentBundle200ApplicationxGzipResponse{Body: archive, ContentLength: int64(archive.Len())}, nil

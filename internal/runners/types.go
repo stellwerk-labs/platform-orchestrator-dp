@@ -9,7 +9,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 
 	"github.com/pkg/errors"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 )
 
 const KubernetesAgentConnectionIssueTolerance = 120 * time.Second

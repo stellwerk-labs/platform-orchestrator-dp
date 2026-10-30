@@ -1,17 +1,22 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
-const maxDeploymentAdmissionResponseBytes = 64 * 1024
+const (
+	maxDeploymentAdmissionResponseBytes = 64 * 1024
+	executionCatalogueTimeout           = 30 * time.Second
+)
 
 var errDeploymentAdmissionResponseTooLarge = errors.New("core Deployment admission response is too large")
 
@@ -40,7 +45,18 @@ func NewOrdinaryDeploymentAdmissionService(database model.Databaser, rawCoreURL,
 	if err != nil {
 		return nil, err
 	}
-	return &OrdinaryDeploymentAdmissionService{Database: database, Core: client, BearerToken: bearerToken}, nil
+	catalogueHTTPClient := *baseHTTPClient
+	catalogueHTTPClient.Timeout = executionCatalogueTimeout
+	catalogueHTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	catalogueClient, err := platformorchestratorcp.NewClientWithResponses(coreURL.String(), platformorchestratorcp.WithHTTPClient(&catalogueHTTPClient), platformorchestratorcp.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
+		request.Header.Del("From")
+		request.Header.Set("Authorization", "Bearer "+bearerToken)
+		return nil
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return &OrdinaryDeploymentAdmissionService{Database: database, Core: client, BearerToken: bearerToken, ExecutionCatalogue: catalogueClient}, nil
 }
 
 type deploymentAdmissionResponseLimitTransport struct {

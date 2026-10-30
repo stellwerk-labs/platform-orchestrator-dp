@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/stellwerk-labs/golib/hecho"
-	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	iamapi "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"github.com/stretchr/testify/require"

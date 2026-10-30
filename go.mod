@@ -38,9 +38,8 @@ require (
 	github.com/stellwerk-labs/golib/hstandardoutbox v1.1.1
 	github.com/stellwerk-labs/golib/htelemetry v1.0.0
 	github.com/stellwerk-labs/golib/hvaultapi v1.0.0
-	github.com/stellwerk-labs/platform-orchestrator-cp/shared v1.0.0
-	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2 v2.1.0
-	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2 v2.2.0
+	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3 v3.0.0
+	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.0.0
 	github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0
 	github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.2.0
 	github.com/stretchr/testify v1.12.1
@@ -57,8 +56,6 @@ require (
 	k8s.io/apimachinery v0.35.2
 	k8s.io/client-go v0.35.2
 )
-
-replace github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2 v2.2.0 => ./shared
 
 require (
 	cloud.google.com/go/auth v0.19.0 // indirect
@@ -265,3 +262,5 @@ tool (
 	go.uber.org/mock/mockgen
 	gotest.tools/gotestsum
 )
+
+replace github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.0.0 => ./shared

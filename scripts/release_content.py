@@ -180,7 +180,7 @@ def notices(files, arch, own_module):
         # The root EUPL explicitly covers this repository, including its SDK.
         if module == own_module:
             continue
-        if module in (own_module + "/shared", own_module + "/shared/v2"):
+        if module in (own_module + "/shared", own_module + "/shared/v2", own_module + "/shared/v3"):
             if bundle.get(module + "/LICENSE") != bundle["application/LICENSE"]:
                 raise ValueError("own SDK lacks its source repository license")
             continue

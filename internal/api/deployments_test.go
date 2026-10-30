@@ -22,8 +22,8 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/errcodes"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/errcodes"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platform_orchestrator_graph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
@@ -42,7 +42,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 const sampleLogs = "test log content"
@@ -154,7 +154,7 @@ func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 		mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 			Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-		cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+		cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 			Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 				HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 				JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -431,7 +431,7 @@ output "two" {
 			mdb.EXPECT().ReadPendingEnvironmentChanges(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", envUuid).
 				Return(model.PendingEnvironmentChanges{Queued: 2}, nil)
 
-			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}, gomock.Any()).
+			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}, gomock.Any()).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 					HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 					JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -612,7 +612,7 @@ output "one" {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
 
-			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
+			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 				PinnedModuleVersions: []string{"d1@v1", "d2@v1", "d3@v1"},
 				AreRulesIgnored:      true,
 			}, gomock.Any()).
@@ -767,7 +767,7 @@ func TestCreateDeployment_with_rollback(t *testing.T) {
 	mdb.EXPECT().GetDeployment(gomock.Any(), gomock.Not(nil), "my-org", rollbackToId, model.GetModeDefault).
 		Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Status: model.DeploymentStatusSucceeded}, encodedManifest, nil, encodedGraph, nil)
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 		PinnedModuleVersions: []string{"some-def@some-ver"},
 		AreRulesIgnored:      true,
 	}, gomock.Any(), gomock.Any()).
@@ -901,7 +901,7 @@ func TestCreateDeployment_with_co_provisioned_resource(t *testing.T) {
 	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1067,7 +1067,7 @@ func TestCreateDeployment_with_inline_module_code(t *testing.T) {
 	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1190,7 +1190,7 @@ func TestCreateDeployment_with_deprecated_variables(t *testing.T) {
 	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1326,7 +1326,7 @@ func TestCreateDeployment_success_graph_test_mode(t *testing.T) {
 	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1489,7 +1489,7 @@ func TestCreateDeployment_fail_graph_error(t *testing.T) {
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
 	cpClient := s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface)
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1541,7 +1541,7 @@ func TestCreateDeployment_fail_missing_provider(t *testing.T) {
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
 	cpClient := s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface)
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -1605,7 +1605,7 @@ func TestCreateDeployment_catalogue_fail(t *testing.T) {
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
 	cpClient := s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface)
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusConflict},
 			JSON409: &platformorchestratorcp.Error{
@@ -1781,7 +1781,7 @@ func TestCreateDeployment_authorization_fallback_to_org(t *testing.T) {
 	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -2234,7 +2234,7 @@ func TestCreateDeployment_invalid_placeholder(t *testing.T) {
 				Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
 			cpClient := s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface)
-			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 				Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 					HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 					JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -2314,7 +2314,7 @@ func TestCreateDeployment_invalid_module_param(t *testing.T) {
 		Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
 
 	cpClient := s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface)
-	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
+	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200: &platformorchestratorcp.InternalModuleCatalogue{
@@ -2430,8 +2430,7 @@ func TestGetDeploymentBundle(t *testing.T) {
 	}, nil, model.RawTofu(`some-tofu`), rawGraph, nil)
 
 	s.ControlPlaneClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GenerateInternalModuleCatalogueWithResponse(
-		gomock.Any(), "my-org", "my-project", "my-env",
-		platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{AreRulesIgnored: true, PinnedModuleVersions: []string{"thing1@v2"}},
+		gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{AreRulesIgnored: true, PinnedModuleVersions: []string{"thing1@v2"}},
 		gomock.Any(),
 	).Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},

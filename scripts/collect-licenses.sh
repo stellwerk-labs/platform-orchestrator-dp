@@ -24,7 +24,7 @@ mkdir "$work/declared"
 while IFS='|' read -r dependency version module_dir replacement; do
   case "$dependency" in
     "$module") continue ;;
-    "$module/shared"|"$module/shared/v2")
+    "$module/shared"|"$module/shared/v2"|"$module/shared/v3")
       test "$module_dir" = "$root/shared" || { echo "own SDK must be the source checkout snapshot" >&2; exit 1; }
       continue ;;
     "$module"*) echo "external module collides with application ignore prefix" >&2; exit 1 ;;
@@ -116,7 +116,7 @@ done < "$work/packages"
 while IFS='|' read -r dependency version module_dir replacement; do
   receipt="$work/declared/$(printf '%s' "$dependency" | tr '/' '_')"
   case "$dependency" in
-    "$module/shared"|"$module/shared/v2")
+    "$module/shared"|"$module/shared/v2"|"$module/shared/v3")
       mkdir -p "$output/$dependency"
       cp "$root/LICENSE" "$output/$dependency/LICENSE" ;;
   esac
