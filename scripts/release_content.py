@@ -173,6 +173,14 @@ def notices(files, arch, own_module):
     modules = bundle["modules.txt"].decode().splitlines()
     if not modules or modules != sorted(set(modules)):
         raise ValueError("invalid production dependency graph")
+    declarations = {}
+    for line in Path(__file__).with_name("declared-licenses.tsv").read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("|")
+        if len(fields) != 4 or fields[0] in declarations:
+            raise ValueError("invalid declared license policy")
+        declarations[fields[0]] = fields[1:]
     for line in modules:
         module, version = line.split("|")
         if not module or any(character.isspace() for character in module + version):
@@ -188,6 +196,37 @@ def notices(files, arch, own_module):
                       re.match(r"(?i)(LICENSE|LICENCE|COPYING)", PurePosixPath(name).name)]
         if not candidates:
             raise ValueError("production dependency has no shipped license")
+        provenance = bundle.get(module + "/LICENSE.provenance")
+        if module in declarations and provenance is None:
+            raise ValueError("declared SDK lacks license provenance")
+        if provenance is not None:
+            try:
+                receipt = strict_json(provenance)
+            except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValueError("invalid SDK license provenance JSON") from error
+            if not isinstance(receipt, dict) or receipt.get("module") != module:
+                raise ValueError("SDK license provenance module differs from dependency")
+            common = {"module", "sourceCommit", "licenseBlob", "licenseSHA256", "spdx"}
+            remote = common | {"version", "moduleSum"}
+            local = common | {"sourceTree"}
+            if set(receipt) == remote:
+                if receipt["version"] != version or not isinstance(receipt["moduleSum"], str) or not re.fullmatch(r"h1:[A-Za-z0-9+/]{43}=", receipt["moduleSum"]):
+                    raise ValueError("SDK license provenance version or module checksum invalid")
+            elif set(receipt) == local:
+                if not isinstance(receipt["sourceTree"], str) or not re.fullmatch(r"[0-9a-f]{40}", receipt["sourceTree"]):
+                    raise ValueError("SDK license provenance source tree invalid")
+            else:
+                raise ValueError("SDK license provenance shape invalid")
+            if module in declarations and [receipt["spdx"], receipt["licenseSHA256"], receipt["licenseBlob"]] != declarations[module]:
+                raise ValueError("SDK license provenance differs from declaration")
+            if (not isinstance(receipt["sourceCommit"], str) or not re.fullmatch(r"[0-9a-f]{40}", receipt["sourceCommit"])
+                    or not isinstance(receipt["licenseBlob"], str) or not re.fullmatch(r"[0-9a-f]{40}", receipt["licenseBlob"])
+                    or receipt["spdx"] != "EUPL-1.2"
+                    or not isinstance(receipt["licenseSHA256"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", receipt["licenseSHA256"])
+                    or bundle.get(module + "/LICENSE") is None
+                    or hashlib.sha256(bundle[module + "/LICENSE"]).hexdigest() != receipt["licenseSHA256"]):
+                raise ValueError("SDK license provenance identity or license invalid")
     return {name: digest(data) for name, data in sorted(bundle.items())}
 
 

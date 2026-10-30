@@ -59,7 +59,14 @@ while IFS='|' read -r dependency version module_dir replacement; do
     metadata="$(go mod download -json "$dependency@$version")"
     origin="$(printf '%s\n' "$metadata" | sed -n 's/^[[:space:]]*"Hash": "\([0-9a-f]\{40\}\)"[,]*$/\1/p')"
     archive_sum="$(printf '%s\n' "$metadata" | sed -n 's/^[[:space:]]*"Sum": "\(h1:[^"]*\)"[,]*$/\1/p')"
-    test "$(printf '%s' "$origin" | wc -c | tr -d ' ')" = 40 && test -n "$archive_sum"
+    if ! printf '%s\n' "$origin" | grep -Eq '^[0-9a-f]{40}$'; then
+      echo "declared SDK has no exact source commit" >&2
+      exit 1
+    fi
+    if ! printf '%s\n' "$archive_sum" | grep -Eq '^h1:[A-Za-z0-9+/]{43}=$'; then
+      echo "declared SDK has no valid module checksum" >&2
+      exit 1
+    fi
     printf '{"module": "%s", "version": "%s", "sourceCommit": "%s", "moduleSum": "%s", "licenseBlob": "%s", "licenseSHA256": "%s", "spdx": "EUPL-1.2"}\n' \
       "$dependency" "$version" "$origin" "$archive_sum" "$license_blob" "$checksum" > "$receipt"
   fi
