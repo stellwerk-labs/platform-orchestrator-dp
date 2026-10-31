@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	iam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
-	dp "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
+	dp "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genclient"
 )
 
 type pinScopeGrant struct {

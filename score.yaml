@@ -70,7 +70,7 @@ resources:
     params:
       host: ${resources.dns.host}
       port: 8080
-      path: /orgs/[^/]+/(deployments|last-deployments|active-resources|metadata-keys)($|/.*)
+      path: /orgs/[^/]+/(deployments|module-test-deployments|last-deployments|active-resources|metadata-keys)($|/.*)
   well-known-route:
     type: route
     params:

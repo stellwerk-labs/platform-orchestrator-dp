@@ -3,7 +3,7 @@ package cloud
 import (
 	"context"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 

@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hnats"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genevents"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	cpevents "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genevents"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api"
@@ -34,7 +34,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/handlers/runnerstatushandler"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/middleware"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 const (
@@ -121,6 +121,7 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 		w.RunnerCommandTTL,
 		w.RunnerGatewayConfiguration,
 		w.RunnerBundleStore,
+		w.DeploymentAdmissions.ExecutionCatalogueClient(),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to setup handler for deployment creation")

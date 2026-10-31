@@ -26,7 +26,7 @@ import (
 	mockvault "github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault/mocks"
 
 	"github.com/google/uuid"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 )
 
 const (

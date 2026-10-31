@@ -1,4 +1,4 @@
-module github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2
+module github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3
 
 go 1.24.0
 

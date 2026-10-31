@@ -26,7 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/stellwerk-labs/golib/hpostgresconnect"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +37,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genclient"
 )
 
 var testHttpClient = &http.Client{

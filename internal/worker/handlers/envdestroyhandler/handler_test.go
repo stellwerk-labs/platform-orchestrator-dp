@@ -13,7 +13,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,7 +94,7 @@ func TestHandleInner_launch_destroy(t *testing.T) {
 			StateStorageConfiguration: ssc,
 		},
 	}, nil)
-	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{AreRulesIgnored: true}).
+	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{AreRulesIgnored: true}).
 		Return(&platformorchestratorcp.GenerateInternalModuleCatalogueResponse{
 			HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 			JSON200:      &platformorchestratorcp.InternalModuleCatalogue{Modules: []platformorchestratorcp.InternalModuleCatalogueModule{}},

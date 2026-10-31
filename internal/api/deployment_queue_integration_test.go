@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stellwerk-labs/golib/hecho"
-	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

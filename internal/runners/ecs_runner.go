@@ -16,7 +16,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/clients/aws"

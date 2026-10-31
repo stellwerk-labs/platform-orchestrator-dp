@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genclient"
 )
 
 // This is the runtime half of the upgrade contract. The CP migration suite

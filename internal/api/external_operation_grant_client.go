@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	platformorchestratorcpv2 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	platformorchestratorcpv3 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 )
 
 var (
@@ -49,9 +49,9 @@ func (c CoreExternalDeploymentGrantClient) AuthorizeExternalDeployment(
 	if err != nil {
 		return AuthorizedExternalDeployment{}, fmt.Errorf("%w: invalid operation reference", ErrExternalDeploymentUnauthorized)
 	}
-	requestBody := platformorchestratorcpv2.PluginDispatchCheck{
+	requestBody := platformorchestratorcpv3.PluginDispatchCheck{
 		Fence:           request.Fence,
-		Action:          platformorchestratorcpv2.PluginDispatchCheckAction(request.ServiceAction),
+		Action:          platformorchestratorcpv3.PluginDispatchCheckAction(request.ServiceAction),
 		DispatchId:      request.DispatchID,
 		ProjectUuid:     request.ProjectUUID,
 		EnvironmentUuid: request.EnvUUID,
@@ -94,7 +94,7 @@ func (c CoreExternalDeploymentGrantClient) AuthorizeExternalDeployment(
 	if err != nil || len(data) > maxExternalDeploymentGrantResponseBytes {
 		return AuthorizedExternalDeployment{}, fmt.Errorf("%w: invalid Core response", ErrExternalDeploymentUnavailable)
 	}
-	var checked platformorchestratorcpv2.PluginDispatchAuthorization
+	var checked platformorchestratorcpv3.PluginDispatchAuthorization
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&checked); err != nil {

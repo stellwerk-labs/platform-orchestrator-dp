@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import zipfile
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -310,6 +311,26 @@ class ContentTests(unittest.TestCase):
         files["licenses/go/LICENSE"] += b"changed"
         with self.assertRaises(ValueError):
             content.notices(files, "amd64", MODULE)
+
+    def test_own_sdk_v2_and_v3_require_exact_root_license(self):
+        for suffix in ("shared/v2", "shared/v3"):
+            with self.subTest(suffix=suffix):
+                files = license_bundle("amd64")
+                name = MODULE + "/" + suffix
+                files["licenses/" + name + "/LICENSE"] = files["licenses/application/LICENSE"]
+                modules = sorted((MODULE + "|", name + "|" + ("v2.1.1" if suffix == "shared/v2" else "v3.0.0"), "example.org/dependency|v1.0.0"))
+                files["licenses/modules.txt"] = ("\n".join(modules) + "\n").encode()
+                def manifest():
+                    entries = {key.removeprefix("licenses/"): value for key, value in files.items()
+                               if key != "licenses/manifest.sha256"}
+                    return "".join(hashlib.sha256(value).hexdigest() + "  ./" + key + "\n"
+                                   for key, value in sorted(entries.items())).encode()
+                files["licenses/manifest.sha256"] = manifest()
+                content.notices(files, "amd64", MODULE)
+                files["licenses/" + name + "/LICENSE"] = b"unrelated license"
+                files["licenses/manifest.sha256"] = manifest()
+                with self.assertRaises(ValueError):
+                    content.notices(files, "amd64", MODULE)
 
     def test_architecture_mismatch_fails(self):
         with self.assertRaises(ValueError):
@@ -660,6 +681,93 @@ class ContentTests(unittest.TestCase):
                                 cwd=application, env=dict(os.environ, GOARCH="amd64"), capture_output=True, timeout=60)
         self.assertNotEqual(result.returncode, 0)
 
+    def test_remote_sdk_file_proxy_requires_exact_git_origin(self):
+        if not shutil.which("go-licenses"):
+            self.fail("pinned go-licenses is required, license checks must not skip")
+        own = (ROOT / "go.mod").read_text().splitlines()[0].removeprefix("module ")
+        other = "dp" if own.endswith("-cp") else "cp"
+        module = "github.com/stellwerk-labs/platform-orchestrator-" + other + "/shared/v3"
+        source, application, proxy = (self.root / name for name in ("source", "application", "proxy"))
+        (source / "shared").mkdir(parents=True)
+        application.mkdir()
+        (source / "LICENSE").write_bytes((ROOT / "LICENSE").read_bytes())
+        sdk_mod = "module " + module + "\n\ngo 1.26.10\n"
+        (source / "shared/go.mod").write_text(sdk_mod)
+        (source / "shared/value.go").write_text("package shared\nfunc Value() {}\n")
+        for args in (["init", "-q"], ["add", "."],
+                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                      "commit", "-q", "--no-gpg-sign", "-m", "fixture"]):
+            subprocess.run(["git", "-C", str(source), *args], check=True, capture_output=True)
+        commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        versions = proxy / module / "@v"
+        versions.mkdir(parents=True)
+        (application / "main.go").write_text('package main\nimport "' + module +
+                                              '"\nfunc main() { shared.Value() }\n')
+        seed = int(hashlib.sha256(str(self.root).encode()).hexdigest()[:8], 16)
+
+        def collect(label, origin, offset):
+            version = "v3.0.0-rc." + str(seed + offset)
+            (versions / (version + ".mod")).write_text(sdk_mod)
+            (versions / "list").write_text(version + "\n")
+            with zipfile.ZipFile(versions / (version + ".zip"), "w", zipfile.ZIP_DEFLATED) as archive:
+                prefix = module + "@" + version + "/"
+                for name, data in (("go.mod", sdk_mod.encode()),
+                                   ("value.go", (source / "shared/value.go").read_bytes()),
+                                   ("LICENSE", (source / "LICENSE").read_bytes())):
+                    archive.writestr(prefix + name, data)
+            info = {"Version": version, "Time": "2026-10-30T00:00:00Z"}
+            if origin:
+                info["Origin"] = {"VCS": "git", "URL": str(source), "Hash": origin}
+            (versions / (version + ".info")).write_text(json.dumps(info) + "\n")
+            (application / "go.mod").write_text("module example.org/application\n\ngo 1.26.10\n\nrequire " +
+                                                module + " " + version + "\n")
+            output = self.root / ("notices-" + label)
+            env = dict(os.environ, GOARCH="amd64", GOWORK="off", GOENV="off",
+                       GOTOOLCHAIN="go1.26.10", GOPROXY=proxy.as_uri(),
+                       GONOSUMDB=module)
+            subprocess.run(["go", "mod", "download", module + "@" + version],
+                           cwd=application, env=env, check=True, capture_output=True, timeout=30)
+            return subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"), str(output), "./..."],
+                                  cwd=application, env=env, capture_output=True, timeout=60), output
+
+        for label, origin, offset in (("missing-origin", None, 1),
+                                      ("invalid-origin", "not-a-commit", 2)):
+            refused, missing = collect(label, origin, offset)
+            self.assertNotEqual(refused.returncode, 0, refused.stderr.decode())
+            self.assertIn(b"declared SDK has no exact source commit", refused.stderr)
+            self.assertFalse(missing.exists())
+        accepted, output = collect("exact-origin", commit, 3)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr.decode())
+        files = {"licenses/" + path.relative_to(output).as_posix(): path.read_bytes()
+                 for path in output.rglob("*") if path.is_file()}
+        content.notices(files, "amd64", "example.org/application")
+        provenance = json.loads((output / module / "LICENSE.provenance").read_text())
+        self.assertEqual(provenance["sourceCommit"], commit)
+        without_receipt = dict(files)
+        del without_receipt["licenses/" + module + "/LICENSE.provenance"]
+        entries = {key.removeprefix("licenses/"): value for key, value in without_receipt.items()
+                   if key != "licenses/manifest.sha256"}
+        without_receipt["licenses/manifest.sha256"] = "".join(
+            hashlib.sha256(value).hexdigest() + "  ./" + key + "\n"
+            for key, value in sorted(entries.items())).encode()
+        with self.assertRaises(ValueError):
+            content.notices(without_receipt, "amd64", "example.org/application")
+        for field, invalid in (("sourceCommit", ""), ("module", module + "-other"),
+                               ("version", "v3.0.1"), ("moduleSum", "h1:bad"),
+                               ("licenseBlob", "f" * 40), ("licenseSHA256", "0" * 64),
+                               ("spdx", "MIT"), ("unexpected", "field")):
+            with self.subTest(field=field):
+                broken = dict(provenance, **{field: invalid})
+                changed = dict(files)
+                changed["licenses/" + module + "/LICENSE.provenance"] = json.dumps(broken).encode()
+                entries = {key.removeprefix("licenses/"): value for key, value in changed.items()
+                           if key != "licenses/manifest.sha256"}
+                changed["licenses/manifest.sha256"] = "".join(
+                    hashlib.sha256(value).hexdigest() + "  ./" + key + "\n"
+                    for key, value in sorted(entries.items())).encode()
+                with self.assertRaises(ValueError):
+                    content.notices(changed, "amd64", "example.org/application")
+
     def test_sdk_declared_license_from_exact_source_commit(self):
         spec = importlib.util.spec_from_file_location("sdk_license", ROOT / "scripts/prepare-sdk-license.py")
         helper = importlib.util.module_from_spec(spec)
@@ -688,6 +796,20 @@ class ContentTests(unittest.TestCase):
                                 cwd=application, env=dict(os.environ, GOARCH="amd64"), capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual((self.root / "notices" / module / "LICENSE").read_bytes(), (ROOT / "LICENSE").read_bytes())
+        local_files = {"licenses/" + path.relative_to(self.root / "notices").as_posix(): path.read_bytes()
+                       for path in (self.root / "notices").rglob("*") if path.is_file()}
+        content.notices(local_files, "amd64", "example.org/application")
+        local_receipt = json.loads(local_files["licenses/" + module + "/LICENSE.provenance"])
+        local_receipt["sourceTree"] = "not-a-tree"
+        broken = dict(local_files)
+        broken["licenses/" + module + "/LICENSE.provenance"] = json.dumps(local_receipt).encode()
+        entries = {key.removeprefix("licenses/"): value for key, value in broken.items()
+                   if key != "licenses/manifest.sha256"}
+        broken["licenses/manifest.sha256"] = "".join(
+            hashlib.sha256(value).hexdigest() + "  ./" + key + "\n"
+            for key, value in sorted(entries.items())).encode()
+        with self.assertRaises(ValueError):
+            content.notices(broken, "amd64", "example.org/application")
         (sdk / "LICENSE.provenance").unlink()
         result = subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"), str(self.root / "no-receipt"), "./..."],
                                 cwd=application, env=dict(os.environ, GOARCH="amd64"), capture_output=True, timeout=60)

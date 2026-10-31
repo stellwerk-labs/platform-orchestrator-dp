@@ -184,6 +184,14 @@ func (s *Server) createQueuedDeployment(ctx context.Context, logger *zap.Logger,
 	if err := s.checkEnvAuthorization(ctx, item.CreatedBy, item.OrgID, env.Uuid, PermissionDeploymentWrite); err != nil {
 		return nil, nil, nil, err
 	}
+	if len(request.DraftTestSnapshots) > 0 {
+		if err := validateDraftTestSelection(request.DraftTestSnapshots); err != nil {
+			return nil, nil, nil, err
+		}
+		if item.Mode != model.DeploymentModeDeploy && item.Mode != model.DeploymentModeDeployPlan {
+			return nil, nil, nil, model.NewErrBadRequest("queued Draft test selection requires deploy or plan-only")
+		}
+	}
 	options := s.deploymentOptions(ctx, item.CreatedBy, item.OrgID, env, item.Mode, request, "", false)
 	options.ExpectedBaseDeploymentID = item.ExpectedBaseDeploymentID
 	options.IdempotencyKeyDigest = item.IdempotencyKeyDigest

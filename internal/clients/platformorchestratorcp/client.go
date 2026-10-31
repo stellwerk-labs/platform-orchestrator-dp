@@ -1,3 +1,3 @@
 package platformorchestratorcp
 
-//go:generate go tool mockgen -destination mocks/client_mock.go -package mockplatformorchestratorcp github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient ClientWithResponsesInterface
+//go:generate go tool mockgen -destination mocks/client_mock.go -package mockplatformorchestratorcp github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient ClientWithResponsesInterface

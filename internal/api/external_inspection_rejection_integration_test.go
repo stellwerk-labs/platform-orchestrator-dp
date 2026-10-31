@@ -22,8 +22,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hecho"
 	"github.com/stellwerk-labs/golib/hmessaging"
-	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 

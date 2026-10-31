@@ -16,8 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
-	cperrors "github.com/stellwerk-labs/platform-orchestrator-cp/shared/errcodes"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"go.uber.org/zap"
 
@@ -28,7 +27,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 
-	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genevents"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 // convertDpManifestToGraphManifest converts the deployment manifest from the API into the graph used by the platformorchestratorgraph
@@ -80,6 +79,8 @@ func CreateDeployment(
 }
 
 type DeploymentOptions struct {
+	DraftTestSnapshots          map[string]uuid.UUID
+	ExecutionCatalogue          platformorchestratorcp.ClientWithResponsesInterface
 	ExplicitModuleVersions      map[string]string
 	RestrictedConfirmations     []uuid.UUID
 	ModuleOperationID           opt.Opt[uuid.UUID]
@@ -143,7 +144,7 @@ func CreateDeploymentWithOptions(
 	if idempotencyKey != nil {
 		idempotencyKeyDigest = opt.Of(digestIdempotencyKey(*idempotencyKey))
 	}
-	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations)
+	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations, options.DraftTestSnapshots)
 	if idempotencyKeyDigest.IsSet() {
 		if d, m, err := db.GetDeploymentByIdempotencyKeyDigest(ctx, tx, orgId, projectId, envId, idempotencyKeyDigest.Must()); err != nil {
 			if _, ok := model.IsErrNotFound(err); !ok {
@@ -241,7 +242,7 @@ func CreateDeploymentWithOptions(
 	selectedModuleVersions := maps.Clone(options.ExplicitModuleVersions)
 	pinnedDefinitions = selectedPinnedDefinitions(pinnedDefinitions, selectedModuleVersions)
 	// Now we can look up all our definitions, rules, and providers from the control plane.
-	var moduleDefinitions []platformorchestratorcp.InternalModuleCatalogueModule
+	var moduleDefinitions []platformorchestratorcp.InternalExecutionCatalogueModule
 	var moduleProviders []platformorchestratorcp.ModuleProvider
 	var moduleArtifacts map[string]catalogueArtifact
 	var catalogueEditors []platformorchestratorcp.RequestEditorFn
@@ -279,36 +280,28 @@ func CreateDeploymentWithOptions(
 			return nil
 		})
 	}
-	if r, err := cp.GenerateInternalModuleCatalogueWithResponse(
-		ctx, orgId, projectId, envId,
-		platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
-			PinnedModuleVersions: pinnedDefinitions,
-			AreRulesIgnored:      useLastGraph,
-		},
-		catalogueEditors...,
-	); err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to generate internal module catalogue")
-	} else if r.StatusCode() == http.StatusNotFound {
-		return nil, nil, nil, model.NewErrConflict(r.JSON404.Message)
-	} else if r.StatusCode() == http.StatusConflict {
-		if r.JSON409.Error == string(cperrors.PinnedModuleMissingProvider) {
-			var details string
-			if missingProviders, ok := ref.DerefOr(r.JSON409.Details, nil)["missing_providers"].([]interface{}); ok {
-				details = fmt.Sprintf(": %s", missingProviders)
-			}
-			return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("%s: existing module(s) depend on providers that no longer exist%s", r.JSON409.Error, details))
-		}
-		return nil, nil, nil, model.NewErrConflict(r.JSON409.Message)
-	} else if r.StatusCode() != http.StatusOK {
-		return nil, nil, nil, errors.Errorf("failed to generate internal module catalogue: %s: %s", r.Status(), string(r.Body))
-	} else {
-		moduleDefinitions = r.JSON200.Modules
-		moduleProviders = r.JSON200.Providers
-		moduleArtifacts, err = decodeCatalogueArtifacts(r.Body, moduleDefinitions)
-		if err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to decode module artifact metadata")
-		}
+	retainedTests, err := graphs.RetainedDraftTestCoordinates(lastGraph, env.Uuid)
+	if err != nil {
+		return nil, nil, nil, err
 	}
+	catalogue, err := compilationCatalogue(ctx, cp, orgId, projectId, envId, platformorchestratorcp.InternalModuleCatalogueGenerateBody{PinnedModuleVersions: pinnedDefinitions, AreRulesIgnored: useLastGraph}, options, retainedTests, catalogueEditors)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	testSelections, err := validateCatalogueDraftSelection(catalogue, options.DraftTestSnapshots, retainedTests, env.Uuid, options.ExplicitModuleVersions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(testSelections) > 0 && selectedModuleVersions == nil {
+		selectedModuleVersions = make(map[string]string)
+	}
+	maps.Copy(selectedModuleVersions, testSelections)
+	moduleDefinitions, moduleProviders = catalogue.Modules, catalogue.Providers
+	moduleArtifacts, err = decodeCatalogueArtifacts(nil, moduleDefinitions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	if options.AuthorizeModuleVersion != nil {
 		for _, definition := range moduleDefinitions {
 			artifact, found := moduleArtifacts[definition.Id+"@"+definition.VersionId]
@@ -327,7 +320,6 @@ func CreateDeploymentWithOptions(
 	}
 
 	var newGraph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
-	var err error
 	if useLastGraph && lastGraph != nil {
 		// When doing a destroy or a rollback, we use the same manifest and graph from the previous deployment
 		// with pinned module definitions. This means that we should generate the same/similar terraform. The upside is that
@@ -336,7 +328,9 @@ func CreateDeploymentWithOptions(
 		// definitions to ones that aren't broken.
 		manifest = lastManifest
 		newGraph = lastGraph
-		_ = graphs.AssignModuleDefinitionsToGraphNodes(lastGraph, moduleDefinitions)
+		if _, err := graphs.AssignModuleDefinitionsToGraphNodes(lastGraph, moduleDefinitions); err != nil {
+			return nil, nil, nil, model.NewErrConflict(err.Error())
+		}
 	} else {
 		var g *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
 		g, err = graphs.BuildGraph(ctx, convertDpManifestToGraphManifest(manifest), moduleDefinitions, lastGraph)
@@ -565,10 +559,14 @@ func deploymentAdmissionLifecycleEvidence(mode model.DeploymentMode, activeDefin
 	return carryForwardVersions, confirmedRestrictedVersions
 }
 
-func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid.UUID) string {
+func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid.UUID, draftSelections ...map[string]uuid.UUID) string {
+	var draftTests map[string]uuid.UUID
+	if len(draftSelections) > 0 {
+		draftTests = draftSelections[0]
+	}
 	// Pre-management commands and explicitly empty collections retain their
 	// original identity. Never infer requested selection from resolved artifacts.
-	if len(selected) == 0 && len(confirmations) == 0 {
+	if len(selected) == 0 && len(confirmations) == 0 && len(draftTests) == 0 {
 		return ""
 	}
 	confirmed := make([]string, len(confirmations))
@@ -577,14 +575,15 @@ func moduleVersionRequestDigest(selected map[string]string, confirmations []uuid
 	}
 	slices.Sort(confirmed)
 	encoded, _ := json.Marshal(struct {
-		Selected  map[string]string `json:"selected,omitempty"`
-		Confirmed []string          `json:"confirmed,omitempty"`
-	}{Selected: selected, Confirmed: slices.Compact(confirmed)})
+		Selected   map[string]string    `json:"selected,omitempty"`
+		Confirmed  []string             `json:"confirmed,omitempty"`
+		DraftTests map[string]uuid.UUID `json:"draft_test_snapshots,omitempty"`
+	}{Selected: selected, Confirmed: slices.Compact(confirmed), DraftTests: draftTests})
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }
 
-func applySelectedModuleVersions(definitions []platformorchestratorcp.InternalModuleCatalogueModule, selected map[string]string) error {
+func applySelectedModuleVersions(definitions []platformorchestratorcp.InternalExecutionCatalogueModule, selected map[string]string) error {
 	for moduleID, version := range selected {
 		targetIndex := -1
 		var rules []platformorchestratorcp.InternalModuleCatalogueModuleRule
@@ -635,45 +634,38 @@ func selectedPinnedDefinitions(pinned []string, selected map[string]string) []st
 }
 
 type catalogueArtifact struct {
-	ModuleUUID          uuid.UUID
-	VersionUUID         uuid.UUID
-	SemanticVersion     string
-	MigrationGeneration string
-	Source              string
-	Digest              string
-	Status              string
+	DraftTest               *graphs.DraftTestReference
+	ModuleUUID              uuid.UUID
+	VersionUUID             uuid.UUID
+	SemanticVersion         string
+	MigrationGeneration     string
+	Source                  string
+	Digest                  string
+	Status                  string
+	ResourceTypeVersion     *int64
+	ResourceTypeVersionUUID *uuid.UUID
+	OutputSchema            *map[string]any
 }
 
-func decodeCatalogueArtifacts(body []byte, definitions []platformorchestratorcp.InternalModuleCatalogueModule) (map[string]catalogueArtifact, error) {
+func decodeCatalogueArtifacts(body []byte, definitions []platformorchestratorcp.InternalExecutionCatalogueModule) (map[string]catalogueArtifact, error) {
+	var catalogue platformorchestratorcp.InternalExecutionCatalogue
 	if len(body) == 0 {
-		result := make(map[string]catalogueArtifact, len(definitions))
-		for _, module := range definitions {
-			result[module.Id+"@"+module.VersionId] = catalogueArtifact{Source: module.ModuleSource}
-		}
-		return result, nil
-	}
-	var catalogue struct {
-		Modules []struct {
-			ID                  string    `json:"id"`
-			VersionID           string    `json:"version_id"`
-			ModuleUUID          uuid.UUID `json:"module_uuid"`
-			VersionUUID         uuid.UUID `json:"version_uuid"`
-			SemanticVersion     string    `json:"semantic_version"`
-			MigrationGeneration string    `json:"migration_generation"`
-			ModuleSource        string    `json:"module_source"`
-			ArtifactDigest      string    `json:"artifact_digest"`
-			SemanticStatus      string    `json:"semantic_status"`
-		} `json:"modules"`
-	}
-	if err := json.Unmarshal(body, &catalogue); err != nil {
+		catalogue.Modules = definitions
+	} else if err := json.Unmarshal(body, &catalogue); err != nil {
 		return nil, err
 	}
 	result := make(map[string]catalogueArtifact, len(catalogue.Modules))
 	for _, module := range catalogue.Modules {
-		result[module.ID+"@"+module.VersionID] = catalogueArtifact{
-			ModuleUUID: module.ModuleUUID, VersionUUID: module.VersionUUID, SemanticVersion: module.SemanticVersion,
-			MigrationGeneration: module.MigrationGeneration,
-			Source:              module.ModuleSource, Digest: module.ArtifactDigest, Status: module.SemanticStatus,
+		reference, err := graphs.DraftTestReferenceFromCatalogue(module)
+		if err != nil {
+			return nil, err
+		}
+		result[module.Id+"@"+module.VersionId] = catalogueArtifact{
+			ModuleUUID: module.ModuleUuid, VersionUUID: module.VersionUuid, SemanticVersion: ref.DerefOr(module.SemanticVersion, ""), DraftTest: reference,
+			MigrationGeneration: string(ref.DerefOr(module.MigrationGeneration, "")),
+			Source:              module.ModuleSource, Digest: module.ArtifactDigest, Status: string(ref.DerefOr(module.SemanticStatus, "")),
+			ResourceTypeVersion: module.ResourceTypeVersion, ResourceTypeVersionUUID: module.ResourceTypeVersionUuid,
+			OutputSchema: (*map[string]any)(module.OutputSchema),
 		}
 	}
 	return result, nil
@@ -691,11 +683,24 @@ func moduleArtifactRequirements(graph *platformorchestratorgraph.Graph[*graphs.G
 		if !found {
 			return nil, model.NewErrConflict(fmt.Sprintf("module %s has no immutable version metadata", key))
 		}
+		if !reflect.DeepEqual(configuration.DraftTest, artifact.DraftTest) {
+			return nil, model.NewErrConflict(fmt.Sprintf("module %s has conflicting immutable Draft test provenance", key))
+		}
+		if configuration.ResourceTypeVersionUUID != nil || configuration.ResourceTypeVersion != nil {
+			if configuration.ResourceTypeVersionUUID == nil || configuration.ResourceTypeVersion == nil ||
+				artifact.ResourceTypeVersionUUID == nil || artifact.ResourceTypeVersion == nil ||
+				*configuration.ResourceTypeVersionUUID != *artifact.ResourceTypeVersionUUID ||
+				*configuration.ResourceTypeVersion != *artifact.ResourceTypeVersion {
+				return nil, model.NewErrConflict(fmt.Sprintf("module %s has conflicting immutable Resource Type metadata", key))
+			}
+		}
 		byKey[key] = model.ModuleArtifactRequirement{
-			ModuleID: configuration.DefinitionId, ModuleUUID: artifact.ModuleUUID,
+			ModuleID: configuration.DefinitionId, ModuleUUID: artifact.ModuleUUID, DraftTest: artifact.DraftTest,
 			Version: configuration.VersionId, VersionUUID: artifact.VersionUUID, Source: artifact.Source,
 			SemanticVersion: artifact.SemanticVersion, MigrationGeneration: artifact.MigrationGeneration,
 			ArtifactDigest: artifact.Digest, RetainedArtifactException: retainedArtifactException,
+			ResourceTypeVersion: artifact.ResourceTypeVersion, ResourceTypeVersionUUID: artifact.ResourceTypeVersionUUID,
+			OutputSchema: artifact.OutputSchema,
 		}
 	}
 	result := make([]model.ModuleArtifactRequirement, 0, len(byKey))

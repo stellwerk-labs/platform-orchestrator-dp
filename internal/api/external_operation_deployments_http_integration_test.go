@@ -23,9 +23,9 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
-	platformorchestratorcpv2 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
-	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/plugincontext"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	platformorchestratorcpv3 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,7 +200,7 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 				response.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			var check platformorchestratorcpv2.PluginDispatchCheck
+			var check platformorchestratorcpv3.PluginDispatchCheck
 			if !assert.NoError(t, json.NewDecoder(request.Body).Decode(&check)) {
 				response.WriteHeader(http.StatusBadRequest)
 				return
@@ -213,7 +213,7 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 				response.WriteHeader(http.StatusForbidden)
 				return
 			}
-			_ = json.NewEncoder(response).Encode(platformorchestratorcpv2.PluginDispatchAuthorization{
+			_ = json.NewEncoder(response).Encode(platformorchestratorcpv3.PluginDispatchAuthorization{
 				Action: string(check.Action), ActorId: actorID, DispatchId: check.DispatchId,
 				EnvironmentUuid: check.EnvironmentUuid, Fence: check.Fence, OperationId: operationID,
 				OrgId: orgID, PluginId: pluginID, ProjectUuid: check.ProjectUuid, RequestDigest: check.RequestDigest,

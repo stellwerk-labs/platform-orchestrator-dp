@@ -18,7 +18,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 )
 
 // KubernetesRunner handles Kubernetes and GKE runners

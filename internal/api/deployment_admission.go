@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v2/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
@@ -45,9 +45,10 @@ type deploymentAdmissionCore interface {
 }
 
 type OrdinaryDeploymentAdmissionService struct {
-	Database    model.Databaser
-	Core        deploymentAdmissionCore
-	BearerToken string
+	Database           model.Databaser
+	Core               deploymentAdmissionCore
+	BearerToken        string
+	ExecutionCatalogue platformorchestratorcp.ClientWithResponsesInterface
 }
 
 type OrdinaryDeploymentAdmissionAttempt struct {
@@ -60,6 +61,7 @@ type OrdinaryDeploymentAdmissionAttempt struct {
 	Mode                            model.DeploymentMode
 	requestDigest                   string
 	moduleVersions                  map[string]uuid.UUID
+	draftTestSnapshots              map[string]uuid.UUID
 	carryForwardModuleVersions      map[string]uuid.UUID
 	confirmedRestrictedVersionUUIDs []uuid.UUID
 	coreEpoch                       int64
@@ -114,19 +116,8 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 		a.ActorID == uuid.Nil {
 		return model.NewErrBadRequest("complete Deployment admission identity is required")
 	}
-	a.moduleVersions = make(map[string]uuid.UUID, len(artifacts))
-	for _, artifact := range artifacts {
-		if artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil {
-			return model.NewErrConflict("Deployment admission requires immutable Module and Version UUIDs")
-		}
-		key := artifact.ModuleUUID.String()
-		if existing, found := a.moduleVersions[key]; found && existing != artifact.VersionUUID {
-			return model.NewErrConflict("Deployment resolves one Module UUID to multiple Versions")
-		}
-		a.moduleVersions[key] = artifact.VersionUUID
-	}
-	if a.Mode == model.DeploymentModeDestroy {
-		a.moduleVersions = map[string]uuid.UUID{}
+	if err := a.collectModuleTargets(artifacts); err != nil {
+		return err
 	}
 	a.carryForwardModuleVersions = compiled.CarryForwardModuleVersions
 	a.confirmedRestrictedVersionUUIDs = compiled.ConfirmedRestrictedVersionUUIDs
@@ -160,13 +151,14 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 		OutputsRecipient                string               `json:"encrypted_outputs_recipient"`
 		LogsRecipient                   string               `json:"encrypted_logs_recipient"`
 		RunnerLogLevel                  string               `json:"runner_log_level"`
+		DraftTestSnapshots              map[string]uuid.UUID `json:"draft_test_snapshots,omitempty"`
 	}{
 		a.AdmissionID, a.OrgID, a.ProjectUUID, a.EnvironmentUUID, a.ActorID, a.Mode, a.moduleVersions,
 		a.carryForwardModuleVersions, a.confirmedRestrictedVersionUUIDs,
 		compiled.ProjectID, compiled.EnvironmentID, compiled.RunnerID, compiled.EffectiveBaseDeploymentID,
 		compiled.RollbackToDeploymentID, hex.EncodeToString(manifestDigest[:]), hex.EncodeToString(graphDigest[:]),
 		hex.EncodeToString(tofuDigest[:]), hex.EncodeToString(artifactsDigest[:]), compiled.EncryptedOutputsRecipient,
-		compiled.EncryptedLogsRecipient, compiled.RunnerLogLevel,
+		compiled.EncryptedLogsRecipient, compiled.RunnerLogLevel, a.draftTestSnapshots,
 	})
 	if err != nil {
 		return err
@@ -277,7 +269,7 @@ func (s *OrdinaryDeploymentAdmissionService) sealAbsent(ctx context.Context, int
 func (a *OrdinaryDeploymentAdmissionAttempt) receipt(disposition string, deploymentID uuid.UUID, outcome string) model.DeploymentAdmissionReceipt {
 	return model.DeploymentAdmissionReceipt{
 		OrgID: a.OrgID, AdmissionID: a.AdmissionID, ProjectUUID: a.ProjectUUID, EnvironmentUUID: a.EnvironmentUUID,
-		ActorID: a.ActorID, RequestDigest: a.requestDigest, Mode: a.Mode, ModuleVersions: a.moduleVersions,
+		ActorID: a.ActorID, RequestDigest: a.requestDigest, Mode: a.Mode, ModuleVersions: a.moduleVersions, DraftTestSnapshots: a.draftTestSnapshots,
 		CarryForwardModuleVersions: a.carryForwardModuleVersions, ConfirmedRestrictedVersionUUIDs: a.confirmedRestrictedVersionUUIDs,
 		CoreEpoch: a.coreEpoch, Disposition: disposition, DeploymentID: uuid.NullUUID{UUID: deploymentID, Valid: deploymentID != uuid.Nil}, TerminalOutcome: outcome,
 	}
@@ -288,6 +280,9 @@ func deploymentAdmissionRequest(receipt *model.DeploymentAdmissionReceipt) platf
 		ActorId: receipt.ActorID, ProjectUuid: receipt.ProjectUUID, EnvironmentUuid: receipt.EnvironmentUUID,
 		Mode: platformorchestratorcp.DeploymentAdmissionRequestMode(receipt.Mode), ModuleVersions: receipt.ModuleVersions,
 		RequestDigest: receipt.RequestDigest,
+	}
+	if len(receipt.DraftTestSnapshots) > 0 {
+		request.DraftTestSnapshots = &receipt.DraftTestSnapshots
 	}
 	if len(receipt.CarryForwardModuleVersions) > 0 {
 		request.CarryForwardModuleVersions = &receipt.CarryForwardModuleVersions
@@ -410,4 +405,45 @@ func (s *OrdinaryDeploymentAdmissionService) bearer() platformorchestratorcp.Req
 		request.Header.Set("Authorization", "Bearer "+s.BearerToken)
 		return nil
 	}
+}
+
+// ExecutionCatalogueClient uses the authenticated admission gateway, not the internal system client.
+func (s *OrdinaryDeploymentAdmissionService) ExecutionCatalogueClient() platformorchestratorcp.ClientWithResponsesInterface {
+	if s == nil {
+		return nil
+	}
+	return s.ExecutionCatalogue
+}
+
+func (a *OrdinaryDeploymentAdmissionAttempt) collectModuleTargets(artifacts []model.ModuleArtifactRequirement) error {
+	a.moduleVersions = make(map[string]uuid.UUID, len(artifacts))
+	a.draftTestSnapshots = make(map[string]uuid.UUID)
+	for _, artifact := range artifacts {
+		if artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil {
+			return model.NewErrConflict("Deployment admission requires immutable Module and Version UUIDs")
+		}
+		key := artifact.ModuleUUID.String()
+		if existing, found := a.moduleVersions[key]; found && existing != artifact.VersionUUID {
+			return model.NewErrConflict("Deployment resolves one Module UUID to multiple Versions")
+		}
+		if existing, found := a.moduleVersions[key]; found {
+			_, wasTest := a.draftTestSnapshots[key]
+			if wasTest != (artifact.DraftTest != nil) || existing != artifact.VersionUUID {
+				return model.NewErrConflict("Deployment cannot relabel an executable's Draft test provenance")
+			}
+		}
+		a.moduleVersions[key] = artifact.VersionUUID
+		if test := artifact.DraftTest; test != nil {
+			if !test.Valid() || test.ModuleUUID != artifact.ModuleUUID || test.SnapshotUUID != artifact.VersionUUID ||
+				test.ProjectUUID != a.ProjectUUID || test.EnvironmentUUID != a.EnvironmentUUID {
+				return model.NewErrConflict("Deployment admission has inconsistent scoped Draft test provenance")
+			}
+			a.draftTestSnapshots[key] = artifact.VersionUUID
+		}
+	}
+	if a.Mode == model.DeploymentModeDestroy {
+		a.moduleVersions = map[string]uuid.UUID{}
+		a.draftTestSnapshots = map[string]uuid.UUID{}
+	}
+	return nil
 }

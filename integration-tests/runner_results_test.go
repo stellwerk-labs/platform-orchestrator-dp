@@ -10,13 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hnats"
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker"
-	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v2/genclient"
+	serverclient "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genclient"
 )
 
 // More stale events than the consumer's acknowledgement capacity must not

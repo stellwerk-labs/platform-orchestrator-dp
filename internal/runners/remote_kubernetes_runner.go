@@ -9,7 +9,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"go.uber.org/zap"
 
-	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/genclient"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
