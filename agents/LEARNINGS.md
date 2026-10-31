@@ -22,3 +22,17 @@
 - A redacted Gitleaks report still supplies file/rule/line/column evidence.
   Full-file hashes plus exact finding sets allow narrow classification without
   persisting or printing suspected values.
+
+## Historical migrations and the root functional gate
+
+- A migration 15/16 round trip against the current schema 37 starts from the
+  wrong history. Later migrations add checks on `deployments.module_artifacts`;
+  dropping that column can remove those checks inside a transaction, so merely
+  re-adding the column does not prove the historical migration. Use a fresh
+  disposable Goose schema stopped at the target version, assert the migration
+  version before and after each Down/Up, and query columns in `current_schema()`.
+- `make test-unit` and internal/API tagged tests do not run the root
+  `integration-tests` Compose/Kind journeys. CI's separate `integration` job
+  runs `make test-integration`, and candidate publication depends on that job.
+  A local internal/API pass therefore does not establish root functional or
+  packaged release readiness.
