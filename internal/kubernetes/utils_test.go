@@ -182,3 +182,39 @@ func TestGetJobSpec_InvalidPodTemplatePatch(t *testing.T) {
 	)
 	require.Error(t, err)
 }
+
+func TestObservationPodTemplateCannotOverrideReadOnlyTransport(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		patch   map[string]interface{}
+		allowed bool
+	}{
+		{name: "default", allowed: true},
+		{name: "resources", patch: map[string]interface{}{"name": "main", "resources": map[string]interface{}{"requests": map[string]interface{}{"memory": "512Mi"}}}, allowed: true},
+		{name: "deploy", patch: map[string]interface{}{"name": "main", "env": []interface{}{map[string]interface{}{"name": "MODE", "value": "deploy"}}}},
+		{name: "wrong protocol", patch: map[string]interface{}{"name": "main", "env": []interface{}{map[string]interface{}{"name": "OBSERVATION_PROTOCOL", "value": "unknown"}}}},
+		{name: "removed marker", patch: map[string]interface{}{"name": "main", "env": []interface{}{map[string]interface{}{"name": "OBSERVATION_PROTOCOL", "$patch": "delete"}}}},
+		{name: "custom command", patch: map[string]interface{}{"name": "main", "command": []interface{}{"terraform", "apply"}}},
+		{name: "custom args", patch: map[string]interface{}{"name": "main", "args": []interface{}{"apply"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := platformorchestratorcp.K8sRunnerJobConfig{ServiceAccount: "default"}
+			if test.patch != nil {
+				config.PodTemplate = &map[string]interface{}{"spec": map[string]interface{}{"containers": []interface{}{test.patch}}}
+			}
+			spec, err := GetJobSpec(t.Context(), config, "runner-image", "", &model.DeploymentSummary{Mode: model.DeploymentModeObservation})
+			if test.allowed {
+				require.NoError(t, err)
+				values := map[string]string{}
+				for _, env := range spec.Template.Spec.Containers[0].Env {
+					values[env.Name] = env.Value
+				}
+				require.Equal(t, "plan_only", values["MODE"])
+				require.Equal(t, "environment-observation/v1", values["OBSERVATION_PROTOCOL"])
+			} else {
+				require.Error(t, err)
+				require.Nil(t, spec)
+			}
+		})
+	}
+}

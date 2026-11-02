@@ -20,8 +20,8 @@ import (
 const maxOutcomeAcknowledgementReasonLength = 1000
 
 // InternalAcknowledgeDeploymentOutcome is the audited operator path out of an
-// Environment fenced by a failed plugin-dispatched Deployment whose Runner
-// outcome is unknown. The acting user becomes the audit record, so neither the
+// Environment fence or persistent Runner slot held by a failed Deployment whose
+// Runner outcome is unknown. The acting user becomes the audit record, so neither the
 // system user nor a deprecated organization token may use it.
 func (s *Server) InternalAcknowledgeDeploymentOutcome(ctx context.Context, request InternalAcknowledgeDeploymentOutcomeRequestObject) (InternalAcknowledgeDeploymentOutcomeResponseObject, error) {
 	uid, authErr := GetAuthenticatedUserIdOr401(ctx)

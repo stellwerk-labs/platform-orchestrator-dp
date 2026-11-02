@@ -68,6 +68,27 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 		return nil, errors.Wrap(err, "failed to get runner type")
 	}
 
+	if deploymentSummary.Mode == model.DeploymentModeObservation {
+		// Validate before the worker records a possibly-sent attempt, so unsafe
+		// template configuration cannot strand a slot for a command never sent.
+		if runnerType == string(platformorchestratorcp.RunnerTypeServerlessEcs) {
+			config, err := internalRunner.RunnerConfiguration.AsServerlessEcsRunnerConfiguration()
+			if err != nil {
+				return nil, err
+			}
+			if err := validateECSObservationEnvironment(deploymentSummary.Mode, config.Job.Environment, config.Job.Secrets); err != nil {
+				return nil, err
+			}
+		} else {
+			config, err := getJobConfiguration(internalRunner.RunnerConfiguration)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := kubernetes.GetJobSpec(ctx, config, f.runnerImage, f.metadataOutputKey, deploymentSummary, f.gatewayConfiguration.public()); err != nil {
+				return nil, err
+			}
+		}
+	}
 	switch runnerType {
 	case string(platformorchestratorcp.RunnerTypeKubernetesAgent):
 		return NewRemoteKubernetesRunner(

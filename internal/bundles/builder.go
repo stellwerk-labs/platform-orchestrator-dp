@@ -128,6 +128,9 @@ func buildForDeployment(
 				return nil, err
 			}
 		}
+		if err := validateRetainedArtifactIdentities(artifacts, catalogue.Modules, deployment.Mode == model.DeploymentModeObservation); err != nil {
+			return nil, err
+		}
 		if err := validateRetainedDraftSources(artifacts, catalogue.Modules); err != nil {
 			return nil, err
 		}
@@ -214,7 +217,7 @@ func selectInlineModules(versions []string, modules []platformorchestratorcp.Int
 		if _, duplicate := found[coordinate]; duplicate {
 			return nil, errors.Errorf("duplicate inline module %s in catalogue response", coordinate)
 		}
-		if module.ModuleSource != "inline" || module.ModuleSourceCode == nil || strings.TrimSpace(*module.ModuleSourceCode) == "" {
+		if module.ModuleSource != model.InlineModuleSource || module.ModuleSourceCode == nil || strings.TrimSpace(*module.ModuleSourceCode) == "" {
 			return nil, errors.Errorf("inline module %s has invalid source code", coordinate)
 		}
 		found[coordinate] = struct{}{}
@@ -321,4 +324,36 @@ func inlineMaterialCoordinates(graph *platformorchestratorgraph.Graph[*graphs.Gr
 	versionsToGet = slices.Compact(versionsToGet)
 
 	return versionsToGet, retained, nil
+}
+
+// An observation reuses captured configuration. Re-fetching inline bytes may
+// only supply the exact retained artifact, never today's catalogue defaults.
+func validateRetainedArtifactIdentities(artifacts []model.ModuleArtifactRequirement, modules []platformorchestratorcp.InternalExecutionCatalogueModule, required bool) error {
+	for _, module := range modules {
+		found := false
+		for _, artifact := range artifacts {
+			if artifact.ModuleID == module.Id && artifact.Version == module.VersionId {
+				if !required && (artifact.ModuleUUID == uuid.Nil || artifact.VersionUUID == uuid.Nil || (artifact.Source != model.InlineModuleSource && artifact.ArtifactDigest == "")) {
+					found = true
+					break
+				}
+				if required && !artifact.HasObservationProvenance() {
+					return errors.New("observation source has no retained artifact identity")
+				}
+				if artifact.ModuleUUID != module.ModuleUuid || artifact.VersionUUID != module.VersionUuid || artifact.Source != module.ModuleSource ||
+					(artifact.ArtifactDigest != "" && artifact.ArtifactDigest != module.ArtifactDigest) {
+					return errors.New("retained observation artifact identity changed")
+				}
+				if artifact.Source == model.InlineModuleSource && (module.ModuleSourceCode == nil || strings.TrimSpace(*module.ModuleSourceCode) == "") {
+					return errors.New("retained inline source is unavailable")
+				}
+				found = true
+				break
+			}
+		}
+		if !found && required {
+			return errors.New("observation source has no retained artifact identity")
+		}
+	}
+	return nil
 }

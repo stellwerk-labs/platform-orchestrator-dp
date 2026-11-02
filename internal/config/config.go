@@ -59,6 +59,11 @@ type Configuration struct {
 
 	DeploymentsCompletedBefore time.Duration `env:"DEPLOYMENTS_COMPLETED_BEFORE,default=5m"`
 
+	// Maintenance bounds are independent of the ordinary output retention pass.
+	// The duration validator uses nanoseconds; one second is the minimum cadence.
+	ObservationResultCleanupInterval  time.Duration `env:"OBSERVATION_RESULT_CLEANUP_INTERVAL,default=5s"    validate:"gte=1000000000"`
+	ObservationResultCleanupBatchSize int           `env:"OBSERVATION_RESULT_CLEANUP_BATCH_SIZE,default=500" validate:"gte=1,lte=2000"`
+
 	RunnerImage string `env:"RUNNER_IMAGE"`
 	// KubernetesRunnerPodSchedulingDelay is the time we wait for a k8s pod to be scheduled before marking the deployment as failed
 	KubernetesRunnerPodSchedulingDelay time.Duration `env:"K8S_RUNNER_POD_SCHEDULING_DELAY, default=5m"`

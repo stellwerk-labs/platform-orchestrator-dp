@@ -153,6 +153,9 @@ func scanDeploymentQueueItem(row interface{ Scan(...any) error }) (*DeploymentQu
 // It is an early read that keeps busy requests away from remote effects; only
 // the same checks in CreateDeployment, under the Environment lock, decide.
 func CheckEnvironmentAvailable(ctx context.Context, tx Tx, orgID, projectID, envID string, environmentUUID, queueItem uuid.UUID) error {
+	if err := RequireObservationStopped(ctx, tx, environmentUUID); err != nil {
+		return err
+	}
 	var leased, executing bool
 	var stateHead, queueHead uuid.NullUUID
 	if err := tx.QueryRowContext(ctx, `SELECT
@@ -273,6 +276,9 @@ func EnqueueDeployment(ctx context.Context, tx Tx, request NewDeploymentQueueIte
 		return nil, false, errors.New("deployment queue TTL and depth must be positive")
 	}
 	if err := LockEnvironmentMutation(ctx, tx, request.EnvironmentUUID); err != nil {
+		return nil, false, err
+	}
+	if err := RequireObservationStopped(ctx, tx, request.EnvironmentUUID); err != nil {
 		return nil, false, err
 	}
 	intentSHA256 := request.IntentSHA256()

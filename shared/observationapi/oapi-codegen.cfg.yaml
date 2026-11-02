@@ -1,0 +1,7 @@
+package: observationapi
+generate:
+  models: true
+  client: true
+output: shared/observationapi/client.gen.go
+output-options:
+  skip-prune: true

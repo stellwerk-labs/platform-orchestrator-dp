@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
@@ -55,5 +56,22 @@ func TestGenerateEnvVarsForRun_IncludesGatewayRunnerContract(t *testing.T) {
 	assert.NotEmpty(t, environment["TOKEN"])
 	for _, obsolete := range []string{"NATS_URL", "NATS_TOKEN", "NATS_BUNDLE_BUCKET", "NATS_BUNDLE_KEY", "LOGS_URL", "PLATFORM_ORCHESTRATOR_BASE_URL", "PLATFORM_ORCHESTRATOR_API_PREFIX"} {
 		assert.NotContains(t, environment, obsolete)
+	}
+}
+
+func TestObservationTransportRemainsReadOnlyForLegacyRunner(t *testing.T) {
+	deployment := &model.DeploymentSummary{Mode: model.DeploymentModeObservation}
+	values := map[string]string{}
+	for key, value := range GenerateEnvVarsForRun("", deployment) {
+		values[key] = value
+	}
+	require.Equal(t, "plan_only", values["MODE"])
+	require.Equal(t, "environment-observation/v1", values["OBSERVATION_PROTOCOL"])
+	for _, mode := range []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeRollback, model.DeploymentModeDeployPlan, model.DeploymentModeDestroy} {
+		values = map[string]string{}
+		for key, value := range GenerateEnvVarsForRun("", &model.DeploymentSummary{Mode: mode}) {
+			values[key] = value
+		}
+		require.NotContains(t, values, "OBSERVATION_PROTOCOL")
 	}
 }

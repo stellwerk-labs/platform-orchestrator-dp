@@ -42,6 +42,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/util"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/worker/completionhooks"
+	observation "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/observationapi"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
@@ -63,6 +64,8 @@ func apiModeAndPlanFromModel(m model.DeploymentMode) (string, bool) {
 		return string(DeploymentCreateBodyModeDeploy), false
 	case model.DeploymentModeDeployPlan:
 		return string(DeploymentCreateBodyModeDeploy), true
+	case model.DeploymentModeObservation:
+		return string(model.DeploymentModeObservation), true
 	case model.DeploymentModeRollback:
 		return string(DeploymentCreateBodyModeRollback), false
 	case model.DeploymentModeRollbackPlan:
@@ -870,6 +873,9 @@ func (s *Server) deploymentResultUpdateParams(
 	deploymentID uuid.UUID,
 	body *DeploymentResultsUpdateBody,
 ) (model.UpdateDeploymentStatusAndOutputsParams, error) {
+	if body == nil || !body.Status.Valid() {
+		return model.UpdateDeploymentStatusAndOutputsParams{}, model.NewErrBadRequest("unsupported Runner completion status")
+	}
 	if body.Outputs != nil {
 		if _, err := io.Copy(io.Discard, base64.NewDecoder(base64.StdEncoding, strings.NewReader(*body.Outputs))); err != nil {
 			return model.UpdateDeploymentStatusAndOutputsParams{}, errRunnerOutputsInvalidBase64
@@ -945,7 +951,15 @@ func (s *Server) applyRunnerDeploymentResult(ctx context.Context, orgID, runnerI
 		if peekErr != nil {
 			return fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, peekErr)
 		}
-		if dep.CompletedAt.IsSet() && dep.Status == model.DeploymentStatusFailed {
+		if dep.CompletedAt.IsSet() && dep.Status == model.DeploymentStatusFailed && dep.Mode != model.DeploymentModeObservation {
+			handled, err := s.retainLateOrdinaryCapacityCompletion(ctx, dep, runnerID, body, envelope)
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+
 			canonical, err := json.Marshal(envelope)
 			if err != nil {
 				return err
@@ -1053,6 +1067,64 @@ func (s *Server) commonUpdateDeploymentResults(
 			}
 		}
 
+		if completionProven && dep.Mode != model.DeploymentModeObservation && dep.CompletedAt.IsSet() {
+			handled, err := model.RecordLateOrdinaryRunnerCompletion(ctx, tx, dep, request.Body)
+			if err != nil {
+				return nil, err
+			}
+			if handled {
+				if err := tx.Commit(); err != nil {
+					return nil, err
+				}
+				return dep, nil
+			}
+		}
+		if dep.Mode == model.DeploymentModeObservation {
+			// Only authenticated complete Runner results prove stop. Watchdogs
+			// and Runner error events cannot release ownership.
+			if completionProven {
+				replayed, err := model.RecordObservationCompletion(ctx, tx, dep.Id, request.Body)
+				if err != nil {
+					return nil, err
+				}
+				if replayed || dep.CompletedAt.IsSet() {
+					if err := tx.Commit(); err != nil {
+						return nil, err
+					}
+					return dep, nil
+				}
+			}
+			updateParams.Outputs = opt.Empty[string]()
+			updateParams.StatusMessage = "observation failed"
+			unsafe := request.Body.Outputs != nil || len(request.Body.Metadata) > 0
+			request.Body.Metadata = nil
+			if updateParams.Status == model.DeploymentStatusSucceeded && !unsafe && request.Body.ObservationResult != nil {
+				encoded, err := json.Marshal(request.Body.ObservationResult)
+				if err != nil {
+					return nil, err
+				}
+				var result observation.ObservationResult
+				if err := json.Unmarshal(encoded, &result); err != nil {
+					return nil, err
+				}
+				if err := model.ValidateObservationResult(result); err == nil {
+					if err := model.StoreObservationResult(ctx, tx, dep.Id, result); err != nil {
+						return nil, err
+					}
+					updateParams.StatusMessage = "observation completed"
+				} else {
+					updateParams.Status = model.DeploymentStatusFailed
+				}
+			} else {
+				updateParams.Status = model.DeploymentStatusFailed
+			}
+			if updateParams.Status == model.DeploymentStatusFailed && request.Body.Status == Success {
+				updateParams.StatusMessage = model.ObservationResultUnavailableMessage
+			}
+		} else if request.Body.ObservationResult != nil {
+			return nil, model.NewErrBadRequest("observation result requires observation mode")
+		}
+
 		if dep.CompletedAt.IsSet() {
 			if runnerEvent != nil {
 				return nil, fmt.Errorf("%w: %w", ErrRunnerEventTargetInvalid, model.NewErrConflict("deployment already completed"))
@@ -1082,7 +1154,7 @@ func (s *Server) commonUpdateDeploymentResults(
 				return nil, errors.Wrap(err, "failed to create deployment history record")
 			}
 
-			if dep.Mode != model.DeploymentModeDeployPlan && updateParams.Status == model.DeploymentStatusSucceeded {
+			if !model.IsPlanDeployment(dep.Mode) && updateParams.Status == model.DeploymentStatusSucceeded {
 				if err := s.Database.DiscardOldActiveResources(ctx, tx, dep.DeploymentEnvUuid, dep.Id); err != nil {
 					return nil, errors.Wrap(err, "failed to discard old active resources")
 				}
@@ -1111,7 +1183,7 @@ func (s *Server) commonUpdateDeploymentResults(
 				Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
 				Payload: model.ConvertDeploymentToEventPayload(dep),
 			}}
-			if dep.Mode != model.DeploymentModeDeployPlan && updateParams.Status == model.DeploymentStatusSucceeded {
+			if !model.IsPlanDeployment(dep.Mode) && updateParams.Status == model.DeploymentStatusSucceeded {
 				observedAt := time.Now().UTC()
 				if dep.CompletedAt.IsSet() {
 					observedAt = dep.CompletedAt.Must()

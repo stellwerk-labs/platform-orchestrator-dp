@@ -181,6 +181,16 @@ func (h *CreateDepHandler) failDeployment(ctx context.Context, logger *zap.Logge
 }
 
 func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, d *model.DeploymentSummary) error {
+	if d.Mode == model.DeploymentModeObservation && time.Since(d.CreatedAt) >= model.RunnerExecutionBudget {
+		budget, err := h.db.GetDeploymentDispatchBudget(ctx, nil, d.Id)
+		if err != nil {
+			return hmessaging.NewRetryError(err)
+		}
+		if !budget.FirstAttemptAt.Valid {
+			return usererrors.NewUserError("observation preparation expired before Runner dispatch")
+		}
+	}
+
 	res, err := h.controlPlaneClient.GetInternalRunnerWithResponse(ctx, d.OrgId, d.RunnerId)
 	if err != nil {
 		return hmessaging.NewRetryError(errors.Wrap(err, "failed to make get-runner request"))
@@ -190,6 +200,16 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		return errors.Errorf("unexpected status code when getting runner '%s': %s: %s", d.RunnerId, res.Status(), string(res.Body))
 	}
 	rn := *res.JSON200
+	limit, observationSupported, err := model.RunnerAdmissionConfiguration(rn.RunnerConfiguration)
+	if err != nil {
+		return err
+	}
+	if d.Mode == model.DeploymentModeObservation && (!observationSupported || limit == 0) {
+		return usererrors.NewUserError("Runner no longer supports environment-observation/v1 with bounded capacity")
+	}
+	if err := h.db.ReserveRunnerDispatch(ctx, d, limit); err != nil {
+		return hmessaging.NewRetryError(errors.Wrap(err, "waiting for Runner job capacity"))
+	}
 	runner, err := h.runnerFactory.CreateRunner(ctx, rn, d)
 	if err != nil {
 		return errors.Wrap(err, "failed to create runner")
@@ -205,6 +225,9 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	if h.bundleStore != nil {
 		archive, err := bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id, h.executionClient)
 		if err != nil {
+			if d.Mode == model.DeploymentModeObservation {
+				return usererrors.NewUserError("observation baseline material is unavailable")
+			}
 			return hmessaging.NewRetryError(errors.Wrap(err, "failed to build runner bundle"))
 		}
 		if _, err := h.bundleStore.Put(ctx, jetstream.ObjectMeta{Name: bundles.ObjectKey(d.OrgId, d.Id)}, archive); err != nil {

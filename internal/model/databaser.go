@@ -119,6 +119,7 @@ type Databaser interface {
 	CreateDeploymentHistoryRecord(ctx context.Context, optionalTx Tx, dep *DeploymentSummary) error
 	TryRecordRunnerEvent(ctx context.Context, optionalTx Tx, eventID, orgID, runnerID string, deploymentID uuid.UUID, eventType string) (bool, error)
 	RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error
+	ReserveRunnerDispatch(ctx context.Context, deployment *DeploymentSummary, limit int) error
 	BeginDeploymentDispatch(ctx context.Context, deployment *DeploymentSummary) (time.Time, error)
 	GetDeploymentDispatchBudget(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID) (DeploymentDispatchBudget, error)
 
