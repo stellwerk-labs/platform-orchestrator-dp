@@ -22,11 +22,13 @@ sort -u "$work/modules" | sed '/^$/d' > "$work/unique"
 ignore="$module"
 mkdir "$work/declared"
 while IFS='|' read -r dependency version module_dir replacement; do
+  own_sdk=false
   case "$dependency" in
     "$module") continue ;;
     "$module/shared"|"$module/shared/v2"|"$module/shared/v3")
-      test "$module_dir" = "$root/shared" || { echo "own SDK must be the source checkout snapshot" >&2; exit 1; }
-      continue ;;
+      if test "$module_dir" = "$root/shared"; then continue; fi
+      test -n "$version" && test -z "$replacement" || { echo "own SDK must be the source checkout or an unreplaced release" >&2; exit 1; }
+      own_sdk=true ;;
     "$module"*) echo "external module collides with application ignore prefix" >&2; exit 1 ;;
   esac
   case "$dependency" in
@@ -40,7 +42,10 @@ while IFS='|' read -r dependency version module_dir replacement; do
     github.com/oapi-codegen/nullable*) echo "module collides with exact nullable notice correction" >&2; exit 1 ;;
   esac
   declaration="$(awk -F '|' -v module="$dependency" '$1 == module {print}' "$root/scripts/declared-licenses.tsv")"
-  test -n "$declaration" || continue
+  if test -z "$declaration"; then
+    test "$own_sdk" = false || { echo "released own SDK requires an exact license declaration" >&2; exit 1; }
+    continue
+  fi
   checksum="$(printf '%s\n' "$declaration" | cut -d '|' -f 3)"
   license_blob="$(printf '%s\n' "$declaration" | cut -d '|' -f 4)"
   test -f "$module_dir/LICENSE" && test ! -L "$module_dir/LICENSE"
@@ -124,8 +129,10 @@ while IFS='|' read -r dependency version module_dir replacement; do
   receipt="$work/declared/$(printf '%s' "$dependency" | tr '/' '_')"
   case "$dependency" in
     "$module/shared"|"$module/shared/v2"|"$module/shared/v3")
-      mkdir -p "$output/$dependency"
-      cp "$root/LICENSE" "$output/$dependency/LICENSE" ;;
+      if test "$module_dir" = "$root/shared"; then
+        mkdir -p "$output/$dependency"
+        cp "$root/LICENSE" "$output/$dependency/LICENSE"
+      fi ;;
   esac
   if test -f "$receipt"; then
     mkdir -p "$output/$dependency"

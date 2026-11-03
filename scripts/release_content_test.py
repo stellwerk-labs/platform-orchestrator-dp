@@ -768,6 +768,84 @@ class ContentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     content.notices(changed, "amd64", "example.org/application")
 
+    def test_released_own_sdk_keeps_actual_notice_and_rejects_invalid_inputs(self):
+        module = re.search(r"(?m)^module (\S+)$", (ROOT / "go.mod").read_text())[1]
+        sdk = re.search(r"(?m)^module (\S+)$", (ROOT / "shared/go.mod").read_text())[1]
+        version = re.search(r"(?m)^\s*" + re.escape(sdk) + r" (v[^\s]+)$",
+                            (ROOT / "go.mod").read_text())[1]
+        application = self.root / "application"
+        application.mkdir()
+        environment = dict(os.environ, GOMODCACHE=str(self.root / "module-cache"),
+                           GOWORK="off", GOENV="off", GOTOOLCHAIN="go1.26.10",
+                           GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org",
+                           GOPRIVATE="", GONOPROXY="", GONOSUMDB="")
+        (application / "go.mod").write_text("module " + module + "\n\ngo 1.26.10\n\nrequire " +
+                                          sdk + " " + version + "\n")
+        (application / "main.go").write_text('package main\nimport _ "' + sdk + '/genclient"\nfunc main() {}\n')
+        subprocess.run(["go", "mod", "tidy"], cwd=application, env=environment,
+                       check=True, capture_output=True, timeout=90)
+        metadata = json.loads(subprocess.check_output(["go", "mod", "download", "-json", sdk + "@" + version],
+                                                      cwd=application, env=environment, timeout=60))
+        self.assertNotIn("Replace", metadata)
+        self.assertRegex(metadata["Origin"]["Hash"], r"^[0-9a-f]{40}$")
+        self.assertTrue(metadata["Sum"].startswith("h1:"))
+        sdk_dir = Path(metadata["Dir"])
+        license_file = sdk_dir / "LICENSE"
+        actual_license = license_file.read_bytes()
+        collector = self.root / "collector"
+        shutil.copytree(ROOT / "scripts", collector / "scripts")
+        (collector / "LICENSE").write_bytes(b"Distinct application fixture notice.\n")
+        for arch in ("amd64", "arm64"):
+            output = self.root / ("released-" + arch)
+            result = subprocess.run(["sh", str(collector / "scripts/collect-licenses.sh"), str(output), "./..."],
+                                    cwd=application, env=dict(environment, GOARCH=arch),
+                                    capture_output=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual((output / sdk / "LICENSE").read_bytes(), actual_license)
+            provenance = json.loads((output / sdk / "LICENSE.provenance").read_text())
+            self.assertEqual(provenance["module"], sdk)
+            self.assertEqual(provenance["version"], version)
+            self.assertEqual(provenance["sourceCommit"], metadata["Origin"]["Hash"])
+            self.assertEqual(provenance["moduleSum"], metadata["Sum"])
+            self.assertEqual(provenance["licenseSHA256"], hashlib.sha256(actual_license).hexdigest())
+        # Mutate only this test's isolated downloaded module, never the shared cache.
+        sdk_dir.chmod(0o755)
+        license_file.chmod(0o644)
+        for label, data in (("tampered", actual_license + b"changed"), ("unlicensed", None)):
+            if data is None:
+                license_file.unlink()
+            else:
+                license_file.write_bytes(data)
+            result = subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"),
+                                     str(self.root / label), "./..."], cwd=application,
+                                    env=dict(environment, GOARCH="amd64"), capture_output=True, timeout=60)
+            self.assertNotEqual(result.returncode, 0)
+        license_file.write_bytes(actual_license)
+        declarations = (ROOT / "scripts/declared-licenses.tsv").read_text().splitlines()
+        (collector / "scripts/declared-licenses.tsv").write_text(
+            "\n".join(line for line in declarations if not line.startswith(sdk + "|")) + "\n")
+        result = subprocess.run(["sh", str(collector / "scripts/collect-licenses.sh"),
+                                 str(self.root / "undeclared"), "./..."], cwd=application,
+                                env=dict(environment, GOARCH="amd64"), capture_output=True, timeout=60)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"requires an exact license declaration", result.stderr)
+        for index, suffix in enumerate(("-lookalike", "/lookalike")):
+            lookalike = sdk + suffix
+            dependency = self.root / ("dependency-" + str(index))
+            dependency.mkdir()
+            (dependency / "go.mod").write_text("module " + lookalike + "\n\ngo 1.26.10\n")
+            (dependency / "value.go").write_text("package dependency\n")
+            (dependency / "LICENSE").write_bytes(actual_license)
+            (application / "go.mod").write_text("module " + module + "\n\ngo 1.26.10\n\nrequire " +
+                                              lookalike + " v1.0.0\nreplace " + lookalike + " => " + str(dependency) + "\n")
+            (application / "main.go").write_text('package main\nimport _ "' + lookalike + '"\nfunc main() {}\n')
+            result = subprocess.run(["sh", str(ROOT / "scripts/collect-licenses.sh"),
+                                     str(self.root / ("rejected-" + str(index))), "./..."],
+                                    cwd=application, env=dict(environment, GOARCH="amd64"),
+                                    capture_output=True, timeout=60)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"collides with application ignore prefix", result.stderr)
+
     def test_sdk_declared_license_from_exact_source_commit(self):
         spec = importlib.util.spec_from_file_location("sdk_license", ROOT / "scripts/prepare-sdk-license.py")
         helper = importlib.util.module_from_spec(spec)
