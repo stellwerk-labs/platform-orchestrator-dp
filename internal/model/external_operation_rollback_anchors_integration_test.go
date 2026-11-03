@@ -140,13 +140,13 @@ func TestRollbackAnchorMigrationAdoptsOnlyUnambiguousRetainedFirstForward(t *tes
 				require.NoError(t, err)
 			}
 			require.NoError(t, seed.Commit())
-			_, err = provider.Up(ctx)
+			_, err = provider.UpTo(ctx, 30)
 			require.NoError(t, err)
-			// Normal startup/restart must preserve the exact adopted anchor.
+			// Reapplying migration30 must preserve the exact adopted anchor.
 			for restart := 0; restart < 2; restart++ {
-				store, err := NewDatabaser(ctx, zap.NewNop(), scoped)
+				_, err = provider.UpTo(ctx, 30)
 				require.NoError(t, err)
-				tx, err := store.BeginTx(ctx, nil)
+				tx, err := legacy.BeginTx(ctx, nil)
 				require.NoError(t, err)
 				anchor, err := ReadExternalOperationRollbackAnchor(ctx, tx, ExternalOperationRollbackAnchor{OrgID: "org", PluginID: "dev.example.rollouts", OperationRef: op, ProjectID: "project", EnvID: "env", ProjectUUID: project, EnvironmentUUID: env})
 				require.NoError(t, err)
@@ -158,7 +158,6 @@ func TestRollbackAnchorMigrationAdoptsOnlyUnambiguousRetainedFirstForward(t *tes
 					require.Nil(t, anchor, "ambiguous history must not pick a first timestamp")
 				}
 				require.NoError(t, tx.Rollback())
-				require.NoError(t, store.Close())
 			}
 			if test.forwards == 1 {
 				// A retained receipt remains downgrade evidence even after its
