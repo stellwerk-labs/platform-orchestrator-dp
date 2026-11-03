@@ -115,7 +115,7 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 
 	deletion, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.NoError(t, store.DeleteDeploymentsForEnv(ctx, deletion, intent.OrgID, deployment.ProjectId, deployment.EnvId, true))
+	require.NoError(t, store.DeleteDeploymentsForEnv(ctx, deletion, intent.OrgID, deployment.ProjectId, deployment.EnvId, true, opt.Empty[uuid.UUID]()))
 	require.NoError(t, deletion.Commit())
 	retained, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)

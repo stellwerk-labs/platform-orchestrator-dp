@@ -712,7 +712,7 @@ func (s *Server) InternalDeleteDeployments(ctx context.Context, request Internal
 			}
 		}
 
-		if err := s.Database.DeleteDeploymentsForEnv(ctx, tx, request.OrgId, *request.Params.ProjectId, *request.Params.EnvId, force); err != nil {
+		if err := s.Database.DeleteDeploymentsForEnv(ctx, tx, request.OrgId, *request.Params.ProjectId, *request.Params.EnvId, force, opt.Empty[uuid.UUID]()); err != nil {
 			if e, ok := model.IsErrNotFound(err); ok {
 				return InternalDeleteDeployments404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 			} else if e, ok := model.IsErrConflict(err); ok {

@@ -3,14 +3,24 @@
 package api
 
 import (
+	"context"
+	"encoding/binary"
 	"encoding/json"
+	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hnats"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stellwerk-labs/golib/hecho"
+	"github.com/stellwerk-labs/golib/hmessaging"
 	iamapi "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"github.com/stretchr/testify/assert"
@@ -18,8 +28,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 )
 
 func TestOutcomeAcknowledgementRequiresPermissionAndReleasesCapturedBaseRecoveryOnce(t *testing.T) {
@@ -74,6 +86,50 @@ func TestOutcomeAcknowledgementRequiresPermissionAndReleasesCapturedBaseRecovery
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
+	// Separate test schemas share the isolated NATS stream, so reserve a unique
+	// outbox ID range rather than colliding with JetStream's real deduplication.
+	outboxNamespace := uuid.New()
+	outboxStart := int64(binary.BigEndian.Uint64(outboxNamespace[:8])&((1<<62)-1)) + 1
+	tx, err = f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(f.ctx, `SELECT setval(pg_get_serial_sequence('pending_event_messages', 'id'), $1, false)`, outboxStart)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	// A real outbox insertion failure must roll back both the audit and ownership
+	// release. A later ordinary request can then record the acknowledgement once.
+	tx, err = f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(f.ctx, `CREATE FUNCTION reject_ack_cleanup_wake() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture rejects cleanup wake'; END $$;
+CREATE TRIGGER reject_ack_cleanup_wake BEFORE INSERT ON pending_event_messages FOR EACH ROW EXECUTE FUNCTION reject_ack_cleanup_wake()`)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	refused := acknowledge(actor.String(), reason)
+	require.Equal(t, http.StatusInternalServerError, refused.Code)
+	tx, err = f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	var auditCount int
+	require.NoError(t, tx.QueryRowContext(f.ctx, `SELECT count(*) FROM deployment_outcome_acknowledgements WHERE deployment_id=$1`, f.forward.Id).Scan(&auditCount))
+	require.Zero(t, auditCount, "failed wake insertion cannot commit an acknowledgement")
+	unreconciled, err := model.DeploymentOutcomeUnreconciled(f.ctx, tx, f.forward.Id)
+	require.NoError(t, err)
+	require.True(t, unreconciled, "failed wake insertion cannot release unknown Runner ownership")
+	_, err = tx.ExecContext(f.ctx, `DROP TRIGGER reject_ack_cleanup_wake ON pending_event_messages; DROP FUNCTION reject_ack_cleanup_wake()`)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	// Close an actual connected NATS transport. The audit must still commit,
+	// leaving exactly one durable outbox message for the ordinary relay.
+	natsURL := os.Getenv("OUTCOME_ACK_TEST_NATS_URL")
+	require.NotEmpty(t, natsURL, "an explicit isolated NATS fixture is required")
+	connection, err := nats.Connect(natsURL, nats.Timeout(3*time.Second))
+	require.NoError(t, err)
+	js, err := jetstream.New(connection)
+	require.NoError(t, err)
+	_, err = js.Stream(f.ctx, hmessaging.EventsStreamName)
+	require.NoError(t, err, "the isolated application NATS fixture must already own its standard events stream")
+	connection.Close()
+	f.server.EventPublisher = hnats.NewPublisher(js, hmessaging.EventsStreamName, zap.NewNop())
 	created := acknowledge(actor.String(), reason)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var ack DeploymentOutcomeAcknowledgement
@@ -85,12 +141,61 @@ func TestOutcomeAcknowledgementRequiresPermissionAndReleasesCapturedBaseRecovery
 	require.Equal(t, f.params.DeploymentEnvUuid, ack.EnvironmentId)
 	require.Equal(t, "dev.example.rollouts", ack.PluginId)
 
+	store := f.store.AsReliableOutboxStore()
+	pending, _, err := store.LoadPage(f.ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "disconnected transport leaves the committed cleanup wake durable")
+	require.Equal(t, string(genevents.IoPlatformOrchestratorDeploymentUpdated), pending[0].Subject)
+	var wake events.CloudEvent[genevents.DeploymentChangedData]
+	require.NoError(t, json.Unmarshal(pending[0].Payload, &wake))
+	require.Equal(t, genevents.IoPlatformOrchestratorDeploymentUpdated, wake.Type)
+	require.Equal(t, f.params.DeploymentEnvUuid, wake.Data.EnvUuid)
+
 	replayed := acknowledge(actor.String(), reason)
 	require.Equal(t, http.StatusOK, replayed.Code)
 	var replay DeploymentOutcomeAcknowledgement
 	require.NoError(t, json.Unmarshal(replayed.Body.Bytes(), &replay))
 	require.True(t, replay.Replayed)
 	require.True(t, ack.AcknowledgedAt.Equal(replay.AcknowledgedAt))
+	afterReplay, _, err := store.LoadPage(f.ctx)
+	require.NoError(t, err)
+	require.Len(t, afterReplay, 1, "replay cannot enqueue another cleanup wake")
+	require.Equal(t, pending[0].Id, afterReplay[0].Id)
+
+	recovered, err := nats.Connect(natsURL, nats.Timeout(3*time.Second))
+	require.NoError(t, err)
+	t.Cleanup(recovered.Close)
+	recoveredJS, err := jetstream.New(recovered)
+	require.NoError(t, err)
+	stream, err := recoveredJS.Stream(f.ctx, hmessaging.EventsStreamName)
+	require.NoError(t, err)
+	consumerName := "outcome_ack_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	consumer, err := stream.CreateConsumer(f.ctx, jetstream.ConsumerConfig{
+		Durable: consumerName, FilterSubject: pending[0].Subject,
+		DeliverPolicy: jetstream.DeliverNewPolicy, AckPolicy: jetstream.AckExplicitPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, stream.DeleteConsumer(context.WithoutCancel(f.ctx), consumerName)) })
+	recoveredPublisher := hnats.NewPublisher(recoveredJS, hmessaging.EventsStreamName, zap.NewNop())
+	_, err = reliableoutbox.FlushNextPage(f.ctx, zap.NewNop(), store, 1, recoveredPublisher)
+	require.NoError(t, err)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		message, err := consumer.Next(jetstream.FetchMaxWait(100 * time.Millisecond))
+		if !assert.NoError(c, err) {
+			return
+		}
+		var delivered events.CloudEvent[genevents.DeploymentChangedData]
+		if !assert.NoError(c, json.Unmarshal(message.Data(), &delivered)) {
+			return
+		}
+		assert.Equal(c, ack.DeploymentId, delivered.Data.DeploymentId)
+		assert.Equal(c, ack.EnvironmentId, delivered.Data.EnvUuid)
+		assert.Equal(c, pending[0].Message().ID, message.Headers().Get(hmessaging.HeaderMessageID))
+		assert.NoError(c, message.Ack())
+	}, 5*time.Second, 10*time.Millisecond, "the normal outbox relay must deliver the actual cleanup wake")
+	empty, _, err := store.LoadPage(f.ctx)
+	require.NoError(t, err)
+	require.Empty(t, empty, "only successful JetStream publication completes the outbox row")
 	require.Equal(t, http.StatusConflict, acknowledge(actor.String(), "a different story").Code)
 	require.Equal(t, http.StatusForbidden, acknowledge(userid.InternalSystemUuid.String(), reason).Code)
 

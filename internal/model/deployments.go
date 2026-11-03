@@ -569,9 +569,14 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 	return out, EncodedDeploymentManifest(rawManifest), tofu, EncodedDeploymentGraph(graph), nil
 }
 
-func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, projectId, envId string, force bool) error {
+func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, projectId, envId string, force bool, expectedEnvironmentID opt.Opt[uuid.UUID]) error {
 	if tx == nil {
 		return errors.New("transaction is required")
+	}
+
+	var expectedUUID any
+	if expectedEnvironmentID.IsSet() {
+		expectedUUID = expectedEnvironmentID.Must().String()
 	}
 
 	var environmentID uuid.UUID
@@ -580,8 +585,18 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		return err
 	}
 	if err == nil {
+		if expectedEnvironmentID.IsSet() && environmentID != expectedEnvironmentID.Must() {
+			return NewErrConflict("Environment UUID changed before deployment deletion")
+		}
 		if err := LockEnvironmentMutation(ctx, tx, environmentID); err != nil {
 			return err
+		}
+		var currentID uuid.UUID
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM deployment_environments WHERE org_id=$1 AND project_id=$2 AND env_id=$3 FOR UPDATE`, orgId, projectId, envId).Scan(&currentID); err != nil {
+			return errors.Wrap(err, "failed to lock deployment environment for deletion")
+		}
+		if currentID != environmentID {
+			return NewErrConflict("Environment UUID changed before deployment deletion")
 		}
 		// Row locks serialize deletion with dispatch capacity admission. A force
 		// deletion still cannot erase ownership of a possibly live Runner job.
@@ -614,10 +629,10 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3 AND ($4::uuid IS NULL OR environment_uuid=$4)`, orgId, projectId, envId, expectedUUID); err != nil {
 		return errors.Wrap(err, "failed to delete deployment queue items")
 	}
-	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3 AND ($4::uuid IS NULL OR id=$4)`, orgId, projectId, envId, expectedUUID); err != nil {
 		return errors.Wrap(err, "failed to delete deployment environments")
 	} else if _, err := rs.RowsAffected(); err != nil {
 		return errors.Wrap(err, "failed to get rows affected")

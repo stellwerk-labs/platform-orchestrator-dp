@@ -100,7 +100,7 @@ func TestExternalOperationDeploymentReceiptSerializesAndSurvivesDeploymentRetent
 
 	deletion, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.NoError(t, store.DeleteDeploymentsForEnv(ctx, deletion, key.OrgID, deployment.ProjectId, deployment.EnvId, true))
+	require.NoError(t, store.DeleteDeploymentsForEnv(ctx, deletion, key.OrgID, deployment.ProjectId, deployment.EnvId, true, opt.Empty[uuid.UUID]()))
 	require.NoError(t, deletion.Commit())
 	retained, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)

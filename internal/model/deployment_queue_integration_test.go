@@ -262,7 +262,7 @@ func TestDeploymentQueueDepthListingCancellationExpiryAndRetention(t *testing.T)
 		require.False(t, cancelled.ReasonDeploymentID.IsSet(), "deletion refers to no Deployment")
 	})
 	f.inTx(t, func(tx TxWithCommit) {
-		require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, "queue-org", "p", "e", true))
+		require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, "queue-org", "p", "e", true, opt.Empty[uuid.UUID]()))
 		var remaining int
 		require.NoError(t, tx.QueryRowContext(f.ctx, `SELECT count(*) FROM environment_deployment_queue`).Scan(&remaining))
 		require.Zero(t, remaining, "deleting the Environment deletes its queue history")

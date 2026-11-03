@@ -67,7 +67,7 @@ func TestHandleInner_active_env(t *testing.T) {
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusActive},
 	}, nil)
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, false))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 }
 
 func TestHandleInner_launch_destroy(t *testing.T) {
@@ -76,7 +76,7 @@ func TestHandleInner_launch_destroy(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting},
+		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: false, DeleteRules: false}, Status: platformorchestratorcp.EnvironmentStatusDeleting},
 	}, nil).Times(1)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: uuid.New(), Mode: model.DeploymentModeDeploy, Status: model.DeploymentStatusSucceeded}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
@@ -113,7 +113,7 @@ func TestHandleInner_launch_destroy(t *testing.T) {
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 	}, nil)
 
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, false))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 }
 
 func TestHandleInner_destroy_in_flight(t *testing.T) {
@@ -122,13 +122,13 @@ func TestHandleInner_destroy_in_flight(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting},
+		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: false, DeleteRules: false}, Status: platformorchestratorcp.EnvironmentStatusDeleting},
 	}, nil)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: uuid.New(), Mode: model.DeploymentModeDestroy, Status: model.DeploymentStatusExecuting}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
 		ProjectId: opt.Of("my-proj"), EnvId: opt.Of("my-env"), StateChangeOnly: true,
 	}).Return([]model.DeploymentSummary{lastDep}, "", nil)
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, false))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 }
 
 func TestHandleInner_destroy_failed(t *testing.T) {
@@ -139,7 +139,14 @@ func TestHandleInner_destroy_failed(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting, StatusMessage: ref.Ref(fmt.Sprintf("Waiting for destroy deployment '%s' to complete", depId))},
+		JSON200: &platformorchestratorcp.Environment{
+			Id:             "my-env",
+			Uuid:           uuid.Nil,
+			RunnerId:       ref.Ref("my-runner"),
+			DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: false, DeleteRules: false},
+			Status:         platformorchestratorcp.EnvironmentStatusDeleting,
+			StatusMessage:  ref.Ref(fmt.Sprintf("Waiting for destroy deployment '%s' to complete", depId)),
+		},
 	}, nil)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: depId, Mode: model.DeploymentModeDestroy, Status: model.DeploymentStatusFailed, StatusMessage: "some-error"}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
@@ -153,7 +160,7 @@ func TestHandleInner_destroy_failed(t *testing.T) {
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
 	}, nil)
 
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, false))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 }
 
 func TestHandleInner_destroy_succeeded_delete_rules(t *testing.T) {
@@ -166,18 +173,18 @@ func TestHandleInner_destroy_succeeded_delete_rules(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting},
+		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: false, DeleteRules: true}, Status: platformorchestratorcp.EnvironmentStatusDeleting},
 	}, nil)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: uuid.New(), Mode: model.DeploymentModeDestroy, Status: model.DeploymentStatusSucceeded}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
 		ProjectId: opt.Of("my-proj"), EnvId: opt.Of("my-env"), StateChangeOnly: true,
 	}).Return([]model.DeploymentSummary{lastDep}, "", nil)
 
-	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", false).Return(nil)
-	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{DeleteRules: ref.Ref(true)}).
+	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", false, opt.Of(uuid.Nil)).Return(nil)
+	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{ExpectedEnvUuid: ref.Ref(uuid.Nil)}).
 		Return(&platformorchestratorcp.InternalForceDeleteEnvironmentResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}}, nil)
 
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, true))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 	require.Equal(t, uuid.Nil.String(), deleteLogsCalledEnvUuid)
 }
 
@@ -191,18 +198,18 @@ func TestHandleInner_force_destroy_succeeded(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting},
+		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: true, DeleteRules: false}, Status: platformorchestratorcp.EnvironmentStatusDeleting},
 	}, nil)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: uuid.New(), Mode: model.DeploymentModeDeploy, Status: model.DeploymentStatusSucceeded}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
 		ProjectId: opt.Of("my-proj"), EnvId: opt.Of("my-env"), StateChangeOnly: true,
 	}).Return([]model.DeploymentSummary{lastDep}, "", nil)
 
-	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", true).Return(nil)
-	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{DeleteRules: ref.Ref(false)}).
+	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", true, opt.Of(uuid.Nil)).Return(nil)
+	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{ExpectedEnvUuid: ref.Ref(uuid.Nil)}).
 		Return(&platformorchestratorcp.InternalForceDeleteEnvironmentResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}}, nil)
 
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, true, false))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 	require.Equal(t, uuid.Nil.String(), deleteLogsCalledEnvUuid)
 }
 func TestHandleInner_destroy_succeeded_delete_rules_log_del_fail(t *testing.T) {
@@ -215,17 +222,17 @@ func TestHandleInner_destroy_succeeded_delete_rules_log_del_fail(t *testing.T) {
 
 	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().GetEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env").Return(&platformorchestratorcp.GetEnvironmentResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusOK},
-		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), Status: platformorchestratorcp.EnvironmentStatusDeleting},
+		JSON200:      &platformorchestratorcp.Environment{Id: "my-env", Uuid: uuid.Nil, RunnerId: ref.Ref("my-runner"), DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{Force: false, DeleteRules: true}, Status: platformorchestratorcp.EnvironmentStatusDeleting},
 	}, nil)
 	lastDep := model.DeploymentSummary{OrgId: "my-org", ProjectId: "my-proj", EnvId: "my-env", Id: uuid.New(), Mode: model.DeploymentModeDestroy, Status: model.DeploymentStatusSucceeded}
 	h.db.(*mockmodel.MockDatabaser).EXPECT().ListLastDeployments(gomock.Any(), gomock.Not(nil), "my-org", "", 1, model.ListLastDeploymentsParams{
 		ProjectId: opt.Of("my-proj"), EnvId: opt.Of("my-env"), StateChangeOnly: true,
 	}).Return([]model.DeploymentSummary{lastDep}, "", nil)
 
-	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", false).Return(nil)
-	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{DeleteRules: ref.Ref(true)}).
+	h.db.(*mockmodel.MockDatabaser).EXPECT().DeleteDeploymentsForEnv(gomock.Any(), gomock.Not(nil), "my-org", "my-proj", "my-env", false, opt.Of(uuid.Nil)).Return(nil)
+	h.cpClient.(*mockplatformorchestratorcp.MockClientWithResponsesInterface).EXPECT().InternalForceDeleteEnvironmentWithResponse(gomock.Any(), "my-org", "my-proj", "my-env", &platformorchestratorcp.InternalForceDeleteEnvironmentParams{ExpectedEnvUuid: ref.Ref(uuid.Nil)}).
 		Return(&platformorchestratorcp.InternalForceDeleteEnvironmentResponse{HTTPResponse: &http.Response{StatusCode: http.StatusNoContent}}, nil)
 
-	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil, false, true))
+	require.NoError(t, h.handleInner(t.Context(), zaptest.NewLogger(t), "my-org", "my-proj", "my-env", uuid.Nil))
 	require.Equal(t, uuid.Nil.String(), deleteLogsCalledEnvUuid)
 }

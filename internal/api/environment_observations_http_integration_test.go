@@ -23,6 +23,7 @@ import (
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 	observation "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/observationapi"
 	platformgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/require"
@@ -311,7 +312,7 @@ func TestObservationRedeployReusesExactSnapshotThroughOrdinaryAdmission(t *testi
 	require.Equal(t, response.Body.String(), lookedUp.Body.String())
 	tx, err := f.store.BeginTx(f.ctx, nil)
 	require.NoError(t, err)
-	require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, queueOrg, queueProject, queueEnv, true))
+	require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, queueOrg, queueProject, queueEnv, true, opt.Empty[uuid.UUID]()))
 	require.NoError(t, tx.Commit())
 	gone := read()
 	require.Equal(t, http.StatusOK, gone.Code, gone.Body.String())

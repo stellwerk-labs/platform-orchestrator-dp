@@ -136,7 +136,15 @@ stop. Ordinary capacity attestations release only that reservation. Existing
 plugin/observation fence acknowledgements reject waiting work as before.
 Even forced Environment deletion cannot erase live Runner ownership. Released
 reservations can be removed during normal Environment deletion; receipt
-identities survive as tombstones.
+identities survive as tombstones. Force skips new Destroy work; it never stops or
+forgets a possibly live job. Deletion handlers re-read CP's canonical deletion
+policy for the exact Environment UUID on every wake. Force and delete-rules
+choices survive ordinary completion, redelivery and restart. They can escalate to
+true within one Environment UUID; a later default/false retry cannot undo them.
+A legacy deleting
+Environment whose policy is unrecorded requires an explicit repeated deletion
+request. A newly recorded acknowledgement durably wakes cleanup in the same
+transaction, while an identical replay does not enqueue another wake.
 
 ## Explicit remedial deployment
 
