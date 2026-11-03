@@ -133,5 +133,23 @@ class WorkflowTests(unittest.TestCase):
                 component(checkout)
 
 
+    def test_score_routes_public_queue_api_only_to_data_plane(self):
+        paths = [line.strip().removeprefix("path: ") for line in
+                 (ROOT / "score.yaml").read_text().splitlines()
+                 if line.strip().startswith("path: /orgs/")]
+        self.assertEqual(len(paths), 1)
+        route = re.compile(paths[0])
+        for path in ("/orgs/example/deployment-queue",
+                     "/orgs/example/deployment-queue/item",
+                     "/orgs/example/deployment-queue/item/actions/cancel"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(route.fullmatch(path))
+        for path in ("/orgs/example/projects", "/orgs/example/runners",
+                     "/internal/orgs/example/deployment-queue",
+                     "/orgs/example/deployment-queue-adjacent"):
+            with self.subTest(path=path):
+                self.assertIsNone(route.fullmatch(path))
+
+
 if __name__ == "__main__":
     unittest.main()
