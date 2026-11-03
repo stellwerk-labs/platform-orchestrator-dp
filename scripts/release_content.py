@@ -440,14 +440,14 @@ def scan(directory, forbidden=()):
 KIN_MODULE = "github.com/getkin/kin-openapi"
 KIN_VERSION = "v0.144.0"
 KIN_SUM = "h1:hIRcTH+KjLfkLpYU6bSSfdFpi0fZi1fp+hSPi4aQu9Y="
-BINARY_POLICY = "kin-openapi-v0.144.0-go1.26.10-adjacent-validation-v1"
+BINARY_POLICY = "verified-public-compiler-literals-go1.26.10-v2"
 KIN_MATCH = "41678ee534db27563e9f7717169f4f1b0d2dc051912e2da8f8c9c33e724364b1"
 KIN_SECRET = "8b422fbcf44a15e60d9edc56c00c549209107dee95a0332e5cf560d4cbc961ab"
 KIN_BEFORE = "c70bd16e531b368f911bab880f76007541bf617d3488ae15455b1a389ea524da"
 KIN_AFTER = "feb9e59b60eab45bc01bb66a0e3f5c9a1e432b819c06e0324334cf1266bfcb32"
 
 
-def known_binary_finding(data, finding, sums, buildinfo):
+def known_kin_binary_finding(data, finding, sums, buildinfo):
     """Accept only the reviewed compiler boundary, never a source credential."""
     if (data[:6] != b"\x7fELF\x02\x01" or len(data) < 20
             or int.from_bytes(data[18:20], "little") not in (62, 183)
@@ -482,6 +482,64 @@ def known_binary_finding(data, finding, sums, buildinfo):
                 or hashlib.sha256(after).hexdigest() != KIN_AFTER):
             return False
     return bool(occurrences)
+
+
+GOOGLE_LITERAL_MODULES = (
+    ("cloud.google.com/go/container", "v1.46.0", "h1:xX94Lo3xrS5OkdMWKvpEVAbBwjN9uleVv6vOi02fL4s="),
+    ("golang.org/x/oauth2", "v0.36.0", "h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs="),
+)
+GOOGLE_LITERAL_HASHES = (
+    "f54b03bbc26c2e9d27c876daee547e35e3640ca75ddd1164373184e038c34dae",
+    "231a717f2f0b84203300978089be7158ead8dad3b96cbb155562ac3644a46152",
+    "f7843c000501ff5d3601b5db0c5eb512e1ffea6bf39d53e31f052c886d5a2e2a",
+    "a0b7a09efd27fb5f5d9e09d7a977e35c00a6d7b1aae433219f272da723ac246f",
+)
+GOOGLE_LITERAL_MATCH = "d15b3a795d9ed3df75c1818c317a22d823111cc1b763adc63284c5c306fff62b"
+GOOGLE_LITERAL_SECRET = "1167873ecd4af6445a3c3524b315cbbb80eddc0f9c8b15bea90333698900852c"
+
+
+def known_google_literal_adjacency(data, finding, sums, buildinfo):
+    """Bind the reviewed four-public-literal compiler boundary, not a credential."""
+    if (data[:6] != b"\x7fELF\x02\x01" or len(data) < 20
+            or int.from_bytes(data[18:20], "little") not in (62, 183)
+            or finding.get("RuleID") != "generic-api-key"
+            or not isinstance(finding.get("Match"), str)
+            or not isinstance(finding.get("Secret"), str)):
+        return False
+    match, secret = finding["Match"].encode(), finding["Secret"].encode()
+    if (len(match) != 79 or hashlib.sha256(match).hexdigest() != GOOGLE_LITERAL_MATCH
+            or len(secret) != 20 or hashlib.sha256(secret).hexdigest() != GOOGLE_LITERAL_SECRET
+            or match[59:79] != secret):
+        return False
+    lines = buildinfo.splitlines()
+    if not lines or not lines[0].endswith(": go1.26.10"):
+        return False
+    rows = [line.split() for line in lines]
+    for module, version, checksum in GOOGLE_LITERAL_MODULES:
+        identity = [module, version, checksum]
+        if identity not in [line.split() for line in sums.splitlines()]:
+            return False
+        deps = [i for i, row in enumerate(rows) if row[:2] == ["dep", module]]
+        if (len(deps) != 1 or rows[deps[0]] != ["dep"] + identity
+                or (deps[0] + 1 < len(rows) and rows[deps[0] + 1][:1] == ["=>"])):
+            return False
+    # Four complete adjacent 28-byte enum/header/endpoint/type literals.
+    # Match: last6 + 28 + 28 + first17. Secret: last3 + first17.
+    occurrences = list(re.finditer(re.escape(match), data))
+    for occurrence in occurrences:
+        start = occurrence.start() - 22
+        if start < 0 or start + 112 > len(data):
+            return False
+        for index, checksum in enumerate(GOOGLE_LITERAL_HASHES):
+            literal = data[start + index * 28:start + (index + 1) * 28]
+            if hashlib.sha256(literal).hexdigest() != checksum:
+                return False
+    return bool(occurrences)
+
+
+def known_binary_finding(data, finding, sums, buildinfo):
+    return (known_kin_binary_finding(data, finding, sums, buildinfo)
+            or known_google_literal_adjacency(data, finding, sums, buildinfo))
 
 
 def scanner_findings(returncode, stdout, stderr):
@@ -606,6 +664,21 @@ def source_scan(directory):
     print(json.dumps({"acceptedPublicSourceFindings": len(findings), "policy": NOTICE_POLICY}, sort_keys=True))
 
 
+def scan_binary_strings(strings, source):
+    # A regular stdin descriptor makes scanner fragments independent of pipe
+    # writes. The private temporary input is closed/unlinked on every exit;
+    # scanner reports remain only in memory, with unchanged flags and rules.
+    with tempfile.TemporaryDirectory(prefix="binary-scan-") as isolated, tempfile.TemporaryFile() as stream:
+        stream.write(strings)
+        stream.seek(0)
+        result = subprocess.run(["gitleaks", "stdin", "--no-banner", "--log-level", "error",
+                                 "--ignore-gitleaks-allow", "--gitleaks-ignore-path", "/dev/null",
+                                 "--config", str(source / "scripts/gitleaks.toml"),
+                                 "--report-format", "json", "--report-path", "-"],
+                                stdin=stream, capture_output=True, timeout=65, cwd=isolated)
+    return scanner_findings(result.returncode, result.stdout, result.stderr)
+
+
 def binary_scan(directory):
     root = Path(directory)
     if not root.is_dir() or root.is_symlink():
@@ -616,14 +689,6 @@ def binary_scan(directory):
     seen = set()
     other_strings = []
     names = []
-    def inspect(strings):
-        with tempfile.TemporaryDirectory(prefix="binary-scan-") as isolated:
-            result = subprocess.run(["gitleaks", "stdin", "--no-banner", "--log-level", "error",
-                                     "--ignore-gitleaks-allow", "--gitleaks-ignore-path", "/dev/null",
-                                     "--config", str(source / "scripts/gitleaks.toml"),
-                                     "--report-format", "json", "--report-path", "-"],
-                                    input=strings, capture_output=True, timeout=65, cwd=isolated)
-        return scanner_findings(result.returncode, result.stdout, result.stderr)
     for path in root.rglob("*"):
         names.append(path.relative_to(root).as_posix().encode())
         if path.is_symlink():
@@ -641,9 +706,9 @@ def binary_scan(directory):
         if data[:6] != b"\x7fELF\x02\x01":
             other_strings.append(strings)
             continue
-        # Raw finding values exist only in this process's memory. Neither tool
-        # output nor reports are logged or persisted, including on failure.
-        findings = inspect(strings)
+        # Scanner reports stay only in memory, including on failure; no raw
+        # finding values are logged or persisted.
+        findings = scan_binary_strings(strings, source)
         if not findings:
             continue
         environment = dict(os.environ, GOTOOLCHAIN="go1.26.10", GOENV="off", GOWORK="off")
@@ -659,9 +724,9 @@ def binary_scan(directory):
     # Binary data such as timezone databases has no exception. Batch its strings
     # rather than spawning one scanner process per tiny file. Byte-identical
     # raw/merged files were already checked once, including hidden lower layers.
-    if other_strings and inspect(b"\n".join(other_strings)):
+    if other_strings and scan_binary_strings(b"\n".join(other_strings), source):
         raise ValueError("non-ELF binary secret scan found prohibited content")
-    if inspect(b"\n".join(names)):
+    if scan_binary_strings(b"\n".join(names), source):
         raise ValueError("artifact path secret scan found prohibited content")
     print(json.dumps({"acceptedBinaryFalsePositives": accepted, "policy": BINARY_POLICY}, sort_keys=True))
 
