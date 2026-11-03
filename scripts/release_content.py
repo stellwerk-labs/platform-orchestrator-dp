@@ -485,13 +485,19 @@ def known_binary_finding(data, finding, sums, buildinfo):
 
 
 def scanner_findings(returncode, stdout, stderr):
+    if returncode not in (0, 1):
+        raise ValueError("binary scanner exit invalid")
+    if stderr:
+        raise ValueError("binary scanner wrote stderr")
     findings = json.loads(stdout)
-    if (returncode not in (0, 1) or stderr or not isinstance(findings, list)
-            or (returncode == 0) != (len(findings) == 0)
-            or any(not isinstance(finding, dict)
-                   or any(not isinstance(finding.get(key), str) or not finding[key]
-                          for key in ("RuleID", "Match", "Secret")) for finding in findings)):
-        raise ValueError("binary scanner tool or report failure")
+    if not isinstance(findings, list):
+        raise ValueError("binary scanner report type invalid")
+    if (returncode == 0) != (len(findings) == 0):
+        raise ValueError("binary scanner report status mismatch")
+    if any(not isinstance(finding, dict)
+           or any(not isinstance(finding.get(key), str) or not finding[key]
+                  for key in ("RuleID", "Match", "Secret")) for finding in findings):
+        raise ValueError("binary scanner finding shape invalid")
     return findings
 
 
@@ -681,9 +687,53 @@ def main():
         raise ValueError("unknown content command")
 
 
+def refusal_code(error):
+    """Classify refusals without logging tool output, paths or finding values."""
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "tool-timeout"
+    if isinstance(error, subprocess.SubprocessError):
+        return "tool-failed"
+    if isinstance(error, json.JSONDecodeError):
+        return "json-report-invalid"
+    if isinstance(error, UnicodeError):
+        return "text-decode-invalid"
+    if isinstance(error, OSError):
+        return "io-failed"
+    if isinstance(error, KeyError):
+        return "metadata-field-missing"
+    if isinstance(error, TypeError):
+        return "metadata-type-invalid"
+    if isinstance(error, tarfile.TarError):
+        return "archive-invalid"
+    if isinstance(error, EOFError):
+        return "archive-truncated"
+    messages = {
+        "binary scanner exit invalid": "scanner-exit-invalid",
+        "binary scanner wrote stderr": "scanner-stderr-nonempty",
+        "binary scanner report type invalid": "scanner-report-type-invalid",
+        "binary scanner report status mismatch": "scanner-report-status-mismatch",
+        "binary scanner finding shape invalid": "scanner-finding-shape-invalid",
+        "binary finding lacks verified Go build metadata": "go-metadata-unavailable",
+        "binary secret scan found unapproved content": "elf-content-refused",
+        "non-ELF binary secret scan found prohibited content": "non-elf-content-refused",
+        "artifact path secret scan found prohibited content": "artifact-path-refused",
+        "refusing symlinked scan content": "symlink-input-refused",
+        "missing or symlinked scan input": "scan-input-invalid",
+    }
+    message = error.args[0] if len(error.args) == 1 and type(error.args[0]) is str else None
+    return messages.get(message, "validation-refused")
+
+
+def report_refusal(error, command):
+    commands = {"export", "compare", "scan", "oci-reference", "sbom-layout", "binary-scan", "source-scan"}
+    phase = command if command in commands else "unknown"
+    print(f"release content validation failed; phase={phase}; code={refusal_code(error)}; "
+          "inspect locally without exposing findings", file=sys.stderr)
+
+
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, EOFError, subprocess.SubprocessError):
-        print("release content validation failed; inspect locally without exposing findings", file=sys.stderr)
+    except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, EOFError, subprocess.SubprocessError) as error:
+        report_refusal(error, sys.argv[1] if len(sys.argv) > 1 else "")
         sys.exit(1)
