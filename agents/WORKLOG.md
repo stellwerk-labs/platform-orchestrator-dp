@@ -104,3 +104,11 @@ Prepared the exact RC6 notes path required by the normal candidate preflight and
 ## 2026-11-04 retained-history assertion and output retention
 
 Corrected the new existing-environment regression after the real old-server case exposed normal encrypted-output expiry. Renamed the private case fingerprint to historical_immutable_columns_sha256 and removed only outputs from the SQL JSON projection. Successful output decryption, strict graph/state checks and all other historical columns remain required. Production code, dependencies, migrations, fixtures and candidate notes are unchanged; no public release or completed upgrade is claimed by this test-only change.
+
+## 2026-11-04: Forward integration generation correction
+
+Preserved RC6 and diagnosed its integration setup failure before API cases ran.
+Added the existing generation target and tracked parity check to the integration
+job, with a workflow order regression and proposed RC7 notes. The correction keeps
+all product tests and publication gates. Clean-checkout generation/compile and
+source-parity evidence are retained separately by the release coordinator.

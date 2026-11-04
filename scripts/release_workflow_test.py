@@ -38,6 +38,34 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn("sbom: generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9", build)
                 self.assertIn("provenance: mode=max", build)
 
+    def assert_integration_generation_precedes_fixture_work(self, workflow):
+        integration = workflow.split("\n  integration:\n", 1)[1].split("\n  release:\n", 1)[0]
+        steps = re.split(r"(?m)^      - name: ", integration)[1:]
+        names = [step.split("\n", 1)[0] for step in steps]
+        generation = names.index("Generate integration test prerequisites")
+        self.assertLess(names.index("Setup Go"), generation)
+        self.assertLess(generation, names.index("Setup Score Compose"))
+        self.assertLess(generation, names.index("Run integration tests"))
+        self.assertRegex(steps[generation], re.compile(
+            r"(?m)^        run: \|\n"
+            r"          make generate\n"
+            r"          git diff --exit-code$"))
+
+    def test_integration_generates_host_test_prerequisites_before_fixture_work(self):
+        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        self.assert_integration_generation_precedes_fixture_work(workflow)
+        generation = ("      - name: Generate integration test prerequisites\n"
+                      "        run: |\n"
+                      "          make generate\n"
+                      "          git diff --exit-code\n\n")
+        missing = workflow.replace(generation, "", 1)
+        with self.assertRaises((AssertionError, ValueError)):
+            self.assert_integration_generation_precedes_fixture_work(missing)
+        reordered = missing.replace("      - name: Show integration test logs\n",
+                                    generation + "      - name: Show integration test logs\n", 1)
+        with self.assertRaises(AssertionError):
+            self.assert_integration_generation_precedes_fixture_work(reordered)
+
     def test_every_publisher_uses_pinned_buildx_and_creation_context_opt_out(self):
         workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
         self.assert_publisher_buildx_policy(workflow)

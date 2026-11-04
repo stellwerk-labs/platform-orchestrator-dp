@@ -26,3 +26,10 @@ Handle historical Canyon placeholder names at the central provider-substitution 
 ## 2026-11-04 retained-history assertion and output retention
 
 The retained-graph regression excludes only the policy-managed outputs ciphertext from its immutable-row fingerprint. It still hashes the graph separately and retains all other Deployment fields, Environment UUID and state UID/bytes/lineage checks. No output-retention setting, database row or production behavior changes. The initial failed fixture/case remains preserved; a new private case representation records the verified durable fingerprint.
+
+## 2026-11-04: Integration checkout owns generated test prerequisites
+
+Generate with the existing pinned Make target in the integration job, then check
+tracked-file parity before fixture setup. Jobs have independent checkouts; the
+verification job's generated mocks cannot satisfy API test-package imports in
+integration. Preserve test selection and keep generated mocks uncommitted.

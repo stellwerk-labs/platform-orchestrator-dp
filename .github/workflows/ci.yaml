@@ -560,6 +560,11 @@ jobs:
           check-latest: true
           cache: false
 
+      - name: Generate integration test prerequisites
+        run: |
+          make generate
+          git diff --exit-code
+
       - name: Setup Score Compose
         uses: score-spec/setup-score@888a7deafd396c3f3f05e00d2d9b0ab225799ac0 # v3.2.4
         with:
