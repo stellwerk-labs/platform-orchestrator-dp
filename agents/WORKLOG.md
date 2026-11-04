@@ -96,3 +96,7 @@
 ## Local retained-graph compatibility preparation
 
 Implemented distinct historical Gob registrations and central normalization with frozen synthetic independent-encoder fixtures. Exact old source fails the fixtures; the patched graph suite and pinned lint pass. Normal generation then full unit suite passes571 tests; new real-server lifecycle regression compiles and full pinned lint passes. The regression has explicit private phases for an old-to-new same-environment rehearsal; actual predecessor upgrade/artifact execution remains pending. Existing RC5 artifacts are unchanged. No public release or customer mutation is performed by this local commit.
+
+## 2026-11-04 proposed candidate notes
+
+Prepared the exact RC6 notes path required by the normal candidate preflight and consolidated the unreleased retained-graph note there. Existing RC5 notes remain unchanged. This is a local documentation-only successor of the tested compatibility reader; application, fixture, workflow, dependency and canonical writer bytes are unchanged. The original compatibility source/artifact evidence remains bound to its actual source. No tag or publication is created; existing-environment upgrade execution and final-source artifact qualification remain separate gates.
