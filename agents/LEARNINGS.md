@@ -36,3 +36,17 @@
   runs `make test-integration`, and candidate publication depends on that job.
   A local internal/API pass therefore does not establish root functional or
   packaged release readiness.
+
+## Retained provider-substitution compatibility
+
+A legacy-map test generated with current Go types cannot prove pre-rename Gob compatibility. Frozen synthetic files from an independent old-name encoder reproduce the missing registration. Distinct legacy concrete types avoid duplicate Gob-name registration and normalize to current placeholders before application use. Current canonical writer and dependencies remain unchanged.
+
+## 2026-11-04 retained-history assertion and output retention
+
+A completed Deployment can legitimately lose its encrypted output transfer payload under the existing retention policy. Compare the retained graph and every other historical column, while checking output delivery separately. In the real old-server rehearsal, a retained Runner result reproduced the original whole-row hash through a read-only projection replacing only that ciphertext, proving the cause before changing the assertion.
+
+## 2026-11-04: Go test filters still compile the whole package
+
+Selecting only PostgreSQL-backed API tests still compiles ordinary API test files
+and their generated mock imports. A warm developer checkout can hide that missing
+job prerequisite. Reproduce on an exact fresh checkout before allocating fixtures.

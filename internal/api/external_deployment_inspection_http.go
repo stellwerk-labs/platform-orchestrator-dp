@@ -710,7 +710,7 @@ func projectEnvironmentReadiness(item model.EnvironmentDeploymentReadiness) exte
 		}
 	}
 	// Plugin dispatches yield to Core-queued Deployments; the queue deploys next.
-	if item.Queued {
+	if item.Queued || item.Executing {
 		state = "busy"
 	}
 	result := externalEnvironmentReadiness{

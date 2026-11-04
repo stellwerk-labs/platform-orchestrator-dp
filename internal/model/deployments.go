@@ -25,6 +25,7 @@ import (
 type DeploymentMode string
 
 const (
+	DeploymentModeObservation  DeploymentMode = "observation"
 	DeploymentModeDeployPlan   DeploymentMode = "plan_only"
 	DeploymentModeDeploy       DeploymentMode = "deploy"
 	DeploymentModeRollback     DeploymentMode = "rollback"
@@ -154,6 +155,8 @@ type EnvironmentDeploymentReadiness struct {
 	ActiveModules             []ModuleArtifactRequirement
 	// Queued reports Core-queued Deployments that every other mutation must wait for.
 	Queued bool
+	// Executing includes plan and observation jobs, without changing the state head.
+	Executing bool
 }
 
 type ListDeploymentsParams struct {
@@ -238,10 +241,13 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		ModuleVersionRequestDigest: params.ModuleVersionRequestDigest,
 	}
 
+	if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
+		return nil, err
+	}
+	if err := RequireObservationStopped(ctx, tx, out.DeploymentEnvUuid); err != nil {
+		return nil, err
+	}
 	if RequiresEnvironmentLease(params.Mode) {
-		if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
-			return nil, err
-		}
 		var holder uuid.UUID
 		if err := tx.QueryRowContext(ctx, `INSERT INTO environment_deployment_leases
 			(environment_id, org_id, project_id, env_id, holder_id, purpose, deployment_id, expires_at)
@@ -331,7 +337,7 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 
 	statement := `INSERT INTO deployment_environments (id, org_id, project_id, env_id, last_executing_deployment_id, last_executing_deployment_at, last_state_deployment_id, last_state_deployment_at) VALUES ($1, $2, $3, $4, $5, $6, $5, $6)
 		ON CONFLICT (org_id, project_id, env_id) DO UPDATE SET last_executing_deployment_id = $5, last_executing_deployment_at = $6, last_state_deployment_id = $5, last_state_deployment_at = $6`
-	if params.Mode == DeploymentModeDeployPlan || params.Mode == DeploymentModeRollbackPlan {
+	if IsPlanDeployment(params.Mode) {
 		statement = `INSERT INTO deployment_environments (id, org_id, project_id, env_id, last_executing_deployment_id, last_executing_deployment_at, last_state_deployment_id, last_state_deployment_at) VALUES ($1, $2, $3, $4, $5, $6, $5, $6)
         	ON CONFLICT (org_id, project_id, env_id) DO UPDATE SET last_executing_deployment_id = $5, last_executing_deployment_at = $6`
 	}
@@ -563,9 +569,52 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 	return out, EncodedDeploymentManifest(rawManifest), tofu, EncodedDeploymentGraph(graph), nil
 }
 
-func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, projectId, envId string, force bool) error {
+func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, projectId, envId string, force bool, expectedEnvironmentID opt.Opt[uuid.UUID]) error {
 	if tx == nil {
 		return errors.New("transaction is required")
+	}
+
+	var expectedUUID any
+	if expectedEnvironmentID.IsSet() {
+		expectedUUID = expectedEnvironmentID.Must().String()
+	}
+
+	var environmentID uuid.UUID
+	err := tx.QueryRowContext(ctx, `SELECT id FROM deployment_environments WHERE org_id=$1 AND project_id=$2 AND env_id=$3`, orgId, projectId, envId).Scan(&environmentID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if expectedEnvironmentID.IsSet() && environmentID != expectedEnvironmentID.Must() {
+			return NewErrConflict("Environment UUID changed before deployment deletion")
+		}
+		if err := LockEnvironmentMutation(ctx, tx, environmentID); err != nil {
+			return err
+		}
+		var currentID uuid.UUID
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM deployment_environments WHERE org_id=$1 AND project_id=$2 AND env_id=$3 FOR UPDATE`, orgId, projectId, envId).Scan(&currentID); err != nil {
+			return errors.Wrap(err, "failed to lock deployment environment for deletion")
+		}
+		if currentID != environmentID {
+			return NewErrConflict("Environment UUID changed before deployment deletion")
+		}
+		// Row locks serialize deletion with dispatch capacity admission. A force
+		// deletion still cannot erase ownership of a possibly live Runner job.
+		var lockedCount int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT id FROM deployments WHERE de_id=$1 FOR UPDATE) locked`, environmentID).Scan(&lockedCount); err != nil {
+			return err
+		}
+
+		var live bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_job_reservations r JOIN deployments d ON d.id=r.deployment_id WHERE d.de_id=$1 AND r.released_at IS NULL)`, environmentID).Scan(&live); err != nil {
+			return err
+		}
+		if live {
+			return NewErrCodedConflict(CodeOutcomeUnreconciled, "Environment retains Runner ownership; prove completion or acknowledge authoritative stop before deletion")
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM runner_job_reservations r USING deployments d WHERE d.id=r.deployment_id AND d.de_id=$1 AND r.released_at IS NOT NULL`, environmentID); err != nil {
+			return err
+		}
 	}
 
 	if !force {
@@ -580,10 +629,10 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_deployment_queue WHERE org_id = $1 AND project_id = $2 AND env_id = $3 AND ($4::uuid IS NULL OR environment_uuid=$4)`, orgId, projectId, envId, expectedUUID); err != nil {
 		return errors.Wrap(err, "failed to delete deployment queue items")
 	}
-	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3`, orgId, projectId, envId); err != nil {
+	if rs, err := tx.ExecContext(ctx, `DELETE FROM deployment_environments WHERE org_id = $1 AND project_id = $2 AND env_id = $3 AND ($4::uuid IS NULL OR id=$4)`, orgId, projectId, envId, expectedUUID); err != nil {
 		return errors.Wrap(err, "failed to delete deployment environments")
 	} else if _, err := rs.RowsAffected(); err != nil {
 		return errors.Wrap(err, "failed to get rows affected")
@@ -636,7 +685,8 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 		       base.id, COALESCE(base.module_artifacts, '[]'::jsonb),
 		       EXISTS (SELECT 1 FROM environment_deployment_queue queued
 		               WHERE queued.org_id=$1 AND queued.project_id=request.project_id
-		                 AND queued.env_id=request.env_id AND queued.state='queued')
+		                 AND queued.env_id=request.env_id AND queued.state='queued'),
+ EXISTS (SELECT 1 FROM deployments executing WHERE executing.id=environment.last_executing_deployment_id AND executing.status='executing')
 		FROM requested request
 		LEFT JOIN deployment_environments environment
 		  ON environment.org_id=$1 AND environment.project_id=request.project_id AND environment.env_id=request.env_id
@@ -664,7 +714,7 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 		if err := rows.Scan(
 			&item.ProjectID, &item.EnvID, opt.Scan(&item.EnvironmentUUID),
 			opt.Scan(&item.LatestDeploymentID), opt.Scan(&item.LatestStatus), opt.Scan(&item.LatestMode),
-			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts, &item.Queued,
+			opt.Scan(&item.ActiveLeaseUntil), opt.Scan(&item.EffectiveBaseDeploymentID), &artifacts, &item.Queued, &item.Executing,
 		); err != nil {
 			return nil, errors.Wrap(err, "failed to scan environment deployment readiness")
 		}
@@ -675,6 +725,17 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 	}
 	if err := rows.Err(); err != nil {
 		return nil, errors.Wrap(err, "failed to iterate environment deployment readiness")
+	}
+	// Close the result before querying through the same transaction connection.
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, item := range result {
+		if item.EnvironmentUUID.IsSet() {
+			if err := RequireObservationStopped(ctx, d.txOrDb(optionalTx), item.EnvironmentUUID.Must()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return result, nil
 }
@@ -707,6 +768,9 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 				return nil, err
 			}
 		}
+		if err := ReleaseRunnerJob(ctx, d.txOrDb(optionalTx), deploymentId); err != nil {
+			return nil, err
+		}
 		if _, err := d.txOrDb(optionalTx).ExecContext(ctx, `DELETE FROM environment_deployment_leases WHERE deployment_id = $1`, deploymentId); err != nil {
 			return nil, errors.Wrap(err, "failed to release environment deployment lease")
 		}
@@ -718,8 +782,12 @@ func CompleteDeploymentSnapshot(manifest EncodedDeploymentManifest, tofu RawTofu
 	return len(tofu) > 0 && json.Valid(manifest) && json.Valid(graph) && strings.HasPrefix(strings.TrimSpace(string(manifest)), "{") && strings.HasPrefix(strings.TrimSpace(string(graph)), "{")
 }
 
+func IsPlanDeployment(mode DeploymentMode) bool {
+	return mode == DeploymentModeDeployPlan || mode == DeploymentModeRollbackPlan || mode == DeploymentModeObservation
+}
+
 func RequiresEnvironmentLease(mode DeploymentMode) bool {
-	return mode == DeploymentModeDeploy || mode == DeploymentModeRollback || mode == DeploymentModeDestroy
+	return mode == DeploymentModeDeploy || mode == DeploymentModeRollback || mode == DeploymentModeDestroy || mode == DeploymentModeObservation
 }
 
 func (d *databaser) RenewDeploymentLease(ctx context.Context, optionalTx Tx, deploymentID uuid.UUID, ttl time.Duration) error {

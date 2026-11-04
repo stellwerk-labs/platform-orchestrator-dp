@@ -88,10 +88,49 @@ func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJ
 		jobTemplate = podTemplate
 	}
 
+	if d.Mode == model.DeploymentModeObservation {
+		if err := validateObservationJobTemplate(jobTemplate); err != nil {
+			return nil, err
+		}
+	}
 	return &v1.JobSpec{
 		TTLSecondsAfterFinished: ref.Ref(int32(DefaultRunnerJobTTL.Seconds())),
 		Parallelism:             ref.Ref(int32(1)),
 		BackoffLimit:            ref.Ref(int32(0)),
 		Template:                jobTemplate,
 	}, nil
+}
+
+// Templates may customize an ordinary job. Observation's final transport must
+// retain the known safe legacy mode and the exact new protocol marker.
+func validateObservationJobTemplate(template corev1.PodTemplateSpec) error {
+	found := false
+	for _, container := range template.Spec.Containers {
+		if container.Name != RunnerContainerName {
+			continue
+		}
+		found = true
+		if len(container.Command) != 0 || !slices.Equal(container.Args, []string{runnercommon.RunnerImageSubCommand}) {
+			return errors.New("observation requires the standard Runner entrypoint")
+		}
+		counts := map[string]int{}
+		expected := map[string]string{"MODE": string(model.DeploymentModeDeployPlan), runnercommon.ObservationProtocolVariable: runnercommon.ObservationProtocolV1}
+		for _, env := range container.Env {
+			if value, protected := expected[env.Name]; protected {
+				counts[env.Name]++
+				if env.ValueFrom != nil || env.Value != value {
+					return errors.New("observation transport environment cannot be overridden by a pod template")
+				}
+			}
+		}
+		for name := range expected {
+			if counts[name] != 1 {
+				return errors.New("observation requires exactly one safe mode and protocol marker")
+			}
+		}
+	}
+	if !found {
+		return errors.New("observation Runner container is missing")
+	}
+	return nil
 }

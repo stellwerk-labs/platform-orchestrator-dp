@@ -42,7 +42,7 @@ func (c *destroyCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	runner := "runner"
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/orgs/org/projects/project/envs/environment":
-		assert.NoError(c.t, json.NewEncoder(w).Encode(platformorchestratorcp.Environment{Id: "environment", ProjectId: "project", Uuid: c.envUUID, RunnerId: &runner, Status: platformorchestratorcp.EnvironmentStatusDeleting}))
+		assert.NoError(c.t, json.NewEncoder(w).Encode(platformorchestratorcp.Environment{Id: "environment", ProjectId: "project", Uuid: c.envUUID, RunnerId: &runner, Status: platformorchestratorcp.EnvironmentStatusDeleting, DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{}}))
 	case r.Method == http.MethodGet && r.URL.Path == "/orgs/org/runners/runner":
 		var storage platformorchestratorcp.StateStorageConfiguration
 		assert.NoError(c.t, storage.FromK8sStorageConfiguration(platformorchestratorcp.K8sStorageConfiguration{Namespace: "test"}))
@@ -54,7 +54,7 @@ func (c *destroyCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		c.changes = append(c.changes, r.Method+" "+r.URL.Path+" "+string(body))
 		c.mu.Unlock()
-		assert.NoError(c.t, json.NewEncoder(w).Encode(platformorchestratorcp.Environment{Id: "environment", ProjectId: "project", Uuid: c.envUUID, Status: platformorchestratorcp.EnvironmentStatusDeleting}))
+		assert.NoError(c.t, json.NewEncoder(w).Encode(platformorchestratorcp.Environment{Id: "environment", ProjectId: "project", Uuid: c.envUUID, Status: platformorchestratorcp.EnvironmentStatusDeleting, DeletionPolicy: &platformorchestratorcp.EnvironmentDeletionPolicy{}}))
 	}
 }
 
@@ -117,7 +117,7 @@ func TestDeletionCancelsQueuedDeploymentsAndDestroyWaitsInsteadOfFailing(t *test
 		require.NoError(t, tx.Commit())
 	}
 	destroy := func() error {
-		return handler.handleInner(ctx, zaptest.NewLogger(t), "org", "project", "environment", core.envUUID, false, false)
+		return handler.handleInner(ctx, zaptest.NewLogger(t), "org", "project", "environment", core.envUUID)
 	}
 	requireWaiting := func(err error) {
 		t.Helper()

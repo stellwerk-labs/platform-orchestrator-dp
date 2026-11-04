@@ -4,6 +4,7 @@ package model
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -25,8 +27,15 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 	connection := os.Getenv("MODEL_TEST_DB_CONNECTION_STRING")
 	require.NotEmpty(t, connection)
 	_, _, scoped := migrationTestDatabase(t, t.Context(), connection)
-	requireStarts(t, t.Context(), scoped)
 	db := schemaConnection(t, scoped)
+	source, err := fs.Sub(embedMigrations, "migrations")
+	require.NoError(t, err)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source,
+		goose.WithDisableGlobalRegistry(true), goose.WithGoMigrations(goose.NewGoMigration(2,
+			&goose.GoFunc{RunTx: hstandardoutbox.MigrateUp01}, &goose.GoFunc{RunTx: hstandardoutbox.MigrateDown01})))
+	require.NoError(t, err)
+	_, err = provider.UpTo(t.Context(), 37)
+	require.NoError(t, err)
 	reference := testDraftReference()
 	rawReference, err := json.Marshal(reference)
 	require.NoError(t, err)
@@ -58,10 +67,7 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, valid(`SELECT valid_draft_test_artifacts($1::jsonb)`, bad))
 	require.True(t, valid(`SELECT valid_draft_test_artifacts($1::jsonb)`, `[{"module_id":"legacy"}]`))
-	store, err := NewDatabaser(t.Context(), zap.NewNop(), scoped)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	tx, err := store.BeginTx(t.Context(), nil)
+	tx, err := db.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	wanted := DeploymentAdmissionReceipt{
@@ -79,14 +85,14 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 	_, err = PrepareDeploymentAdmissionReceipt(t.Context(), tx, wanted)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	tx, err = store.BeginTx(t.Context(), nil)
+	tx, err = db.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	retained, err := GetDeploymentAdmissionReceipt(t.Context(), tx, "org", wanted.AdmissionID)
 	require.NoError(t, err)
 	require.Equal(t, wanted.DraftTestSnapshots, retained.DraftTestSnapshots)
 	require.NoError(t, tx.Commit())
-	tx, err = store.BeginTx(t.Context(), nil)
+	tx, err = db.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	recovered, err := ListUnsettledDeploymentAdmissionReceipts(t.Context(), tx, 10, time.Now().Add(time.Minute))
@@ -95,7 +101,8 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 	require.Equal(t, wanted.DraftTestSnapshots, recovered[0].DraftTestSnapshots)
 	require.NoError(t, tx.Commit())
 	before := appliedMigrations(t, t.Context(), db)
-	require.ErrorContains(t, goose.DownToContext(t.Context(), db, "migrations", 36), "cannot downgrade while Draft test execution history exists")
+	_, err = provider.DownTo(t.Context(), 36)
+	require.ErrorContains(t, err, "cannot downgrade while Draft test execution history exists")
 	require.Equal(t, before, appliedMigrations(t, t.Context(), db))
 	requireStarts(t, t.Context(), scoped)
 }

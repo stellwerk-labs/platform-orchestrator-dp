@@ -480,7 +480,7 @@ func main() {
 		}
 	}()
 
-	api.ScheduleDeploymentOutputsCleaning(bgCtx, cfg.DeploymentsCompletedBefore, zap.L(), db)
+	scheduleResultMaintenance(bgCtx, cfg, zap.L(), db)
 
 	exit := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
 	signal.Notify(exit, syscall.SIGINT, syscall.SIGTERM)
@@ -504,6 +504,11 @@ func main() {
 
 // sweepDeploymentQueue expires waiting Deployments and retries queue heads
 // that no event promoted, on every replica.
+func scheduleResultMaintenance(ctx context.Context, cfg *config.Configuration, logger *zap.Logger, db model.Databaser) {
+	api.ScheduleDeploymentOutputsCleaning(ctx, cfg.DeploymentsCompletedBefore, logger, db)
+	api.ScheduleObservationResultCleaning(ctx, cfg.ObservationResultCleanupInterval, cfg.ObservationResultCleanupBatchSize, logger, db)
+}
+
 func sweepDeploymentQueue(ctx context.Context, server *api.Server) {
 	ticker := time.NewTicker(api.DeploymentQueueSweepInterval)
 	defer ticker.Stop()

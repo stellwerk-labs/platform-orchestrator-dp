@@ -24,6 +24,9 @@ func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary,
 			yield("DEPLOYMENT_ENV_UUID", d.DeploymentEnvUuid.String())
 		}
 		yield("MODE", RunnerModeForDeployment(d.Mode))
+		if d.Mode == model.DeploymentModeObservation {
+			yield(ObservationProtocolVariable, ObservationProtocolV1)
+		}
 		if d.EncryptedOutputsRecipient.IsSet() {
 			yield("ENCRYPTING_KEY", d.EncryptedOutputsRecipient.Must())
 		}
@@ -47,6 +50,8 @@ func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary,
 // supports deploy, plan, and destroy.
 func RunnerModeForDeployment(deploymentMode model.DeploymentMode) string {
 	switch deploymentMode {
+	case model.DeploymentModeObservation:
+		return string(model.DeploymentModeDeployPlan)
 	case model.DeploymentModeRollback:
 		return string(model.DeploymentModeDeploy)
 	case model.DeploymentModeRollbackPlan:

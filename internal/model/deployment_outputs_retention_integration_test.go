@@ -102,7 +102,7 @@ func TestDeploymentOutputsRetentionRequiresExactExternalMaterialOwnership(t *tes
 				require.Equal(t, ciphertext, actual)
 				// Retention ends at actual normal Deployment deletion, not grant
 				// release or a resource's archival/visibility state in Core.
-				require.NoError(t, store.DeleteDeploymentsForEnv(ctx, tx, orgID, projectID, envID, false))
+				require.NoError(t, store.DeleteDeploymentsForEnv(ctx, tx, orgID, projectID, envID, false, opt.Empty[uuid.UUID]()))
 				_, err = store.GetDeploymentEncryptedOutputs(ctx, tx, orgID, deployment.Id)
 				_, missing := IsErrNotFound(err)
 				require.True(t, missing)

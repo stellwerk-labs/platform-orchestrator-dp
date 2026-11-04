@@ -28,6 +28,7 @@ generate:
 	$(GO) generate -v ./...
 	$(GO) tool oapi-codegen --config=shared/genclient/oapi-codegen.cfg.yaml openapi/spec.yaml
 	$(GO) tool oapi-codegen --config=shared/genevents/oapi-codegen.cfg.yaml openapi/events.yaml
+	$(GO) tool oapi-codegen --config=shared/observationapi/oapi-codegen.cfg.yaml openapi/observation.yaml
 
 # ------------------------------------------------------------------------------
 # NOTE: CI and local tooling rely on these target names.

@@ -173,3 +173,41 @@ func lateSuccessfulOutputs(ctx context.Context, tx model.Tx, dep model.Deploymen
           AND encrypted_outputs IS NOT NULL AND recipient=$4)`, dep.Id, dep.OrgId, dep.RunnerId, dep.EncryptedOutputsRecipient.Ref()).Scan(&found)
 	return found, err
 }
+
+func (s *Server) retainLateOrdinaryCapacityCompletion(ctx context.Context, previous *model.DeploymentSummary, runnerID string, body DeploymentResultsUpdateBody, envelope *hmessaging.EventEnvelope) (bool, error) {
+	tx, err := s.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, previous.OrgId, previous.Id, model.GetModeForUpdate)
+	if err != nil {
+		return false, err
+	}
+	if dep.RunnerId != runnerID {
+		return true, fmt.Errorf("%w: foreign Runner identity", ErrRunnerEventTargetInvalid)
+	}
+	if envelope != nil && dep.Mode != model.DeploymentModeObservation {
+		evidence, err := model.ReadDeploymentStopEvidence(ctx, tx, dep.Id)
+		if err != nil {
+			return false, err
+		}
+		if !evidence.PluginDispatched && evidence.CapacityReserved {
+			budget, err := model.ReadDeploymentDispatchBudget(ctx, tx, dep.Id)
+			if err != nil {
+				return true, err
+			}
+			if !budget.FirstAttemptAt.Valid || envelope.EventID != dep.Id.String()+":deployment-result" || envelope.CreatedAt.Before(budget.FirstAttemptAt.Time) || (envelope.CommandID != "" && envelope.CommandID != fmt.Sprintf("create-job:%s:%d", dep.Id, budget.Revision)) {
+				return true, fmt.Errorf("%w: late completion does not identify owned Runner attempt", ErrRunnerEventTargetInvalid)
+			}
+		}
+	}
+	handled, err := model.RecordLateOrdinaryRunnerCompletion(ctx, tx, dep, body)
+	if err != nil {
+		return handled, err
+	}
+	if !handled {
+		return false, nil
+	}
+	return true, tx.Commit()
+}

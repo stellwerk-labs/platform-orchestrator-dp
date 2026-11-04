@@ -516,3 +516,10 @@ func Test_full_nominal(t *testing.T) {
 		require.NoError(t, r.Start(context.Background()))
 	})
 }
+
+func TestECSObservationCannotOverrideReadOnlyTransport(t *testing.T) {
+	require.NoError(t, validateECSObservationEnvironment(model.DeploymentModeObservation, map[string]string{"TF_LOG": "ERROR"}, map[string]string{"CLOUD_TOKEN": "secret-path"}))
+	require.Error(t, validateECSObservationEnvironment(model.DeploymentModeObservation, map[string]string{"MODE": "deploy"}, nil))
+	require.Error(t, validateECSObservationEnvironment(model.DeploymentModeObservation, nil, map[string]string{"OBSERVATION_PROTOCOL": "secret-path"}))
+	require.NoError(t, validateECSObservationEnvironment(model.DeploymentModeDeploy, map[string]string{"MODE": "deploy"}, nil))
+}

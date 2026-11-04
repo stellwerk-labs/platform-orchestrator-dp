@@ -14,7 +14,7 @@ import (
 
 // DeploymentOutcomeAcknowledgement is the audit record of an operator who
 // accepted responsibility that the Runner attempt of one failed
-// plugin-dispatched Deployment can no longer change its Environment.
+// Deployment can no longer change its Environment or consume its Runner slot.
 type DeploymentOutcomeAcknowledgement struct {
 	DeploymentID   uuid.UUID
 	OrgID          string
@@ -65,9 +65,17 @@ func AcknowledgeDeploymentOutcome(ctx context.Context, tx Tx, orgID string, depl
         WHERE deployment_id=$1 AND org_id=$2`, deploymentID, orgID).Scan(&ack.PluginID, &ack.OperationRef); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, errors.Wrap(err, "failed to read plugin operation receipt")
 	}
+	if ack.PluginID == "" {
+		if err := tx.QueryRowContext(ctx, `SELECT plugin_id, grant_id::text FROM environment_observation_receipts WHERE deployment_id=$1 AND org_id=$2`, deploymentID, orgID).Scan(&ack.PluginID, &ack.OperationRef); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, err
+		}
+	}
+	if ack.OperationRef == "" {
+		ack.OperationRef = deploymentID.String()
+	}
 	var head uuid.NullUUID
 	var completed bool
-	if err := tx.QueryRowContext(ctx, `SELECT e.last_state_deployment_id, d.completed_at IS NOT NULL
+	if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN d.mode='observation' THEN e.last_executing_deployment_id ELSE e.last_state_deployment_id END, d.completed_at IS NOT NULL
         FROM deployments d JOIN deployment_environments e ON e.id=d.de_id WHERE d.id=$1`, deploymentID).Scan(&head, &completed); err != nil {
 		return nil, false, errors.Wrap(err, "failed to read environment head")
 	}
@@ -90,27 +98,34 @@ func AcknowledgeDeploymentOutcome(ctx context.Context, tx Tx, orgID string, depl
 	).Scan(&ack.AcknowledgedAt); err != nil {
 		return nil, false, errors.Wrap(err, "failed to record deployment outcome acknowledgement")
 	}
-	// Requests that waited behind the fenced Deployment never start by themselves
-	// once an operator acknowledges it; the operator deploys again on purpose.
-	if _, err := SettleQueuedDeployments(ctx, tx, environmentID, DeploymentQueueRejected, DeploymentQueueSettlement{
-		ReasonCode:         CodeOutcomeUnreconciled,
-		ReasonMessage:      fmt.Sprintf("plugin-dispatched Deployment '%s' failed with an unreconciled outcome", deploymentID),
-		ReasonDeploymentID: opt.Of(deploymentID),
-	}); err != nil {
+	if evidence.PluginDispatched {
+		// Requests that waited behind the fenced Deployment never start by themselves
+		// once an operator acknowledges it; the operator deploys again on purpose.
+		if _, err := SettleQueuedDeployments(ctx, tx, environmentID, DeploymentQueueRejected, DeploymentQueueSettlement{
+			ReasonCode:         CodeOutcomeUnreconciled,
+			ReasonMessage:      fmt.Sprintf("plugin-dispatched Deployment '%s' failed with an unreconciled outcome", deploymentID),
+			ReasonDeploymentID: opt.Of(deploymentID),
+		}); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := ReleaseRunnerJob(ctx, tx, deploymentID); err != nil {
 		return nil, false, err
 	}
 	return ack, false, nil
 }
 
-// acknowledgementConflict limits acknowledgements to the one Deployment that
-// currently fences its Environment, after its Runner dispatch window closed.
+// acknowledgementConflict permits an audited stop attestation after the immutable
+// dispatch window closes, for an Environment fence or retained Runner ownership.
 func (e DeploymentStopEvidence) acknowledgementConflict(completed, head bool, deadline sql.NullTime, now time.Time) error {
 	switch {
-	case !e.PluginDispatched:
-		return NewErrConflict("only a plugin-dispatched Deployment can block its Environment; there is nothing to acknowledge")
+	case !e.PluginDispatched && !e.CapacityReserved:
+		return NewErrConflict("Deployment has no unreconciled plugin outcome or retained Runner ownership")
+	case e.CapacityReserved && !deadline.Valid:
+		return NewErrConflict("Runner ownership has no authoritative closed dispatch budget")
 	case !e.Failed || !completed:
 		return NewErrConflict("only a terminal failed Deployment can have its outcome acknowledged")
-	case !head:
+	case !head && !e.CapacityReserved:
 		return NewErrConflict("deployment is no longer the Environment head and blocks nothing")
 	case !e.OutcomeUnreconciled():
 		return NewErrConflict("deployment already has Runner stop evidence; there is nothing to acknowledge")

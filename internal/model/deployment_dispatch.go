@@ -82,6 +82,8 @@ func BeginDeploymentDispatch(ctx context.Context, db Databaser, dep *DeploymentS
 // Deployment can still change its Environment.
 type DeploymentStopEvidence struct {
 	Failed bool
+	// CapacityReserved identifies persistent ownership requiring explicit stop proof.
+	CapacityReserved bool
 	// PluginDispatched is set when a plugin operation receipt admitted the
 	// Deployment. Ordinary Core Deployments never have one.
 	PluginDispatched bool
@@ -112,7 +114,8 @@ func (e DeploymentStopEvidence) BlocksReplacement() bool {
 func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UUID) (DeploymentStopEvidence, error) {
 	var evidence DeploymentStopEvidence
 	err := tx.QueryRowContext(ctx, `SELECT d.status='failed',
-        EXISTS (SELECT 1 FROM external_operation_deployments receipt WHERE receipt.deployment_id=d.id AND receipt.org_id=e.org_id),
+ EXISTS(SELECT 1 FROM runner_job_reservations r WHERE r.deployment_id=d.id AND r.released_at IS NULL),
+        (EXISTS (SELECT 1 FROM external_operation_deployments receipt WHERE receipt.deployment_id=d.id AND receipt.org_id=e.org_id) OR EXISTS (SELECT 1 FROM environment_observation_receipts observation WHERE observation.deployment_id=d.id AND observation.org_id=e.org_id)),
         budget.deployment_id IS NULL OR budget.first_attempt_at IS NOT NULL,
         budget.completion_received_at IS NOT NULL
           OR EXISTS (SELECT 1 FROM runner_event_inbox result WHERE result.deployment_id=d.id AND result.event_type='deployment-result'
@@ -124,7 +127,7 @@ func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UU
         JOIN deployment_environments e ON e.id=d.de_id
         LEFT JOIN deployment_dispatch_budgets budget ON budget.deployment_id=d.id
         WHERE d.id=$1`, deploymentID).Scan(
-		&evidence.Failed, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven, &evidence.Acknowledged)
+		&evidence.Failed, &evidence.CapacityReserved, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven, &evidence.Acknowledged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeploymentStopEvidence{}, NewErrNotFound("deployment not found for stop evidence")
 	}
@@ -182,5 +185,8 @@ func ReadEnvironmentFence(ctx context.Context, tx Tx, stateHead uuid.UUID) (opt.
 
 func RecordDeploymentCompletion(ctx context.Context, tx Tx, deploymentID uuid.UUID) error {
 	_, err := tx.ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET completion_received_at=COALESCE(completion_received_at,now()) WHERE deployment_id=$1`, deploymentID)
-	return err
+	if err != nil {
+		return err
+	}
+	return ReleaseRunnerJob(ctx, tx, deploymentID)
 }

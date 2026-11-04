@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,4 +225,59 @@ func TestInlineMaterialRetainsOnlySourcesRequiredByLiveNodes(t *testing.T) {
 	b.EnvironmentUUID = uuid.New()
 	_, _, err = inlineMaterialCoordinates(stored, environment)
 	require.Error(t, err, "even deleted references may not borrow another Environment's provenance")
+}
+
+func TestObservationInlineSourcesRequireExactCapturedArtifactIdentity(t *testing.T) {
+	moduleUUID, versionUUID := uuid.New(), uuid.New()
+	artifact := model.ModuleArtifactRequirement{ModuleID: "example", Version: "v1", ModuleUUID: moduleUUID, VersionUUID: versionUUID, ArtifactDigest: "sha256:immutable", Source: "inline"}
+	source := `output "example" { value = "retained" }`
+	module := platformorchestratorcp.InternalExecutionCatalogueModule{Id: "example", VersionId: "v1", ModuleUuid: moduleUUID, VersionUuid: versionUUID, ArtifactDigest: "sha256:immutable", ModuleSource: "inline", ModuleSourceCode: &source}
+	require.NoError(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{artifact}, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
+	module.ArtifactDigest = "sha256:changed"
+	require.Error(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{artifact}, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
+	require.Error(t, validateRetainedArtifactIdentities(nil, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
+}
+
+func TestObservationInlineSourcesAllowOptionalDigestButRequireExactRetainedMaterial(t *testing.T) {
+	source := `output "example" { value = "retained" }`
+	artifact := model.ModuleArtifactRequirement{ModuleID: "example", Version: "1.0.0", ModuleUUID: uuid.New(), VersionUUID: uuid.New(), Source: "inline"}
+	module := platformorchestratorcp.InternalExecutionCatalogueModule{Id: artifact.ModuleID, VersionId: artifact.Version, ModuleUuid: artifact.ModuleUUID, VersionUuid: artifact.VersionUUID, ModuleSource: "inline", ModuleSourceCode: &source}
+	for _, required := range []bool{true, false} {
+		require.NoError(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{artifact}, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, required))
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*platformorchestratorcp.InternalExecutionCatalogueModule)
+	}{
+		{"changed module UUID", func(m *platformorchestratorcp.InternalExecutionCatalogueModule) { m.ModuleUuid = uuid.New() }},
+		{"changed version UUID", func(m *platformorchestratorcp.InternalExecutionCatalogueModule) { m.VersionUuid = uuid.New() }},
+		{"changed source kind", func(m *platformorchestratorcp.InternalExecutionCatalogueModule) {
+			m.ModuleSource = "git::https://example.invalid/module"
+		}},
+		{"missing inline bytes", func(m *platformorchestratorcp.InternalExecutionCatalogueModule) { m.ModuleSourceCode = nil }},
+		{"empty inline bytes", func(m *platformorchestratorcp.InternalExecutionCatalogueModule) {
+			blank := " \n"
+			m.ModuleSourceCode = &blank
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed := module
+			test.change(&changed)
+			for _, required := range []bool{true, false} {
+				require.Error(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{artifact}, []platformorchestratorcp.InternalExecutionCatalogueModule{changed}, required))
+			}
+		})
+	}
+	supplied := artifact
+	supplied.ArtifactDigest = "sha256:" + strings.Repeat("a", 64)
+	matching := module
+	matching.ArtifactDigest = supplied.ArtifactDigest
+	require.NoError(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{supplied}, []platformorchestratorcp.InternalExecutionCatalogueModule{matching}, true))
+	require.Error(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{supplied}, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
+	matching.ArtifactDigest = "sha256:" + strings.Repeat("b", 64)
+	require.Error(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{supplied}, []platformorchestratorcp.InternalExecutionCatalogueModule{matching}, true))
+	missing := artifact
+	missing.ModuleUUID = uuid.Nil
+	require.Error(t, validateRetainedArtifactIdentities([]model.ModuleArtifactRequirement{missing}, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
+	require.Error(t, validateRetainedArtifactIdentities(nil, []platformorchestratorcp.InternalExecutionCatalogueModule{module}, true))
 }

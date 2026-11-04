@@ -51,6 +51,7 @@ var (
 type ExternalDeploymentHTTPAdapter struct {
 	Issuer             string
 	VerificationKey    ed25519.PublicKey
+	OrdinaryAdmissions *OrdinaryDeploymentAdmissionService
 	Admission          ExternalDeploymentAdmissionService
 	Materials          ExternalOperationMaterialService
 	ControlPlaneClient platformorchestratorcp.ClientWithResponsesInterface

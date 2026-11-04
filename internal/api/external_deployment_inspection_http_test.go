@@ -10,6 +10,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
 )
 
 func TestProjectPlanCaptureDropsAllManifestAndGraphValues(t *testing.T) {
@@ -74,4 +75,9 @@ func graphWithSecretParam(t *testing.T, secret string) *platformorchestratorgrap
 		SharedResources: map[string]platformorchestratorgraph.ResourceCoordinate{},
 		LeafResources:   map[platformorchestratorgraph.ResourceCoordinate]bool{coordinate: true},
 	}
+}
+
+func TestReadinessReportsExecutingObservationOrPlanAsBusy(t *testing.T) {
+	projected := projectEnvironmentReadiness(model.EnvironmentDeploymentReadiness{LatestStatus: opt.Of(model.DeploymentStatusSucceeded), Executing: true})
+	require.Equal(t, "busy", projected.State, "successful state head does not make a running plan or observation idle")
 }

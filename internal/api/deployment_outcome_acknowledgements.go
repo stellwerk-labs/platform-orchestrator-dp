@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -10,18 +11,22 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/herrors"
 	"github.com/stellwerk-labs/golib/hlogger"
+	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	"github.com/stellwerk-labs/golib/hstandardoutbox"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
 const maxOutcomeAcknowledgementReasonLength = 1000
 
 // InternalAcknowledgeDeploymentOutcome is the audited operator path out of an
-// Environment fenced by a failed plugin-dispatched Deployment whose Runner
-// outcome is unknown. The acting user becomes the audit record, so neither the
+// Environment fence or persistent Runner slot held by a failed Deployment whose
+// Runner outcome is unknown. The acting user becomes the audit record, so neither the
 // system user nor a deprecated organization token may use it.
 func (s *Server) InternalAcknowledgeDeploymentOutcome(ctx context.Context, request InternalAcknowledgeDeploymentOutcomeRequestObject) (InternalAcknowledgeDeploymentOutcomeResponseObject, error) {
 	uid, authErr := GetAuthenticatedUserIdOr401(ctx)
@@ -66,6 +71,23 @@ func (s *Server) InternalAcknowledgeDeploymentOutcome(ctx context.Context, reque
 		}
 		return nil, errors.Wrap(err, "failed to acknowledge deployment outcome")
 	}
+	var messages []*hstandardoutbox.PendingEventMessage
+	if !replayed {
+		payload, err := json.Marshal(events.CloudEvent[genevents.DeploymentChangedData]{
+			Type: genevents.IoPlatformOrchestratorDeploymentUpdated, Time: ack.AcknowledgedAt,
+			Data: model.ConvertDeploymentToEventData(deployment),
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to encode acknowledged deployment cleanup wake")
+		}
+		messages, err = s.Database.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{{
+			Subject: string(genevents.IoPlatformOrchestratorDeploymentUpdated),
+			Payload: payload,
+		}})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to store acknowledged deployment cleanup wake")
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, errors.Wrap(err, "failed to commit deployment outcome acknowledgement")
 	}
@@ -77,7 +99,9 @@ func (s *Server) InternalAcknowledgeDeploymentOutcome(ctx context.Context, reque
 	if replayed {
 		return InternalAcknowledgeDeploymentOutcome200JSONResponse(response), nil
 	}
-	hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).Info("acknowledged unreconciled Deployment outcome",
+	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx)
+	reliableoutbox.OptimisticPublish(ctx, logger, s.Database.AsReliableOutboxStore(), s.EventPublisher, messages)
+	logger.Info("acknowledged unreconciled Deployment outcome",
 		zap.String("org_id", ack.OrgID), zap.String("deployment_id", ack.DeploymentID.String()),
 		zap.String("environment_id", ack.EnvironmentID.String()), zap.String("plugin_id", ack.PluginID),
 		zap.String("actor_id", ack.ActorID.String()))

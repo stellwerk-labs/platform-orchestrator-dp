@@ -58,6 +58,7 @@ type Server struct {
 func SkipGeneratedOpenAPIValidation(c echo.Context) bool {
 	switch c.Path() {
 	case "/alive", "/health", "/internal/actions/flush-pending-messages",
+		ObservationStartPath, ObservationRunPath, ObservationRequestPath, ObservationRedeployPath, ObservationRedeployReadPath, ObservationCapabilitiesPath, ObservationRequestResolvePath, ObservationRedeployResolvePath,
 		ExternalDeploymentAdmissionPath,
 		ExternalDeploymentReadinessPath,
 		ExternalDeploymentPlanningPath,
@@ -81,6 +82,15 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 	})
 	RegisterHandlers(e, apiHandler)
 	if s.ExternalDeployments != nil {
+		s.ExternalDeployments.OrdinaryAdmissions = s.DeploymentAdmissions
+		e.POST(ObservationRedeployPath, s.ExternalDeployments.HandleObservationRedeploy)
+		e.POST(ObservationRequestResolvePath, s.ExternalDeployments.HandleObservationRequestResolve)
+		e.POST(ObservationRedeployResolvePath, s.ExternalDeployments.HandleObservationRedeployResolve)
+		e.GET(ObservationRedeployReadPath, s.ExternalDeployments.HandleObservationRedeployRead)
+		e.GET(ObservationCapabilitiesPath, s.ExternalDeployments.HandleObservationCapabilities)
+		e.POST(ObservationStartPath, s.ExternalDeployments.HandleObservationStart)
+		e.GET(ObservationRunPath, s.ExternalDeployments.HandleObservationRun)
+		e.GET(ObservationRequestPath, s.ExternalDeployments.HandleObservationRequest)
 		e.POST(ExternalDeploymentAdmissionPath, s.ExternalDeployments.Handle)
 		e.POST(ExternalDeploymentReadinessPath, s.ExternalDeployments.HandleReadiness)
 		e.POST(ExternalDeploymentPlanningPath, s.ExternalDeployments.HandlePlan)

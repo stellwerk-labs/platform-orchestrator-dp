@@ -70,8 +70,7 @@ func (h *EnvDestroyHandler) Handle(ctx context.Context, logger *zap.Logger, d hm
 		if err := json.Unmarshal(d.Data, &e); err != nil {
 			return errors.Wrap(err, "failed to unmarshal event body")
 		}
-		force := ref.DerefOr(e.Data.Force, false)
-		return h.handleInner(ctx, logger, e.Data.OrgId, e.Data.ProjectId, e.Data.EnvId, e.Data.EnvUuid, force, ref.DerefOr(e.Data.DeleteRules, false))
+		return h.handleInner(ctx, logger, e.Data.OrgId, e.Data.ProjectId, e.Data.EnvId, e.Data.EnvUuid)
 	case string(dpevents.IoPlatformOrchestratorDeploymentCreated):
 		fallthrough
 	case string(dpevents.IoPlatformOrchestratorDeploymentUpdated):
@@ -79,7 +78,7 @@ func (h *EnvDestroyHandler) Handle(ctx context.Context, logger *zap.Logger, d hm
 		if err := json.Unmarshal(d.Data, &e); err != nil {
 			return errors.Wrap(err, "failed to unmarshal event body")
 		}
-		return h.handleInner(ctx, logger, e.Data.OrgId, e.Data.ProjectId, e.Data.EnvId, e.Data.EnvUuid, false, false)
+		return h.handleInner(ctx, logger, e.Data.OrgId, e.Data.ProjectId, e.Data.EnvId, e.Data.EnvUuid)
 	default:
 		return nil
 	}
@@ -97,7 +96,7 @@ func (h *EnvDestroyHandler) updateEnvStatus(ctx context.Context, logger *zap.Log
 	}
 }
 
-func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger, orgId, projectId, envId string, envUuid uuid.UUID, force, deleteRules bool) error {
+func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger, orgId, projectId, envId string, envUuid uuid.UUID) error {
 	logger = logger.With(logging.ZapOrgId(orgId), logging.ZapProjectId(projectId), logging.ZapEnvId(envId))
 
 	// first step is to check if the env is deleting, if it isn't or doesn't exist anymore we can ignore it here
@@ -120,6 +119,11 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 			return nil
 		}
 	}
+
+	if env.DeletionPolicy == nil {
+		return model.NewErrConflict("Environment deletion policy is unrecorded; repeat DeleteEnvironment explicitly")
+	}
+	force := env.DeletionPolicy.Force
 
 	if err := h.cancelQueuedDeployments(ctx, logger, envUuid); err != nil {
 		return err
@@ -150,7 +154,7 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 			logger.Info("environment has been destroyed - deleting deployments and cp env")
 		}
 		// once we're done, we can delete all the data and then force delete the env from the CP
-		if err := h.db.DeleteDeploymentsForEnv(ctx, tx, orgId, projectId, envId, force); err != nil {
+		if err := h.db.DeleteDeploymentsForEnv(ctx, tx, orgId, projectId, envId, force, opt.Of(envUuid)); err != nil {
 			return errors.Wrap(err, "failed to delete deployments for env")
 		}
 
@@ -164,7 +168,7 @@ func (h *EnvDestroyHandler) handleInner(ctx context.Context, logger *zap.Logger,
 			// we don't return error here because we want to proceed with env deletion even if logs deletion fails
 		}
 
-		if r, err := h.cpClient.InternalForceDeleteEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.InternalForceDeleteEnvironmentParams{DeleteRules: &deleteRules}); err != nil {
+		if r, err := h.cpClient.InternalForceDeleteEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.InternalForceDeleteEnvironmentParams{ExpectedEnvUuid: &envUuid}); err != nil {
 			return errors.Wrap(err, "failed to force delete environment")
 		} else if r.StatusCode() != http.StatusNoContent {
 			return errors.Errorf("unexpected status code when force deleting environment: %s: %s", r.Status(), string(r.Body))

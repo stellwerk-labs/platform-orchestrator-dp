@@ -140,12 +140,14 @@ func (e *ecsRunnerInstance) Start(ctx context.Context) error {
 	ids, ctx := hlogger.EnsurePlatformOrchestratorIdsOnCtx(ctx)
 	logger := hlogger.TraceScopedLoggerFromCtx(zap.L(), ctx).WithLazy(ids.AsLogField())
 
+	runCfg := e.mustRunnerConfiguration()
+	if err := validateECSObservationEnvironment(e.Deployment.Mode, runCfg.Job.Environment, runCfg.Job.Secrets); err != nil {
+		return err
+	}
 	ecsClient, err := e.client(ctx)
 	if err != nil {
 		return err
 	}
-
-	runCfg := e.mustRunnerConfiguration()
 
 	if err := e.deregisterActiveTaskDefinitions(ctx, ecsClient, logger); err != nil {
 		return errors.Wrap(err, "failed to deregister active task definitions before starting")
@@ -431,3 +433,17 @@ func (e *ecsRunnerInstance) deleteInActiveTaskDefinitions(ctx context.Context, c
 }
 
 var _ RunnerInterface = (*ecsRunnerInstance)(nil)
+
+func validateECSObservationEnvironment(mode model.DeploymentMode, environment, secrets map[string]string) error {
+	if mode != model.DeploymentModeObservation {
+		return nil
+	}
+	for _, values := range []map[string]string{environment, secrets} {
+		for _, name := range []string{"MODE", runnercommon.ObservationProtocolVariable} {
+			if _, overridden := values[name]; overridden {
+				return errors.New("observation transport environment cannot be overridden by ECS configuration")
+			}
+		}
+	}
+	return nil
+}

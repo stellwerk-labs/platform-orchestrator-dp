@@ -92,3 +92,23 @@
 - Additional workflow contracts: 18 passed; the pre-existing stable workflow
   contract still expects mutable `sbom: true` instead of the approved pinned
   generator. Its owner was notified; no workflow paths changed in this branch.
+
+## Local retained-graph compatibility preparation
+
+Implemented distinct historical Gob registrations and central normalization with frozen synthetic independent-encoder fixtures. Exact old source fails the fixtures; the patched graph suite and pinned lint pass. Normal generation then full unit suite passes571 tests; new real-server lifecycle regression compiles and full pinned lint passes. The regression has explicit private phases for an old-to-new same-environment rehearsal; actual predecessor upgrade/artifact execution remains pending. Existing RC5 artifacts are unchanged. No public release or customer mutation is performed by this local commit.
+
+## 2026-11-04 proposed candidate notes
+
+Prepared the exact RC6 notes path required by the normal candidate preflight and consolidated the unreleased retained-graph note there. Existing RC5 notes remain unchanged. This is a local documentation-only successor of the tested compatibility reader; application, fixture, workflow, dependency and canonical writer bytes are unchanged. The original compatibility source/artifact evidence remains bound to its actual source. No tag or publication is created; existing-environment upgrade execution and final-source artifact qualification remain separate gates.
+
+## 2026-11-04 retained-history assertion and output retention
+
+Corrected the new existing-environment regression after the real old-server case exposed normal encrypted-output expiry. Renamed the private case fingerprint to historical_immutable_columns_sha256 and removed only outputs from the SQL JSON projection. Successful output decryption, strict graph/state checks and all other historical columns remain required. Production code, dependencies, migrations, fixtures and candidate notes are unchanged; no public release or completed upgrade is claimed by this test-only change.
+
+## 2026-11-04: Forward integration generation correction
+
+Preserved RC6 and diagnosed its integration setup failure before API cases ran.
+Added the existing generation target and tracked parity check to the integration
+job, with a workflow order regression and proposed RC7 notes. The correction keeps
+all product tests and publication gates. Clean-checkout generation/compile and
+source-parity evidence are retained separately by the release coordinator.

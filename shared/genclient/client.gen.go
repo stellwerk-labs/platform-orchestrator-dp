@@ -361,6 +361,84 @@ func (e MetadataKeySchemaType) Valid() bool {
 	}
 }
 
+// Defines values for ObservationChangeActions.
+const (
+	Create ObservationChangeActions = "create"
+	Delete ObservationChangeActions = "delete"
+	Forget ObservationChangeActions = "forget"
+	NoOp   ObservationChangeActions = "no-op"
+	Read   ObservationChangeActions = "read"
+	Update ObservationChangeActions = "update"
+)
+
+// Valid indicates whether the value is a known member of the ObservationChangeActions enum.
+func (e ObservationChangeActions) Valid() bool {
+	switch e {
+	case Create:
+		return true
+	case Delete:
+		return true
+	case Forget:
+		return true
+	case NoOp:
+		return true
+	case Read:
+		return true
+	case Update:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservationResultComplete.
+const (
+	True ObservationResultComplete = true
+)
+
+// Valid indicates whether the value is a known member of the ObservationResultComplete enum.
+func (e ObservationResultComplete) Valid() bool {
+	switch e {
+	case True:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservationResultSchemaVersion.
+const (
+	N1 ObservationResultSchemaVersion = "1"
+)
+
+// Valid indicates whether the value is a known member of the ObservationResultSchemaVersion enum.
+func (e ObservationResultSchemaVersion) Valid() bool {
+	switch e {
+	case N1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservationResultTool.
+const (
+	Opentofu  ObservationResultTool = "opentofu"
+	Terraform ObservationResultTool = "terraform"
+)
+
+// Valid indicates whether the value is a known member of the ObservationResultTool enum.
+func (e ObservationResultTool) Valid() bool {
+	switch e {
+	case Opentofu:
+		return true
+	case Terraform:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PendingEnvironmentChangesCode.
 const (
 	ResultMayChange PendingEnvironmentChangesCode = "result_may_change"
@@ -932,7 +1010,8 @@ type DeploymentResultsUpdateBody struct {
 	Error *Error `json:"error,omitempty"`
 
 	// Metadata The metadata produced by the resources involved in the deployment.
-	Metadata DeploymentResultMetadata `json:"metadata,omitempty"`
+	Metadata          DeploymentResultMetadata `json:"metadata,omitempty"`
+	ObservationResult *ObservationResult       `json:"observation_result,omitempty"`
 
 	// Outputs The encrypted outputs produced by the runner.
 	Outputs *string `json:"outputs,omitempty"`
@@ -1425,6 +1504,36 @@ type ModuleTestDeploymentCreateBody struct {
 	// DraftTestSnapshots Stable Module UUID to immutable captured test snapshot UUID. Draft heads and published Version references are not accepted here.
 	DraftTestSnapshots map[string]openapi_types.UUID `json:"draft_test_snapshots"`
 }
+
+// ObservationChange defines model for ObservationChange.
+type ObservationChange struct {
+	Actions      []ObservationChangeActions `json:"actions"`
+	Id           string                     `json:"id"`
+	ResourceType string                     `json:"resource_type"`
+}
+
+// ObservationChangeActions defines model for ObservationChange.Actions.
+type ObservationChangeActions string
+
+// ObservationResult defines model for ObservationResult.
+type ObservationResult struct {
+	Complete          ObservationResultComplete      `json:"complete"`
+	ObservedChanges   []ObservationChange            `json:"observed_changes"`
+	OutputChangeCount int                            `json:"output_change_count"`
+	ProposedChanges   []ObservationChange            `json:"proposed_changes"`
+	SchemaVersion     ObservationResultSchemaVersion `json:"schema_version"`
+	Tool              ObservationResultTool          `json:"tool"`
+	ToolVersion       string                         `json:"tool_version"`
+}
+
+// ObservationResultComplete defines model for ObservationResult.Complete.
+type ObservationResultComplete bool
+
+// ObservationResultSchemaVersion defines model for ObservationResult.SchemaVersion.
+type ObservationResultSchemaVersion string
+
+// ObservationResultTool defines model for ObservationResult.Tool.
+type ObservationResultTool string
 
 // OpenidConfiguration OpenID discovery configuration.
 type OpenidConfiguration struct {
