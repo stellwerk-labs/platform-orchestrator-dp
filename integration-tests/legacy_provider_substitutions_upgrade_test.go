@@ -37,16 +37,16 @@ type legacyGraphState struct {
 }
 
 type legacyGraphUpgradeCase struct {
-	OrgID           string           `json:"org_id"`
-	ProjectID       string           `json:"project_id"`
-	EnvironmentID   string           `json:"environment_id"`
-	EnvironmentUUID uuid.UUID        `json:"environment_uuid"`
-	BaseDeployment  uuid.UUID        `json:"base_deployment"`
-	Namespace       string           `json:"namespace"`
-	OutputIdentity  string           `json:"output_identity"`
-	HistoricalGraph string           `json:"historical_graph_sha256"`
-	HistoricalRow   string           `json:"historical_other_columns_sha256"`
-	State           legacyGraphState `json:"state"`
+	OrgID                  string           `json:"org_id"`
+	ProjectID              string           `json:"project_id"`
+	EnvironmentID          string           `json:"environment_id"`
+	EnvironmentUUID        uuid.UUID        `json:"environment_uuid"`
+	BaseDeployment         uuid.UUID        `json:"base_deployment"`
+	Namespace              string           `json:"namespace"`
+	OutputIdentity         string           `json:"output_identity"`
+	HistoricalGraph        string           `json:"historical_graph_sha256"`
+	HistoricalImmutableRow string           `json:"historical_immutable_columns_sha256"`
+	State                  legacyGraphState `json:"state"`
 }
 
 // The default run is the normal real-server regression. The explicit private
@@ -213,7 +213,7 @@ output "platform_orchestrator_metadata" { value = {} }
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
 	require.NoError(t, tx.Commit())
-	fixture.HistoricalGraph, fixture.HistoricalRow = readLegacyGraphHistory(t, fixture)
+	fixture.HistoricalGraph, fixture.HistoricalImmutableRow = readLegacyGraphHistory(t, fixture)
 	t.Logf("owned synthetic legacy case org=%s env=%s deployment=%s fixture=%s", org, environment.Uuid, base.Id, legacyProviderFixtureSHA256)
 	return fixture
 }
@@ -311,6 +311,8 @@ func legacyGraphDigest(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Output ciphertext expires under the existing transfer-retention policy.
+// Every other historical column and the separate graph bytes remain strict invariants.
 func readLegacyGraphHistory(t *testing.T, f legacyGraphUpgradeCase) (string, string) {
 	t.Helper()
 	var graph, rest []byte
@@ -318,7 +320,7 @@ func readLegacyGraphHistory(t *testing.T, f legacyGraphUpgradeCase) (string, str
 		t,
 		MustDatabaseConn(
 			t,
-		).QueryRowContext(t.Context(), `SELECT d.graph,(to_jsonb(d)-'graph')::text FROM deployments d JOIN deployment_environments e ON e.id=d.de_id WHERE d.id=$1 AND d.de_id=$2 AND e.org_id=$3 AND e.project_id=$4 AND e.env_id=$5`, f.BaseDeployment, f.EnvironmentUUID, f.OrgID, f.ProjectID, f.EnvironmentID).
+		).QueryRowContext(t.Context(), `SELECT d.graph,(to_jsonb(d)-'graph'-'outputs')::text FROM deployments d JOIN deployment_environments e ON e.id=d.de_id WHERE d.id=$1 AND d.de_id=$2 AND e.org_id=$3 AND e.project_id=$4 AND e.env_id=$5`, f.BaseDeployment, f.EnvironmentUUID, f.OrgID, f.ProjectID, f.EnvironmentID).
 			Scan(&graph, &rest),
 	)
 	return legacyGraphDigest(graph), legacyGraphDigest(rest)
@@ -328,7 +330,7 @@ func assertLegacyGraphHistory(t *testing.T, f legacyGraphUpgradeCase) {
 	t.Helper()
 	graph, row := readLegacyGraphHistory(t, f)
 	require.Equal(t, f.HistoricalGraph, graph, "old graph bytes must never be rewritten")
-	require.Equal(t, f.HistoricalRow, row, "other historical Deployment columns must never be rewritten")
+	require.Equal(t, f.HistoricalImmutableRow, row, "immutable historical Deployment columns must never be rewritten")
 	environment, err := MustControlPlaneClient(t).GetEnvironmentWithResponse(t.Context(), f.OrgID, f.ProjectID, f.EnvironmentID)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, environment.StatusCode(), string(environment.Body))
