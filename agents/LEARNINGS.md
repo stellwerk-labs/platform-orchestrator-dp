@@ -36,3 +36,7 @@
   runs `make test-integration`, and candidate publication depends on that job.
   A local internal/API pass therefore does not establish root functional or
   packaged release readiness.
+
+## Retained provider-substitution compatibility
+
+A legacy-map test generated with current Go types cannot prove pre-rename Gob compatibility. Frozen synthetic files from an independent old-name encoder reproduce the missing registration. Distinct legacy concrete types avoid duplicate Gob-name registration and normalize to current placeholders before application use. Current canonical writer and dependencies remain unchanged.

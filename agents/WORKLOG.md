@@ -92,3 +92,7 @@
 - Additional workflow contracts: 18 passed; the pre-existing stable workflow
   contract still expects mutable `sbom: true` instead of the approved pinned
   generator. Its owner was notified; no workflow paths changed in this branch.
+
+## Local retained-graph compatibility preparation
+
+Implemented distinct historical Gob registrations and central normalization with frozen synthetic independent-encoder fixtures. Exact old source fails the fixtures; the patched graph suite and pinned lint pass. Normal generation then full unit suite passes571 tests; new real-server lifecycle regression compiles and full pinned lint passes. The regression has explicit private phases for an old-to-new same-environment rehearsal; actual predecessor upgrade/artifact execution remains pending. Existing RC5 artifacts are unchanged. No public release or customer mutation is performed by this local commit.

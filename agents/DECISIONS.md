@@ -18,3 +18,7 @@
 - Keep directory reports fully redacted in process memory. This source policy
   does not extend to raw metadata, binary strings, filenames or other files.
   Scanner errors and malformed reports remain fatal.
+
+## Automatic historical graph reads
+
+Handle historical Canyon placeholder names at the central provider-substitution decoder for both map and canonical containers. Preserve nested fields and expose current concrete types. Keep existing canonical writes and retained graph rows; no startup history rewrite or schema migration is introduced. Reject corrupt, unknown-type and unsupported-version payloads. Verify existing-environment plan/state/deploy/rollback separately from codec tests.

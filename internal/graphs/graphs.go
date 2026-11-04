@@ -105,7 +105,7 @@ func decodeProviderSubsMap(encoded []byte) (map[string]map[string]platform_orche
 			}
 			result[entry.LocalRef] = substitutions
 		}
-		return result, nil
+		return normalizeProviderSubsMap(result)
 	}
 
 	// Graphs written before the canonical encoding stored the map directly.
@@ -114,7 +114,7 @@ func decodeProviderSubsMap(encoded []byte) (map[string]map[string]platform_orche
 	if err := gob.NewDecoder(bytes.NewReader(encoded)).Decode(&legacy); err != nil {
 		return nil, err
 	}
-	return legacy, nil
+	return normalizeProviderSubsMap(legacy)
 }
 
 // MarshalJSON implements custom JSON marshaling for GraphNodeModuleConfig
