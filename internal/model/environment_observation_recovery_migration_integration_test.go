@@ -46,7 +46,7 @@ func TestObservationRecoveryMigrationRetainsNegativeReceiptsAcrossRestart(t *tes
 	var count int
 	require.NoError(t, legacy.QueryRowContext(ctx, `SELECT count(*) FROM environment_observation_request_seals`).Scan(&count))
 	require.Equal(t, 1, count)
-	_, err = provider.Down(ctx)
+	_, err = provider.DownTo(ctx, 38)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot discard sealed observation requests")
 }

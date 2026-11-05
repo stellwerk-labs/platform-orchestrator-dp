@@ -112,3 +112,9 @@ Added the existing generation target and tracked parity check to the integration
 job, with a workflow order regression and proposed RC7 notes. The correction keeps
 all product tests and publication gates. Clean-checkout generation/compile and
 source-parity evidence are retained separately by the release coordinator.
+
+## 2026-11-05: candidate Draft backup/restore correction
+
+- Investigated actual custom-archive restore failure and reproduced schema39 empty-search_path COPY failure independently for Draft artifacts and graph. New40 fixes nested lookup without relaxing malformed/cross-Environment checks or caller-schema isolation.
+- Added real PostgreSQL migration/metadata/idempotency/Down regression. Historical observation recovery test now explicitly attempts DownTo38 to exercise the migration39 sealed-request fence rather than whichever migration happens to be latest.
+- Candidate-only source based on public4d2cc25; no published migration or artifact edited. Qualification receipts, first fixture/tool failures and remaining actual release gates are retained outside the repository.
