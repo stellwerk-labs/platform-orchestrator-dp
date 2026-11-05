@@ -50,3 +50,8 @@ A completed Deployment can legitimately lose its encrypted output transfer paylo
 Selecting only PostgreSQL-backed API tests still compiles ordinary API test files
 and their generated mock imports. A warm developer checkout can hide that missing
 job prerequisite. Reproduce on an exact fresh checkout before allocating fixtures.
+
+## Restore executes constraints with a restricted search path
+
+- PostgreSQL restores schema-qualified tables with an empty session search path. CHECK function OIDs can resolve correctly while nested unqualified PL/pgSQL calls fail only for real Draft-containing rows. Test COPY with actual provenance, not only empty/legacy rows.
+- Pin nested-validator lookup to pg_catalog and the actual application schema; do not hardcode public, replace validator bodies, or inherit caller-controlled schemas.

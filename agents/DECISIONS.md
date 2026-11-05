@@ -33,3 +33,8 @@ Generate with the existing pinned Make target in the integration job, then check
 tracked-file parity before fixture setup. Jobs have independent checkouts; the
 verification job's generated mocks cannot satisfy API test-package imports in
 integration. Preserve test selection and keep generated mocks uncommitted.
+
+## Migration40: restore-safe Draft validator lookup
+
+- Preserve immutable migration37. ALTER only the two existing outer validator function search_path settings, using deployments-owning namespace, pg_catalog first and pg_temp last. Function identity/body/ACL/owner/volatility and all CHECK acceptance remain unchanged.
+- Down40 intentionally retains compatible safety settings. Operational recovery remains forward-only with matching schema-supported binaries; no application/SDK or dependency change.
