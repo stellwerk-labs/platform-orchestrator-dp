@@ -91,3 +91,15 @@ enforce symbol-level findings explicitly. A correction must bind the complete
 OSV record, scanner identity/protocol and upstream-fixed module version/checksum,
 reject replacements and malformed or ambiguous reports, and retain other findings.
 Module/package-only findings retain the previous informational policy.
+
+## Portable integration environment projection
+
+Do not compute Score resource names containing `#` inside a shared Make variable.
+Escaping that character can pass a literal backslash to Score under Linux Make,
+while a different local Make accepts it. Use the existing Bash environment helper
+under `-euo pipefail`, followed by `exec "$@"`. Bare assignments propagate Score
+failures; `export NAME=$(command)` masks the producer exit status.
+
+Test that actual Make-to-Score boundary with the CI Score version and newly
+generated state. A newer local Score state can be unreadable to the pinned older
+CLI. Check environment fields without logging credential values before suites.

@@ -53,24 +53,32 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 build: compose.yaml
 	docker compose build --pull
 
-TEST_ENV = RUNNER_TEST_KUBE_CONTEXT="$(CLUSTER_NAME)" SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#api-dns | jq -r .host):$(PUBLIC_PORT)" OIDC_SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#platform-orchestrator-dp.dns-oidc | jq -r .host):$(PUBLIC_PORT)" INTERNAL_CP_URL=http://localhost:$(CP_PORT) INTERNAL_DP_URL=http://localhost:$(DP_PORT) INTERNAL_IAM_URL=http://localhost:$(IAM_PORT) DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default\#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" CP_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default\#platform-orchestrator-cp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" NATS_URL=nats://localhost:$(NATS_PORT) RUNNER_TOKEN_SALT="vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=" TEST_USER_IDENTITY_RECIPIENT=age10hmkvsqfxr5ha05ay6pqj9zdtal7pw7x2r3t4n00rzucc3en3u9q3cycqm
+TEST_ENV = RUNNER_TEST_KUBE_CONTEXT="$(CLUSTER_NAME)" PUBLIC_PORT="$(PUBLIC_PORT)" DATABASE_PORT="$(DATABASE_PORT)" CP_PORT="$(CP_PORT)" DP_PORT="$(DP_PORT)" IAM_PORT="$(IAM_PORT)"
+RUN_TESTS = $(TEST_ENV) bash -c 'set -euo pipefail; source ./local-test-env.sh; exec "$$@"' --
 
 .PHONY: test
 test: compose.yaml
+	$(MAKE) test-environment
 	docker compose up --no-build -d platform-orchestrator-cp-platform-orchestrator-cp platform-orchestrator-dp-platform-orchestrator-dp runner-gateway --wait
 	timeout 60s sh -c 'until curl --fail --silent --output /dev/null http://127.0.0.1:$(CP_PORT)/health && curl --fail --silent --output /dev/null http://127.0.0.1:$(DP_PORT)/health; do sleep 1; done'
 	docker network connect $(COMPOSE_PROJECT_NAME)_default $(NAME)-control-plane || true
 	$(MAKE) test-model-integration
 	$(MAKE) test-outcome-ack-integration
-	@$(TEST_ENV) go tool gotestsum --format testname ./ -test.timeout $(TEST_TIMEOUT) -test.parallel=$(TEST_PARALLEL) -test.v $(TESTARGS)
+	@$(RUN_TESTS) go tool gotestsum --format testname ./ -test.timeout $(TEST_TIMEOUT) -test.parallel=$(TEST_PARALLEL) -test.v $(TESTARGS)
 
 # Run last: this phase enables real admission authorization instead of the
 # legacy internal-system test actor. The normal clean target removes its proxy.
 .PHONY: test-historical-removal
 test-historical-removal:
 	@test -f compose.yaml
+	$(MAKE) test-environment
 	python3 bootstrap-admission.py --iam-port $(IAM_PORT)
-	@$(TEST_ENV) go tool gotestsum --format testname -- -tags=admissionintegration ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestHistoricalResourceRemoval$$' -test.v
+	@$(RUN_TESTS) go tool gotestsum --format testname -- -tags=admissionintegration ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestHistoricalResourceRemoval$$' -test.v
+
+# Exercise the actual Score-to-process boundary before starting the test suite.
+.PHONY: test-environment
+test-environment:
+	@$(RUN_TESTS) python3 check-test-env.py
 
 .PHONY: test-model-integration
 test-model-integration:

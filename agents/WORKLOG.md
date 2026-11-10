@@ -183,3 +183,20 @@ private fixture retains a fixed4GiB NATS file-store quota for its3GiB reserved
 streams; no published product setting changes. Final source security scan also
 passes. This completes local qualification; hosted multiarchitecture, publication
 and guarded live acceptance remain pending.
+
+## 2026-11-10: Hosted integration environment correction
+
+PR15's first hosted verify gate passed, but integration failed9cases before the
+authenticated phase: escaped hashes in the shared Make variable reached Score
+as literal resource-name backslashes, leaving database settings empty. Stopped
+landing and retained the failed run42792514833; no tag/release/image was created.
+
+Reused the existing Bash helper, removed resource lookups from Make, preserved
+argument forwarding and made lookup failure fatal. Added a real environment
+contract before both suites. A network-disabled LinuxGNU Make4.4.1 container
+using official checksum-verified Score0.17.0 and freshly generated state
+reproduces the old failure, passes the new boundary, and proves missing state
+stops before the child command. Mac Make3.81 with custom ports also passes.
+ShellCheck, Bash syntax, workflow contracts and diff checks pass. This changes
+only fixture/control source; qualified application bytes remain unchanged.
+See LEARNINGS.md and DECISIONS.md for the portability and fail-fast rationale.

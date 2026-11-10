@@ -78,3 +78,12 @@ Echo4.16.3 as vulnerable. Independently verified upstream fixes justify only an
 exact source/checksum/OSV-hash correction, isolated from graph code. No release
 gate is disabled and no additional called finding is accepted. Changed records
 that continue reporting a finding require fresh review.
+
+## Fail-fast integration environment boundary
+
+Reuse `local-test-env.sh` for both integration phases, transferring only ports
+and cluster context through Make. This removes the second parser's resource
+escaping rules. Score-derived values use bare assignments and a grouped export
+so lookup failures stop the wrapper. A cheap environment contract runs before
+both suites and never prints connection values. No application or protocol
+behavior changes.
