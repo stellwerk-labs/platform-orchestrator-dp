@@ -176,3 +176,10 @@ now explicitly reuses the existing stack and compatible default pins. The
 five-minute startup wait was stopped and logged. A further local retry awaits
 the user's required timeout check. Hosted CI/multiarchitecture/public-consumer
 and live upgrade acceptance remain separate, unexecuted gates.
+
+The user approved the fixture retry. The final maintained target passed against
+the normal arm64 image: both legacy and managed variants (59.268s total). The
+private fixture retains a fixed4GiB NATS file-store quota for its3GiB reserved
+streams; no published product setting changes. Final source security scan also
+passes. This completes local qualification; hosted multiarchitecture, publication
+and guarded live acceptance remain pending.
