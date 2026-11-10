@@ -19,12 +19,11 @@ VAULT_PORT ?= 8200
 export NATS_PORT NATS_HEALTH_PORT VAULT_PORT
 DEFAULT_K8S_RES := platform-orchestrator-runner
 RUNNER_CONFIGURATION := runner_config.json
-# CP v3.0.0 is the oldest public release that accepts the immutable Module
-# Version fields the fixtures publish (semantic_version, artifact_digest,
-# output_schema). CI overrides this with CORE_CP_INTEGRATION_IMAGE.
-CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:d3ba43fea96d28fa4d80adb5ff5d1d726ea3593b49da85f2ebef03ffd131a3f9
-IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam:v2.4.0@sha256:0fb4b3645ae2d7ccf366921c8d9490a6862cce111bdcb683ef6afcc852b40331
-RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner:v3.1.0@sha256:6a18787b33aa1c4173982ac5876a62b1cde49307fe1f7a4e86b52f1519134d43
+# Historical material tests require CP 3.3.0's authenticated execution catalogue.
+# CI overrides these compatible public defaults with its frozen Core image set.
+CP_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-cp@sha256:53f0ab233e5c8f495fa2f23f859625f22c3523050c46df642df01525798d867c
+IAM_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-iam@sha256:b9667a64ac9e896960ef04fea43cd2d0b3e0bac2dfbebe86ab2ddfbce162f87c
+RUNNER_IMAGE ?= ghcr.io/stellwerk-labs/platform-orchestrator-runner@sha256:944f7698905fc8be4fb3ab29cd7d4ba54a56aef377deef1b6ddaf7d0c2b534f2
 # Docker tags and kind imports cannot use a registry digest as a tag. Keep the
 # immutable source in RUNNER_IMAGE and use a digest-derived alias only locally.
 RUNNER_TEST_IMAGE = $(if $(findstring @sha256:,$(RUNNER_IMAGE)),stellwerk-runner-integration:sha256-$(lastword $(subst :, ,$(RUNNER_IMAGE))),$(RUNNER_IMAGE))
@@ -54,6 +53,8 @@ compose.yaml: ../score.yaml Makefile compose-mixins.yaml score.provisioners.yaml
 build: compose.yaml
 	docker compose build --pull
 
+TEST_ENV = RUNNER_TEST_KUBE_CONTEXT="$(CLUSTER_NAME)" SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#api-dns | jq -r .host):$(PUBLIC_PORT)" OIDC_SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#platform-orchestrator-dp.dns-oidc | jq -r .host):$(PUBLIC_PORT)" INTERNAL_CP_URL=http://localhost:$(CP_PORT) INTERNAL_DP_URL=http://localhost:$(DP_PORT) INTERNAL_IAM_URL=http://localhost:$(IAM_PORT) DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default\#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" CP_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default\#platform-orchestrator-cp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" NATS_URL=nats://localhost:$(NATS_PORT) RUNNER_TOKEN_SALT="vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=" TEST_USER_IDENTITY_RECIPIENT=age10hmkvsqfxr5ha05ay6pqj9zdtal7pw7x2r3t4n00rzucc3en3u9q3cycqm
+
 .PHONY: test
 test: compose.yaml
 	docker compose up --no-build -d platform-orchestrator-cp-platform-orchestrator-cp platform-orchestrator-dp-platform-orchestrator-dp runner-gateway --wait
@@ -61,7 +62,15 @@ test: compose.yaml
 	docker network connect $(COMPOSE_PROJECT_NAME)_default $(NAME)-control-plane || true
 	$(MAKE) test-model-integration
 	$(MAKE) test-outcome-ack-integration
-	@RUNNER_TEST_KUBE_CONTEXT="$(CLUSTER_NAME)" SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#api-dns | jq -r .host):$(PUBLIC_PORT)" OIDC_SERVER_URL="http://$(shell score-compose resources get-outputs dns.default\#platform-orchestrator-dp.dns-oidc | jq -r .host):$(PUBLIC_PORT)" INTERNAL_CP_URL=http://localhost:$(CP_PORT) INTERNAL_DP_URL=http://localhost:$(DP_PORT) INTERNAL_IAM_URL=http://localhost:$(IAM_PORT) DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" CP_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-cp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" NATS_URL=nats://localhost:$(NATS_PORT) RUNNER_TOKEN_SALT="vnXd0Ses8L1X0TGGcp+mf/V8dQs+L4/fWvijORwb7lI=" TEST_USER_IDENTITY_RECIPIENT=age10hmkvsqfxr5ha05ay6pqj9zdtal7pw7x2r3t4n00rzucc3en3u9q3cycqm go tool gotestsum --format testname ./ -test.timeout $(TEST_TIMEOUT) -test.parallel=$(TEST_PARALLEL) -test.v $(TESTARGS)
+	@$(TEST_ENV) go tool gotestsum --format testname ./ -test.timeout $(TEST_TIMEOUT) -test.parallel=$(TEST_PARALLEL) -test.v $(TESTARGS)
+
+# Run last: this phase enables real admission authorization instead of the
+# legacy internal-system test actor. The normal clean target removes its proxy.
+.PHONY: test-historical-removal
+test-historical-removal:
+	@test -f compose.yaml
+	python3 bootstrap-admission.py --iam-port $(IAM_PORT)
+	@$(TEST_ENV) go tool gotestsum --format testname -- -tags=admissionintegration ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestHistoricalResourceRemoval$$' -test.v
 
 .PHONY: test-model-integration
 test-model-integration:
@@ -80,7 +89,7 @@ clean:
 
 .PHONY: test-integration-logs
 test-integration-logs:
-	docker compose logs
+	@if [ -f .score-compose/admission/compose.json ]; then docker compose -f compose.yaml -f .score-compose/admission/compose.json logs; else docker compose logs; fi
 
 .PHONY: connect-to-integ-db
 connect-to-integ-db:

@@ -430,6 +430,7 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
 			RestrictedConfirmations:     confirmations,
+			ModuleMaterialCatalogue:     a.OrdinaryAdmissions.ExecutionCatalogueClient(),
 			ExpectedCurrentDeploymentID: opt.Of(expectedHead),
 			RetryOfRollbackDeploymentID: retryOf,
 			ValidatePlan: func(captured DeploymentPlanCapture) error {

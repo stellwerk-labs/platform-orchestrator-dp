@@ -20,7 +20,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.20.0
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/hashicorp/vault/api v1.23.0
-	github.com/labstack/echo/v4 v4.15.3
+	github.com/labstack/echo/v4 v4.16.3
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
 	github.com/oapi-codegen/nullable v1.2.0
@@ -156,14 +156,14 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/justinrixx/retryhttp v1.1.0 // indirect
-	github.com/klauspost/compress v1.18.7 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/linkdata/deadlock v0.5.5 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260216142805-b3301c5f2a88 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/minio/simdjson-go v0.4.5 // indirect

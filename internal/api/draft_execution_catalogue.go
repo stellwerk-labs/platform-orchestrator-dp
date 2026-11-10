@@ -26,8 +26,12 @@ func compilationCatalogue(
 	var catalogue *cp.InternalExecutionCatalogue
 	var conflict *cp.N409Conflict
 	var err error
-	if len(options.DraftTestSnapshots) > 0 || len(retained) > 0 || (len(options.ExplicitModuleVersions) > 0 && options.ExecutionCatalogue != nil) {
-		if options.ExecutionCatalogue == nil {
+	executionClient := options.ExecutionCatalogue
+	if body.AreRulesIgnored && executionClient == nil {
+		executionClient = options.ModuleMaterialCatalogue
+	}
+	if len(options.DraftTestSnapshots) > 0 || len(retained) > 0 || ((body.AreRulesIgnored || len(options.ExplicitModuleVersions) > 0) && executionClient != nil) {
+		if executionClient == nil {
 			return nil, ErrDeploymentAdmissionUnavailable
 		}
 		request := cp.InternalExecutionCatalogueGenerateBody{
@@ -43,7 +47,7 @@ func compilationCatalogue(
 		if !request.MaterialOnly && len(options.ExplicitModuleVersions) > 0 {
 			request.SelectedPublishedModuleVersions = &options.ExplicitModuleVersions
 		}
-		response, callErr := options.ExecutionCatalogue.GenerateInternalExecutionCatalogueWithResponse(ctx, org, project, environment, nil, request, editors...)
+		response, callErr := executionClient.GenerateInternalExecutionCatalogueWithResponse(ctx, org, project, environment, nil, request, editors...)
 		if callErr != nil {
 			return nil, callErr
 		}

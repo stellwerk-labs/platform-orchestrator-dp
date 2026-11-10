@@ -138,3 +138,41 @@ source-parity evidence are retained separately by the release coordinator.
 - Investigated actual custom-archive restore failure and reproduced schema39 empty-search_path COPY failure independently for Draft artifacts and graph. New40 fixes nested lookup without relaxing malformed/cross-Environment checks or caller-schema isolation.
 - Added real PostgreSQL migration/metadata/idempotency/Down regression. Historical observation recovery test now explicitly attempts DownTo38 to exercise the migration39 sealed-request fence rather than whichever migration happens to be latest.
 - Candidate-only source based on public4d2cc25; no published migration or artifact edited. Qualification receipts, first fixture/tool failures and remaining actual release gates are retained outside the repository.
+
+## 2026-11-10: Complete offline removal qualification
+
+- Added the material-only path for destroy/rollback and Runner inline bundle
+  reconstruction. A real asynchronous destroy exposed the second catalogue
+  lookup after compilation and plan-only checks had passed.
+- Added a tagged real-IAM/Runner regression for migrated opaque and managed
+  versions: initial apply, changed Default, unchanged plan-only state bytes,
+  failed provider configuration, restored-provider cleanup retry, empty redeploy,
+  rollback with immutable original history and successful environment destroy.
+- Isolated authenticated fixture bootstrap in a required final CI phase. The
+  ordinary integration fixture retains its existing actor behavior; normal
+  cleanup removes the added proxy. Raw credentials remain disposable and ignored.
+- Full unit suite578, lint, real model/outcome-ack integration, six related
+  legacy/lifecycle/pin/provider-removal/destroy tests and30 private captured-graph
+  scenarios passed. Customer data and the private replay harness are absent from
+  shipping source. Final artifact qualification is recorded separately.
+- Updated existing security dependencies and isolated exact stale-advisory
+  verification in a standard-library-only scanner wrapper. Focused policy tests
+  and source/binary scans passed; final rebuilt-artifact evidence remains distinct.
+- Fresh planning, first-green and final clean-code reviews accepted the design.
+  Final reviewer counted six production concepts, three fixture concepts and five
+  separate security-policy concepts, with no blocking findings.
+- See DECISIONS.md for identity/admission boundaries and LEARNINGS.md for the
+  asynchronous reconstruction gap. No public push, release or installation write
+  is performed by these local changes.
+
+Final local checks: the normal unit gate including scanner-policy cases passes
+593tests; lint and8workflow contracts pass. A clean export's normal generation
+and both module tidy checks preserve every tracked byte. The normal arm64
+Dockerfile build passes dependency verification, binary vulnerability checking
+and licence collection. Its executable SHA256 equals the functional-test
+executable byte for byte. A subsequent exact-image target startup hit a local
+NATS quota problem after Compose regenerated the fixture; the new final target
+now explicitly reuses the existing stack and compatible default pins. The
+five-minute startup wait was stopped and logged. A further local retry awaits
+the user's required timeout check. Hosted CI/multiarchitecture/public-consumer
+and live upgrade acceptance remain separate, unexecuted gates.

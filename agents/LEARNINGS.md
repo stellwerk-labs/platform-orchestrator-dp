@@ -69,3 +69,25 @@ job prerequisite. Reproduce on an exact fresh checkout before allocating fixture
 
 - PostgreSQL restores schema-qualified tables with an empty session search path. CHECK function OIDs can resolve correctly while nested unqualified PL/pgSQL calls fail only for real Draft-containing rows. Test COPY with actual provenance, not only empty/legacy rows.
 - Pin nested-validator lookup to pg_catalog and the actual application schema; do not hardcode public, replace validator bodies, or inherit caller-controlled schemas.
+
+## Historical material must survive Runner reconstruction
+
+Graph compilation is only one consumer of immutable material. The real Runner
+regression exposed the same current-catalogue policy in inline bundle rebuilding
+after compilation was fixed. Reconstruct every already-admitted inline source
+through the authenticated material-only catalogue when configured, preserving
+all existing artifact and Draft provenance checks. Plan success alone does not
+prove asynchronous destroy or rollback execution.
+
+Existing integration fixtures use an internal-system actor. Core deliberately
+rejects that actor for delegated admission. Exercise real service authentication
+and a scoped human actor in a separate final, tagged integration phase instead
+of enabling admission across legacy fixtures.
+
+## Exact advisory metadata corrections
+
+Govulncheck JSON exits zero even when findings exist. Preserve raw output and
+enforce symbol-level findings explicitly. A correction must bind the complete
+OSV record, scanner identity/protocol and upstream-fixed module version/checksum,
+reject replacements and malformed or ambiguous reports, and retain other findings.
+Module/package-only findings retain the previous informational policy.

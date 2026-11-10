@@ -52,3 +52,29 @@ integration. Preserve test selection and keep generated mocks uncommitted.
 
 - Preserve immutable migration37. ALTER only the two existing outer validator function search_path settings, using deployments-owning namespace, pg_catalog first and pg_temp last. Function identity/body/ACL/owner/volatility and all CHECK acceptance remain unchanged.
 - Down40 intentionally retains compatible safety settings. Operational recovery remains forward-only with matching schema-supported binaries; no application/SDK or dependency change.
+
+## Complete retained-material execution path
+
+Retain the exact original Module metadata for removed nodes after new graph
+selection. Do not match a replacement or migrate Terraform state: that would
+change resource identity without evidence. Defaults, Pins and Rules may omit
+historical versions even after versioning, so the repair applies to both migrated
+and managed graphs. Missing material is an actionable conflict, never an
+automatic reassignment. Current provider definitions win a duplicate merge.
+
+Use authenticated material-only reads for destroy/rollback compilation and
+already-admitted Runner bundle reconstruction. These reads grant no mutation
+authority; central admission and existing identity/provenance checks remain.
+This requires the compatible CP3.3.0/IAM2.6.0/Runner3.2.0 set and normal service
+admission identity, rather than a DP-only swap on CP3.1.1. The patch introduces
+no migration beyond its DP4.2.1 base; older installations still traverse the
+intervening schema changes. Keep the prior historical Gob reader.
+
+## Security fixes needed by the normal build
+
+The unchanged strict artifact build exposed new dependency advisories. Update
+existing Echo to4.16.3 and compress to1.20.2. Two Go DB entries still mark fixed
+Echo4.16.3 as vulnerable. Independently verified upstream fixes justify only an
+exact source/checksum/OSV-hash correction, isolated from graph code. No release
+gate is disabled and no additional called finding is accepted. Changed records
+that continue reporting a finding require fresh review.
