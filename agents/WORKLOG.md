@@ -1,5 +1,25 @@
 # Worklog
 
+## 2026-11-10: Historical resource removal, local repair
+
+- Based the isolated repair on published DP 4.2.1 (e2f4617), retaining its
+  historical placeholder decoder. No API/SDK/dependency/schema change.
+- Added post-selection historical material lookup, provider merge preserving the
+  initial catalogue, ordinary/external compilation wiring, and clear 409/400 errors.
+- Focused no-mock tests cover JSON-roundtripped namespace/database/route deletion,
+  provider hash/alias/tfvar retention, unchanged current module selection,
+  missing exact version through the HTTP 409 response mapper, and provider merge.
+- A separate private real CP 3.3.0/PostgreSQL 17 harness verified the actual resolver
+  request flags, deprecated historical material despite a newer Environment Pin,
+  no returned rules, unchanged Pin, and missing-version conflict response. It
+  exercises material planning, not IAM, full deployment or Runner execution.
+- Focused Go tests, make lint, go vet for affected packages, gofmt and diff checks
+  passed. Initial fresh-checkout checks needed the existing ignored generated
+  mocks; these were generated without adding dependencies. Fresh planning,
+  first-green and final independent clean-code reviews accepted five concepts.
+- Live incident validation and coordinated artifact publication remain separate.
+  No installation change, public push, tag or release occurred.
+
 ## Complete raw tar metadata coverage
 
 - Retain every raw layer header, PAX extension, padding and trailing byte in a

@@ -547,7 +547,8 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 		*environment, model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), DeploymentManifest{}, nil, nil, nil, true, nil,
 		a.ControlPlaneClient, a.Admission.Database, tx, DeploymentOptions{
 			ExplicitModuleVersions: explicitVersions, ReuseLastSuccessfulManifest: true, IgnoreEnvironmentPins: true,
-			RequireExistingRunner: true, CapturePlan: capture,
+			ModuleMaterialCatalogue: a.OrdinaryAdmissions.ExecutionCatalogueClient(),
+			RequireExistingRunner:   true, CapturePlan: capture,
 			AuthorizeModuleVersion: func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error {
 				if !explicitlySelected {
 					return nil

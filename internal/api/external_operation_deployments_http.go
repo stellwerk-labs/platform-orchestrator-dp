@@ -321,8 +321,9 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 		model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), manifest, &recipient, &recipient, nil, false,
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
-			ExplicitModuleVersions: explicitVersions,
-			ModuleOperationID:      opt.Of(body.OperationRef),
+			ExplicitModuleVersions:  explicitVersions,
+			ModuleMaterialCatalogue: a.OrdinaryAdmissions.ExecutionCatalogueClient(),
+			ModuleOperationID:       opt.Of(body.OperationRef),
 			AuthorizeModuleVersion: func(moduleID string, explicitlySelected bool, artifact catalogueArtifact) error {
 				if !explicitlySelected {
 					return nil

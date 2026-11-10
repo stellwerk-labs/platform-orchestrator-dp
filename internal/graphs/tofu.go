@@ -119,8 +119,8 @@ func BuildTofuFromGraph(g *platform_orchestrator_graph.Graph[*GraphNodeModuleCon
 		}
 
 		n := g.Nodes[rc]
-		if n.ModuleConfiguration == nil || n.ModuleConfiguration.Definition == nil {
-			return nil, fmt.Errorf("module configuration is nil on node %s (%v)", rc.String(), n)
+		if err := validateModuleDefinition(rc, n.ModuleConfiguration); err != nil {
+			return nil, err
 		}
 
 		resourceContextLookup := contextPlaceholderLookup.Or(ContextPlaceholderLookupMap(map[string]interface{}{

@@ -1,5 +1,19 @@
 # Decisions
 
+## 2026-11-10: Resolve missing deletion material after graph selection
+
+Fetch only missing deleted-node definitions through the authenticated execution
+catalogue with ignored rules and material_only. Attach exact identities after
+BuildGraph/AddDeletedNodes, preserving normal module selection and admission.
+External plan/forward callers receive a material-specific client so their existing
+selection route stays unchanged. Keep deleted inline-source flags false.
+
+Preserve providers from the initial catalogue when historical material contains
+the same provider ID. An unavailable exact historical definition is a 409 with
+resource/module/version and recovery guidance. Invalid graph configuration is a
+400 instead of an internal node dump. Do not skip deleted providers: destruction
+still requires them.
+
 - Preserve the complete pinned Distroless base and BuildKit SBOM/provenance.
 - Reproducibility compares actual platform payload manifests/configurations/layers/binaries/notices. Attestation and full index variance is recorded, not suppressed.
 - Collect production notice graphs separately for each Linux architecture and all shipped executables. Restrict SDK classifier exceptions to exact declared module identities and verified legal bytes/source provenance.

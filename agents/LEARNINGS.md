@@ -1,5 +1,19 @@
 # Learnings
 
+## 2026-11-10: Historical definitions needed during resource removal
+
+Normal compilation requests today's selectable module catalogue. A deleted node
+may still require its exact older definition to recover provider mappings, even
+though it generates no module block. Globally current versions need not appear
+in an environment's rule-filtered catalogue. This can affect any resource type,
+and is not intrinsically a pre-upgrade graph issue.
+
+Treat historical material separately from new version selection: a material-only
+lookup must ignore rules and cannot override Environment Pins or adopt restricted
+versions. Keep initial provider configurations when merging a second catalogue
+read. Persisted-JSON regression tests must populate provider bindings before the
+roundtrip so they can assert the original hash and alias survive deletion.
+
 - go-licenses v2.0.1 does not recognize the SDK root EUPL text. Exact declared SDK provenance must be handled explicitly; external unknown licenses remain fatal.
 - gitleaks directory scans skip binary files. Stream printable binary strings through the same pinned scanner, without saving extracted secrets.
 - Standard-library packages have no Go module record. Dependency notice collection must not treat their package paths as external modules.

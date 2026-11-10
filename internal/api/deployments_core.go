@@ -81,6 +81,7 @@ func CreateDeployment(
 type DeploymentOptions struct {
 	DraftTestSnapshots          map[string]uuid.UUID
 	ExecutionCatalogue          platformorchestratorcp.ClientWithResponsesInterface
+	ModuleMaterialCatalogue     platformorchestratorcp.ClientWithResponsesInterface
 	ExplicitModuleVersions      map[string]string
 	RestrictedConfirmations     []uuid.UUID
 	ModuleOperationID           opt.Opt[uuid.UUID]
@@ -350,6 +351,15 @@ func CreateDeploymentWithOptions(
 		newGraph = g
 
 		graphs.AddDeletedNodes(newGraph, lastGraph, lastDeploymentMayHaveNotConverged)
+		materialClient := options.ModuleMaterialCatalogue
+		if materialClient == nil {
+			materialClient = options.ExecutionCatalogue
+		}
+		deletedProviders, err := resolveDeletedModuleMaterial(ctx, materialClient, orgId, projectId, envId, newGraph, catalogueEditors)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		moduleProviders = mergeModuleProviders(moduleProviders, deletedProviders)
 	}
 
 	// Build the distance matrix once for use by both AddProviderMappingToNodes and BuildTofuFromGraph

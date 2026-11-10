@@ -393,8 +393,8 @@ func AddProviderMappingToNodes(g *platform_orchestrator_graph.Graph[*GraphNodeMo
 		}
 
 		n := g.Nodes[rc]
-		if n.ModuleConfiguration == nil || n.ModuleConfiguration.Definition == nil {
-			return fmt.Errorf("module configuration is nil on node %s (%v)", rc.String(), n)
+		if err := validateModuleDefinition(rc, n.ModuleConfiguration); err != nil {
+			return err
 		}
 
 		if pm := n.ModuleConfiguration.Definition.ProviderMapping; len(pm) > 0 {
