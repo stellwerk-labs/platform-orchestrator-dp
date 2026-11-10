@@ -11,6 +11,7 @@ export GOTOOLCHAIN="$release_go_version" GOWORK=off GOENV=off CGO_ENABLED=0 GOOS
 unset GOFLAGS GOEXPERIMENT
 mkdir -p /opt/server
 # Retain linker symbols for binary vulnerability analysis; omit only DWARF.
+go mod verify
 go build -trimpath -buildvcs=false -ldflags="-w" -o /opt/server/server ./cmd/server
 (unset GOOS GOARCH GOAMD64 GOARM64; sh scripts/check-go-security.sh binary /opt/server/server)
 sh scripts/collect-licenses.sh /opt/licenses ./cmd/server

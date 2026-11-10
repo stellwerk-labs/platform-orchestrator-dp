@@ -100,9 +100,11 @@ func buildForDeployment(
 			return nil
 		})
 		var catalogue *platformorchestratorcp.InternalExecutionCatalogue
-		if len(retained) > 0 {
+		// Reconstruct already-admitted sources without reapplying today's
+		// selection policy, including deprecated historical rollback versions.
+		if len(retained) > 0 || (len(executionClient) == 1 && executionClient[0] != nil) {
 			if len(executionClient) != 1 || executionClient[0] == nil {
-				return nil, errors.New("runtime identity is required to reconstruct retained Draft test sources")
+				return nil, errors.New("runtime identity is required to reconstruct retained sources")
 			}
 			response, callErr := executionClient[0].GenerateInternalExecutionCatalogueWithResponse(ctx, orgID, deployment.ProjectId, deployment.EnvId, nil,
 				platformorchestratorcp.InternalExecutionCatalogueGenerateBody{

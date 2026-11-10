@@ -53,7 +53,7 @@ test-integration: build
 ## Run golang tests
 .PHONY: test-unit
 test-unit:
-	go tool gotestsum --format testname -- -coverprofile=cover.out ./internal/...
+	go tool gotestsum --format testname -- -coverprofile=cover.out ./internal/... ./scripts/gosecurity
 
 ## Lint the code
 .PHONY: lint

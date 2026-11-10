@@ -1,5 +1,19 @@
 # Decisions
 
+## 2026-11-10: Resolve missing deletion material after graph selection
+
+Fetch only missing deleted-node definitions through the authenticated execution
+catalogue with ignored rules and material_only. Attach exact identities after
+BuildGraph/AddDeletedNodes, preserving normal module selection and admission.
+External plan/forward callers receive a material-specific client so their existing
+selection route stays unchanged. Keep deleted inline-source flags false.
+
+Preserve providers from the initial catalogue when historical material contains
+the same provider ID. An unavailable exact historical definition is a 409 with
+resource/module/version and recovery guidance. Invalid graph configuration is a
+400 instead of an internal node dump. Do not skip deleted providers: destruction
+still requires them.
+
 - Preserve the complete pinned Distroless base and BuildKit SBOM/provenance.
 - Reproducibility compares actual platform payload manifests/configurations/layers/binaries/notices. Attestation and full index variance is recorded, not suppressed.
 - Collect production notice graphs separately for each Linux architecture and all shipped executables. Restrict SDK classifier exceptions to exact declared module identities and verified legal bytes/source provenance.
@@ -38,3 +52,48 @@ integration. Preserve test selection and keep generated mocks uncommitted.
 
 - Preserve immutable migration37. ALTER only the two existing outer validator function search_path settings, using deployments-owning namespace, pg_catalog first and pg_temp last. Function identity/body/ACL/owner/volatility and all CHECK acceptance remain unchanged.
 - Down40 intentionally retains compatible safety settings. Operational recovery remains forward-only with matching schema-supported binaries; no application/SDK or dependency change.
+
+## Complete retained-material execution path
+
+Retain the exact original Module metadata for removed nodes after new graph
+selection. Do not match a replacement or migrate Terraform state: that would
+change resource identity without evidence. Defaults, Pins and Rules may omit
+historical versions even after versioning, so the repair applies to both migrated
+and managed graphs. Missing material is an actionable conflict, never an
+automatic reassignment. Current provider definitions win a duplicate merge.
+
+Use authenticated material-only reads for destroy/rollback compilation and
+already-admitted Runner bundle reconstruction. These reads grant no mutation
+authority; central admission and existing identity/provenance checks remain.
+This requires the compatible CP3.3.0/IAM2.6.0/Runner3.2.0 set and normal service
+admission identity, rather than a DP-only swap on CP3.1.1. The patch introduces
+no migration beyond its DP4.2.1 base; older installations still traverse the
+intervening schema changes. Keep the prior historical Gob reader.
+
+## Security fixes needed by the normal build
+
+The unchanged strict artifact build exposed new dependency advisories. Update
+existing Echo to4.16.3 and compress to1.20.2. Two Go DB entries still mark fixed
+Echo4.16.3 as vulnerable. Independently verified upstream fixes justify only an
+exact source/checksum/OSV-hash correction, isolated from graph code. No release
+gate is disabled and no additional called finding is accepted. Changed records
+that continue reporting a finding require fresh review.
+
+## Fail-fast integration environment boundary
+
+Reuse `local-test-env.sh` for both integration phases, transferring only ports
+and cluster context through Make. This removes the second parser's resource
+escaping rules. Score-derived values use bare assignments and a grouped export
+so lookup failures stop the wrapper. A cheap environment contract runs before
+both suites and never prints connection values. No application or protocol
+behavior changes.
+
+## Readiness after enabling fixture admission
+
+Reload the original generated public proxy after recreating admission-configured
+Core/DP services. Require a unique public Nginx service and successful Core
+projects-list GET through its actual Score Host before business creates. Retain
+the same authentication and use canonical Compose service names in the separate
+admission proxy. These are fixture lifecycle controls, not production routing
+changes. Bounded network readiness catches OSError across supported Python
+versions and still requires200.

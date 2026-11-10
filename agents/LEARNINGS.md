@@ -1,5 +1,19 @@
 # Learnings
 
+## 2026-11-10: Historical definitions needed during resource removal
+
+Normal compilation requests today's selectable module catalogue. A deleted node
+may still require its exact older definition to recover provider mappings, even
+though it generates no module block. Globally current versions need not appear
+in an environment's rule-filtered catalogue. This can affect any resource type,
+and is not intrinsically a pre-upgrade graph issue.
+
+Treat historical material separately from new version selection: a material-only
+lookup must ignore rules and cannot override Environment Pins or adopt restricted
+versions. Keep initial provider configurations when merging a second catalogue
+read. Persisted-JSON regression tests must populate provider bindings before the
+roundtrip so they can assert the original hash and alias survive deletion.
+
 - go-licenses v2.0.1 does not recognize the SDK root EUPL text. Exact declared SDK provenance must be handled explicitly; external unknown licenses remain fatal.
 - gitleaks directory scans skip binary files. Stream printable binary strings through the same pinned scanner, without saving extracted secrets.
 - Standard-library packages have no Go module record. Dependency notice collection must not treat their package paths as external modules.
@@ -55,3 +69,47 @@ job prerequisite. Reproduce on an exact fresh checkout before allocating fixture
 
 - PostgreSQL restores schema-qualified tables with an empty session search path. CHECK function OIDs can resolve correctly while nested unqualified PL/pgSQL calls fail only for real Draft-containing rows. Test COPY with actual provenance, not only empty/legacy rows.
 - Pin nested-validator lookup to pg_catalog and the actual application schema; do not hardcode public, replace validator bodies, or inherit caller-controlled schemas.
+
+## Historical material must survive Runner reconstruction
+
+Graph compilation is only one consumer of immutable material. The real Runner
+regression exposed the same current-catalogue policy in inline bundle rebuilding
+after compilation was fixed. Reconstruct every already-admitted inline source
+through the authenticated material-only catalogue when configured, preserving
+all existing artifact and Draft provenance checks. Plan success alone does not
+prove asynchronous destroy or rollback execution.
+
+Existing integration fixtures use an internal-system actor. Core deliberately
+rejects that actor for delegated admission. Exercise real service authentication
+and a scoped human actor in a separate final, tagged integration phase instead
+of enabling admission across legacy fixtures.
+
+## Exact advisory metadata corrections
+
+Govulncheck JSON exits zero even when findings exist. Preserve raw output and
+enforce symbol-level findings explicitly. A correction must bind the complete
+OSV record, scanner identity/protocol and upstream-fixed module version/checksum,
+reject replacements and malformed or ambiguous reports, and retain other findings.
+Module/package-only findings retain the previous informational policy.
+
+## Portable integration environment projection
+
+Do not compute Score resource names containing `#` inside a shared Make variable.
+Escaping that character can pass a literal backslash to Score under Linux Make,
+while a different local Make accepts it. Use the existing Bash environment helper
+under `-euo pipefail`, followed by `exec "$@"`. Bare assignments propagate Score
+failures; `export NAME=$(command)` masks the producer exit status.
+
+Test that actual Make-to-Score boundary with the CI Score version and newly
+generated state. A newer local Score state can be unreadable to the pinned older
+CLI. Check environment fields without logging credential values before suites.
+
+## Proxy caches survive backend recreation
+
+The Score-generated public Nginx proxy resolves its upstreams while loading
+configuration. Recreating Core and DP can swap their addresses while that proxy
+continues routing to old addresses. Refresh its configuration after backend
+health, then probe a concrete Core route through the public virtual host. Direct
+service health alone cannot prove routing. GET `/orgs` is not a Core list method;
+a projects-list GET on an unused fixture organization returns200 in Core and404
+in DP and provides a safe, nonmutating identity probe.

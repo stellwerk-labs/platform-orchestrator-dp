@@ -595,6 +595,11 @@ jobs:
           TEST_PARALLEL: "1"
           TEST_TIMEOUT: 20m
 
+      - name: Test historical removal with real admission authorization
+        run: make -C integration-tests test-historical-removal
+        env:
+          TEST_TIMEOUT: 5m
+
       - name: Show integration test logs
         if: always()
         run: make test-integration-logs
