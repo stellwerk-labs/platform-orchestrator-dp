@@ -103,3 +103,13 @@ failures; `export NAME=$(command)` masks the producer exit status.
 Test that actual Make-to-Score boundary with the CI Score version and newly
 generated state. A newer local Score state can be unreadable to the pinned older
 CLI. Check environment fields without logging credential values before suites.
+
+## Proxy caches survive backend recreation
+
+The Score-generated public Nginx proxy resolves its upstreams while loading
+configuration. Recreating Core and DP can swap their addresses while that proxy
+continues routing to old addresses. Refresh its configuration after backend
+health, then probe a concrete Core route through the public virtual host. Direct
+service health alone cannot prove routing. GET `/orgs` is not a Core list method;
+a projects-list GET on an unused fixture organization returns200 in Core and404
+in DP and provides a safe, nonmutating identity probe.

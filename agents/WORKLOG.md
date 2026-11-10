@@ -189,7 +189,7 @@ and guarded live acceptance remain pending.
 PR15's first hosted verify gate passed, but integration failed9cases before the
 authenticated phase: escaped hashes in the shared Make variable reached Score
 as literal resource-name backslashes, leaving database settings empty. Stopped
-landing and retained the failed run42792514833; no tag/release/image was created.
+landing and retained the failed run42792514833; no release tag, GitHub release or public image was published.
 
 Reused the existing Bash helper, removed resource lookups from Make, preserved
 argument forwarding and made lookup failure fatal. Added a real environment
@@ -200,3 +200,24 @@ stops before the child command. Mac Make3.81 with custom ports also passes.
 ShellCheck, Bash syntax, workflow contracts and diff checks pass. This changes
 only fixture/control source; qualified application bytes remain unchanged.
 See LEARNINGS.md and DECISIONS.md for the portability and fail-fast rationale.
+
+## 2026-11-10: Authenticated-phase proxy lifecycle correction
+
+Second PR CI42798000033 passed verify and the complete ordinary135-test suite.
+Its final authenticated cases failed during project creation: retained logs prove
+Core POST requests reached DP and returned404 after the fixture recreated both
+services. No merge/tag/release/image publication occurred.
+
+Reloaded the generated public Nginx proxy after direct backend health and added
+a bounded concrete Core-route probe using Score's virtual Host. Canonical
+Compose upstream names remove an implicit alias assumption. A real owned
+Core/DP IP swap reproduces public200->404; refresh restoresCore200 while the
+same path returns404 from DP. The injected swap disturbed Docker Desktop's
+direct port mapping, so both apps were restored through normal Compose before
+full business execution. Both historical variants then pass the maintained
+target on the normal arm64 image in113.380s. Initial invalid GET/orgs probe and
+failed local diagnostic attempts remain private and are not passes.
+
+Fresh planning/first-green reviews accept three localized routing concepts,
+with unchanged authentication and no runtime application changes. Source syntax,
+workflow contracts and diff checks pass. Normal hosted checks still required.

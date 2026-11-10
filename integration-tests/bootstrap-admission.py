@@ -31,14 +31,15 @@ def token_is_valid(iam, principal):
         raise
 
 
-def wait_ready(port):
+def wait_ready(port, path="/health", headers=None):
     deadline = time.monotonic() + 60
     while True:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+            with urllib.request.urlopen(req, timeout=2) as response:
                 if response.status == 200:
                     return
-        except (urllib.error.URLError, TimeoutError):
+        except OSError:
             pass
         if time.monotonic() >= deadline:
             raise RuntimeError(f"service on port {port} did not become healthy")
@@ -81,7 +82,7 @@ http {
     listen 8080;
     location = /_authenticate {
       internal;
-      set $iam http://platform-orchestrator-iam:8080;
+      set $iam http://platform-orchestrator-iam-platform-orchestrator-iam:8080;
       proxy_pass $iam/internal/authenticate;
       proxy_method POST;
       proxy_pass_request_body off;
@@ -93,15 +94,18 @@ http {
       auth_request /_authenticate;
       auth_request_set $principal $upstream_http_from;
       proxy_set_header From $principal;
-      set $core http://platform-orchestrator-cp:8080;
+      set $core http://platform-orchestrator-cp-platform-orchestrator-cp:8080;
       proxy_pass $core$request_uri;
     }
   }
 }
 """)
     config = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"]))
-    router = next(service for service in config["services"].values()
-                  if "nginx" in service.get("image", ""))
+    routers = [(name, service) for name, service in config["services"].items()
+               if "nginx" in service.get("image", "") and service.get("ports")]
+    if len(routers) != 1:
+        raise RuntimeError("exactly one public Score router is required")
+    router_name, router = routers[0]
     override = {"services": {
         "platform-orchestrator-cp-platform-orchestrator-cp": {
             "environment": {"DEPLOYMENT_ADMISSION_IDENTITY": principal["id"]}},
@@ -126,6 +130,13 @@ http {
     for name in ["platform-orchestrator-cp-platform-orchestrator-cp",
                  "platform-orchestrator-dp-platform-orchestrator-dp"]:
         wait_ready(config["services"][name]["ports"][0]["published"])
+    # The generated proxy resolves upstream addresses when its configuration loads.
+    subprocess.run(["docker", "compose", "-f", "compose.yaml", "-f", str(override_file),
+                    "exec", "-T", router_name, "nginx", "-s", "reload"], check=True)
+    host = subprocess.check_output(["score-compose", "resources", "get-outputs",
+                                    "dns.default#api-dns", "-f", "{{ .host }}"], text=True).strip()
+    wait_ready(router["ports"][0]["published"], "/orgs/routing-readiness-probe/projects",
+               {"Host": host, "From": "ffffffff-ffff-ffff-ffff-ffffffffffff"})
     print("Configured real IAM platform-principal admission and material catalogue")
 
 

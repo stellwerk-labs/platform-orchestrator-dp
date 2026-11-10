@@ -87,3 +87,13 @@ escaping rules. Score-derived values use bare assignments and a grouped export
 so lookup failures stop the wrapper. A cheap environment contract runs before
 both suites and never prints connection values. No application or protocol
 behavior changes.
+
+## Readiness after enabling fixture admission
+
+Reload the original generated public proxy after recreating admission-configured
+Core/DP services. Require a unique public Nginx service and successful Core
+projects-list GET through its actual Score Host before business creates. Retain
+the same authentication and use canonical Compose service names in the separate
+admission proxy. These are fixture lifecycle controls, not production routing
+changes. Bounded network readiness catches OSError across supported Python
+versions and still requires200.
