@@ -170,10 +170,13 @@ func CreateDeploymentWithOptions(
 	var lastManifest DeploymentManifest
 	var lastDeploymentMayHaveNotConverged bool
 	var lastDeploymentSucceeded bool
+	var stateHead *model.DeploymentSummary
+	var stateSnapshot graphs.ProviderSnapshot
 	{
 		var d *model.DeploymentSummary
 		var m model.EncodedDeploymentManifest
 		var g model.EncodedDeploymentGraph
+		var tofu model.RawTofu
 		var err error
 
 		// First, look up the previous graph if it exists. This is either the previous deployment graph or the rollback target
@@ -181,7 +184,7 @@ func CreateDeploymentWithOptions(
 		if rollbackTo.IsSet() {
 			d, m, _, g, err = db.GetDeployment(ctx, tx, orgId, rollbackTo.Must(), model.GetModeDefault)
 		} else {
-			d, m, _, g, err = db.GetLastDeployment(ctx, tx, orgId, projectId, envId, model.GetLastDeploymentParams{StateChangeOnly: true})
+			d, m, tofu, g, err = db.GetLastDeployment(ctx, tx, orgId, projectId, envId, model.GetLastDeploymentParams{StateChangeOnly: true})
 		}
 
 		if err != nil {
@@ -199,6 +202,9 @@ func CreateDeploymentWithOptions(
 			return nil, nil, nil, errors.Wrap(err, "failed to parse reference deployment manifest")
 		} else if d != nil {
 			lastDeploymentId = d.Id
+			if !rollbackTo.IsSet() {
+				stateHead, stateSnapshot = d, graphs.ProviderSnapshot{Graph: g, Tofu: tofu}
+			}
 			lastDeploymentSucceeded = d.Status == model.DeploymentStatusSucceeded
 			if d.Status == model.DeploymentStatusFailed {
 				lastDeploymentMayHaveNotConverged = true
@@ -320,6 +326,10 @@ func CreateDeploymentWithOptions(
 		return nil, nil, nil, model.NewErrConflict(err.Error())
 	}
 
+	materialClient := options.ModuleMaterialCatalogue
+	if materialClient == nil {
+		materialClient = options.ExecutionCatalogue
+	}
 	var newGraph *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
 	if useLastGraph && lastGraph != nil {
 		// When doing a destroy or a rollback, we use the same manifest and graph from the previous deployment
@@ -351,10 +361,6 @@ func CreateDeploymentWithOptions(
 		newGraph = g
 
 		graphs.AddDeletedNodes(newGraph, lastGraph, lastDeploymentMayHaveNotConverged)
-		materialClient := options.ModuleMaterialCatalogue
-		if materialClient == nil {
-			materialClient = options.ExecutionCatalogue
-		}
 		deletedProviders, err := resolveDeletedModuleMaterial(ctx, materialClient, orgId, projectId, envId, newGraph, catalogueEditors)
 		if err != nil {
 			return nil, nil, nil, err
@@ -387,13 +393,43 @@ func CreateDeploymentWithOptions(
 		"env_type_id": env.EnvTypeId,
 	}
 
-	rawTofu, err := graphs.BuildTofuFromGraph(newGraph, moduleProviders, runner, env.Uuid, graphs.ContextPlaceholderLookupMap(contextMap), distanceMatrix)
+	lookup := graphs.ContextPlaceholderLookupMap(contextMap)
+	rawTofu, err := graphs.BuildTofuFromGraph(newGraph, moduleProviders, runner, env.Uuid, lookup, distanceMatrix)
 	if err != nil {
 		if e := graphs.UserBadRequestError(""); errors.As(err, &e) {
 			logger.Warn("failed to build tofu", zap.Error(err))
 			return nil, nil, nil, model.NewErrBadRequest(e.Error())
 		}
 		return nil, nil, nil, err
+	}
+
+	// A rollback target is the desired graph, not the deployment that last
+	// managed the current state. Keep cleanup material out of module selection.
+	if rollbackTo.IsSet() {
+		stateHead, stateSnapshot, err = currentProviderState(ctx, db, tx, orgId, projectId, envId, env.Uuid)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	history, _, err := providerStateHistory(ctx, db, tx, stateHead, stateSnapshot)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	rawTofu, _, err = graphs.RetainProviderBindings(rawTofu, newGraph, history, runner.Id, lookup, func(ids []string) ([]platformorchestratorcp.ModuleProvider, error) {
+		return loadCleanupProviders(ctx, materialClient, orgId, projectId, envId, ids, catalogueEditors)
+	})
+	if err != nil {
+		return nil, nil, nil, model.NewErrConflict("cannot retain provider cleanup context: " + err.Error())
+	}
+	// Even a decision that no provider needs retaining is specific to the
+	// observed state. Nil is an explicit expectation that no state head exists.
+	observedBase := uuid.Nil
+	if stateHead != nil {
+		observedBase = stateHead.Id
+	}
+	expectedBase := options.ExpectedBaseDeploymentID
+	if !expectedBase.IsSet() {
+		expectedBase = opt.Of(observedBase)
 	}
 
 	metrics := model.DeploymentMetrics{}
@@ -495,7 +531,7 @@ func CreateDeploymentWithOptions(
 		ModuleVersionRequestDigest:  requestDigest,
 		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
 		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
-		ExpectedBaseDeploymentID:    options.ExpectedBaseDeploymentID,
+		ExpectedBaseDeploymentID:    expectedBase,
 		QueueItemID:                 options.QueueItemID,
 	})
 	if err != nil {

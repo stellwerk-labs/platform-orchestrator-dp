@@ -113,3 +113,7 @@ health, then probe a concrete Core route through the public virtual host. Direct
 service health alone cannot prove routing. GET `/orgs` is not a Core list method;
 a projects-list GET on an unused fixture organization returns200 in Core and404
 in DP and provides a safe, nonmutating identity probe.
+
+## Installation settings and Provider retirement
+
+- A queued or deferred workflow is new work until its durable deployment is committed. Drain evidence must retain uncertain admission and Runner acknowledgement history rather than infer settlement from elapsed time.

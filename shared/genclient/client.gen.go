@@ -346,6 +346,21 @@ func (e ExternalEnvironmentReadinessState) Valid() bool {
 	}
 }
 
+// Defines values for InternalProviderUsageProtocolVersion.
+const (
+	InternalProviderUsageProtocolVersionN1 InternalProviderUsageProtocolVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the InternalProviderUsageProtocolVersion enum.
+func (e InternalProviderUsageProtocolVersion) Valid() bool {
+	switch e {
+	case InternalProviderUsageProtocolVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MetadataKeySchemaType.
 const (
 	MetadataKeySchemaTypeString MetadataKeySchemaType = "string"
@@ -408,13 +423,13 @@ func (e ObservationResultComplete) Valid() bool {
 
 // Defines values for ObservationResultSchemaVersion.
 const (
-	N1 ObservationResultSchemaVersion = "1"
+	ObservationResultSchemaVersionN1 ObservationResultSchemaVersion = "1"
 )
 
 // Valid indicates whether the value is a known member of the ObservationResultSchemaVersion enum.
 func (e ObservationResultSchemaVersion) Valid() bool {
 	switch e {
-	case N1:
+	case ObservationResultSchemaVersionN1:
 		return true
 	default:
 		return false
@@ -1395,6 +1410,23 @@ type InternalModuleUsageItem struct {
 	ProjectId       string             `json:"project_id"`
 }
 
+// InternalProviderUsage defines model for InternalProviderUsage.
+type InternalProviderUsage struct {
+	// Busy A state writer or unresolved execution outcome prevents finalisation.
+	Busy                bool                                 `json:"busy"`
+	Complete            bool                                 `json:"complete"`
+	EnvironmentUuids    []openapi_types.UUID                 `json:"environment_uuids"`
+	EnvironmentsScanned int                                  `json:"environments_scanned"`
+	OrgId               string                               `json:"org_id"`
+	ProtocolVersion     InternalProviderUsageProtocolVersion `json:"protocol_version"`
+
+	// Providers Exact provider_type.id values still retained by managed state.
+	Providers []string `json:"providers"`
+}
+
+// InternalProviderUsageProtocolVersion defines model for InternalProviderUsage.ProtocolVersion.
+type InternalProviderUsageProtocolVersion int
+
 // Jwk JSON Web Key
 type Jwk struct {
 	Alg string    `json:"alg"`
@@ -1669,6 +1701,11 @@ type N413TooLarge = Error
 // N503Unavailable A standard error response
 type N503Unavailable = Error
 
+// InternalCheckProviderUsageJSONBody defines parameters for InternalCheckProviderUsage.
+type InternalCheckProviderUsageJSONBody struct {
+	RequiredEnvironmentUuids []openapi_types.UUID `json:"required_environment_uuids"`
+}
+
 // InternalDeleteDeploymentsParams defines parameters for InternalDeleteDeployments.
 type InternalDeleteDeploymentsParams struct {
 	// ProjectId The Project ID
@@ -1827,6 +1864,9 @@ type AdmitExternalDeploymentParams struct {
 	IdempotencyKey IdempotencyKeyHeader `json:"Idempotency-Key"`
 }
 
+// InternalCheckProviderUsageJSONRequestBody defines body for InternalCheckProviderUsage for application/json ContentType.
+type InternalCheckProviderUsageJSONRequestBody InternalCheckProviderUsageJSONBody
+
 // InternalAcknowledgeDeploymentOutcomeJSONRequestBody defines body for InternalAcknowledgeDeploymentOutcome for application/json ContentType.
 type InternalAcknowledgeDeploymentOutcomeJSONRequestBody = DeploymentOutcomeAcknowledgementBody
 
@@ -1940,6 +1980,28 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /.well-known/openid-configuration (the `GetOpenidConfiguration` operationId).
 	GetOpenidConfiguration(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalCheckProviderUsageWithBody Report Provider bindings retained by managed deployment state.
+	//
+	// Returns a complete, conservative organisation snapshot for Provider
+	// retirement. Failed applies retain preceding bindings. Unknown history,
+	// disabled admission protection or incomplete coverage returns 503.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+	InternalCheckProviderUsageWithBody(ctx context.Context, orgId OrgIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InternalCheckProviderUsage Report Provider bindings retained by managed deployment state.
+	//
+	// Returns a complete, conservative organisation snapshot for Provider
+	// retirement. Failed applies retain preceding bindings. Unknown history,
+	// disabled admission protection or incomplete coverage returns 503.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+	InternalCheckProviderUsage(ctx context.Context, orgId OrgIdPathParam, body InternalCheckProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// InternalDeleteDeployments Delete all the deployments for an project_id, env_id combination. The last deployment must be a successful destroy.
 	//
@@ -2355,6 +2417,48 @@ func (c *Client) GetJwks(ctx context.Context, reqEditors ...RequestEditorFn) (*h
 // Corresponds with GET /.well-known/openid-configuration (the `GetOpenidConfiguration` operationId).
 func (c *Client) GetOpenidConfiguration(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetOpenidConfigurationRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalCheckProviderUsageWithBody Report Provider bindings retained by managed deployment state.
+//
+// Returns a complete, conservative organisation snapshot for Provider
+// retirement. Failed applies retain preceding bindings. Unknown history,
+// disabled admission protection or incomplete coverage returns 503.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+func (c *Client) InternalCheckProviderUsageWithBody(ctx context.Context, orgId OrgIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalCheckProviderUsageRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InternalCheckProviderUsage Report Provider bindings retained by managed deployment state.
+//
+// Returns a complete, conservative organisation snapshot for Provider
+// retirement. Failed applies retain preceding bindings. Unknown history,
+// disabled admission protection or incomplete coverage returns 503.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+func (c *Client) InternalCheckProviderUsage(ctx context.Context, orgId OrgIdPathParam, body InternalCheckProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInternalCheckProviderUsageRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3238,6 +3342,53 @@ func NewGetOpenidConfigurationRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewInternalCheckProviderUsageRequest calls the generic InternalCheckProviderUsage builder with application/json body
+func NewInternalCheckProviderUsageRequest(server string, orgId OrgIdPathParam, body InternalCheckProviderUsageJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInternalCheckProviderUsageRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewInternalCheckProviderUsageRequestWithBody constructs an http.Request for the InternalCheckProviderUsage method, with any body, and a specified content type
+func NewInternalCheckProviderUsageRequestWithBody(server string, orgId OrgIdPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgId", orgId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/orgs/%s/actions/check-provider-usage", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -5361,6 +5512,28 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /.well-known/openid-configuration (the `GetOpenidConfiguration` operationId).
 	GetOpenidConfigurationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetOpenidConfigurationResponse, error)
 
+	// InternalCheckProviderUsageWithBodyWithResponse Report Provider bindings retained by managed deployment state.
+	//
+	// Returns a complete, conservative organisation snapshot for Provider
+	// retirement. Failed applies retain preceding bindings. Unknown history,
+	// disabled admission protection or incomplete coverage returns 503.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+	InternalCheckProviderUsageWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalCheckProviderUsageResponse, error)
+
+	// InternalCheckProviderUsageWithResponse Report Provider bindings retained by managed deployment state.
+	//
+	// Returns a complete, conservative organisation snapshot for Provider
+	// retirement. Failed applies retain preceding bindings. Unknown history,
+	// disabled admission protection or incomplete coverage returns 503.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+	InternalCheckProviderUsageWithResponse(ctx context.Context, orgId OrgIdPathParam, body InternalCheckProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalCheckProviderUsageResponse, error)
+
 	// InternalDeleteDeploymentsWithResponse Delete all the deployments for an project_id, env_id combination. The last deployment must be a successful destroy.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5891,6 +6064,47 @@ func (r GetOpenidConfigurationResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetOpenidConfigurationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InternalCheckProviderUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InternalProviderUsage
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r InternalCheckProviderUsageResponse) GetJSON200() *InternalProviderUsage {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r InternalCheckProviderUsageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InternalCheckProviderUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InternalCheckProviderUsageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InternalCheckProviderUsageResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7738,6 +7952,40 @@ func (c *ClientWithResponses) GetOpenidConfigurationWithResponse(ctx context.Con
 	return ParseGetOpenidConfigurationResponse(rsp)
 }
 
+// InternalCheckProviderUsageWithBodyWithResponse Report Provider bindings retained by managed deployment state.
+//
+// Returns a complete, conservative organisation snapshot for Provider
+// retirement. Failed applies retain preceding bindings. Unknown history,
+// disabled admission protection or incomplete coverage returns 503.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+func (c *ClientWithResponses) InternalCheckProviderUsageWithBodyWithResponse(ctx context.Context, orgId OrgIdPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InternalCheckProviderUsageResponse, error) {
+	rsp, err := c.InternalCheckProviderUsageWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalCheckProviderUsageResponse(rsp)
+}
+
+// InternalCheckProviderUsageWithResponse Report Provider bindings retained by managed deployment state.
+//
+// Returns a complete, conservative organisation snapshot for Provider
+// retirement. Failed applies retain preceding bindings. Unknown history,
+// disabled admission protection or incomplete coverage returns 503.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/orgs/{orgId}/actions/check-provider-usage (the `InternalCheckProviderUsage` operationId).
+func (c *ClientWithResponses) InternalCheckProviderUsageWithResponse(ctx context.Context, orgId OrgIdPathParam, body InternalCheckProviderUsageJSONRequestBody, reqEditors ...RequestEditorFn) (*InternalCheckProviderUsageResponse, error) {
+	rsp, err := c.InternalCheckProviderUsage(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInternalCheckProviderUsageResponse(rsp)
+}
+
 // InternalDeleteDeploymentsWithResponse Delete all the deployments for an project_id, env_id combination. The last deployment must be a successful destroy.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8495,6 +8743,35 @@ func ParseGetOpenidConfigurationResponse(rsp *http.Response) (*GetOpenidConfigur
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInternalCheckProviderUsageResponse parses an HTTP response from a InternalCheckProviderUsageWithResponse call
+func ParseInternalCheckProviderUsageResponse(rsp *http.Response) (*InternalCheckProviderUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InternalCheckProviderUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InternalProviderUsage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 503:
+		break // No content-type
 
 	}
 

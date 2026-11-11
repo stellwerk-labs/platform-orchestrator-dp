@@ -600,6 +600,11 @@ jobs:
         env:
           TEST_TIMEOUT: 5m
 
+      - name: Test Provider retirement with real state and admission
+        run: make -C integration-tests test-provider-retirement
+        env:
+          TEST_TIMEOUT: 5m
+
       - name: Show integration test logs
         if: always()
         run: make test-integration-logs

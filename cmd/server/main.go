@@ -228,6 +228,7 @@ func main() {
 		Vault:                    vlt,
 		OidcIssuerUrl:            cfg.OidcIssuerUrl,
 		IamClient:                iamClient,
+		UiHostUrl:                cfg.UiHostUrl,
 		DeploymentQueue: api.DeploymentQueueConfig{
 			MaxDepth: cfg.DeploymentQueueMaxDepth, DefaultTTL: cfg.DeploymentQueueDefaultTTL, MaxTTL: cfg.DeploymentQueueMaxTTL,
 		},

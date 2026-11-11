@@ -34,6 +34,7 @@ const (
 )
 
 type Server struct {
+	UiHostUrl                string
 	Database                 model.Databaser
 	Logger                   *zap.Logger
 	EventPublisher           hmessaging.Publisher
@@ -57,7 +58,7 @@ type Server struct {
 // request bytes before decoding. Each adapter performs its own strict decode.
 func SkipGeneratedOpenAPIValidation(c echo.Context) bool {
 	switch c.Path() {
-	case "/alive", "/health", "/internal/actions/flush-pending-messages",
+	case "/internal/installation-maintenance", "/platform-settings/deployments", "/alive", "/health", "/internal/actions/flush-pending-messages",
 		ObservationStartPath, ObservationRunPath, ObservationRequestPath, ObservationRedeployPath, ObservationRedeployReadPath, ObservationCapabilitiesPath, ObservationRequestResolvePath, ObservationRedeployResolvePath,
 		ExternalDeploymentAdmissionPath,
 		ExternalDeploymentReadinessPath,
@@ -81,6 +82,9 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		adaptStrictMiddleware(token.StrictEncryptionMiddleware()),
 	})
 	RegisterHandlers(e, apiHandler)
+	e.GET("/internal/installation-maintenance", s.getInternalInstallationMaintenance, echomiddleware.ContextTimeout(RequestHandlerTimeout))
+	e.GET("/platform-settings/deployments", s.getInstallationMaintenance, echomiddleware.ContextTimeout(RequestHandlerTimeout))
+	e.PUT("/platform-settings/deployments", s.putInstallationMaintenance, echomiddleware.ContextTimeout(RequestHandlerTimeout))
 	if s.ExternalDeployments != nil {
 		s.ExternalDeployments.OrdinaryAdmissions = s.DeploymentAdmissions
 		e.POST(ObservationRedeployPath, s.ExternalDeployments.HandleObservationRedeploy)

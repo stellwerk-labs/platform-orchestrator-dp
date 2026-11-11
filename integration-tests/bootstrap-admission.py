@@ -49,6 +49,7 @@ def wait_ready(port, path="/health", headers=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--iam-port", type=int, default=8083)
+    parser.add_argument("--provider-retirement", action="store_true", help="Activate retirement only on the fully upgraded disposable fixture")
     args = parser.parse_args()
     os.umask(0o077)
     root = Path(".score-compose/admission")
@@ -122,6 +123,8 @@ http {
             "depends_on": ["platform-orchestrator-cp-platform-orchestrator-cp",
                            "platform-orchestrator-iam-platform-orchestrator-iam"]},
     }}
+    if args.provider_retirement:
+        override["services"]["platform-orchestrator-cp-platform-orchestrator-cp"]["environment"]["PROVIDER_RETIREMENT_ENABLED"] = "true"
     override_file = root / "compose.json"
     override_file.write_text(json.dumps(override))
     subprocess.run(["docker", "compose", "-f", "compose.yaml", "-f", str(override_file),

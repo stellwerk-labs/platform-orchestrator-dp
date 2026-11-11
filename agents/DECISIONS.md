@@ -97,3 +97,7 @@ the same authentication and use canonical Compose service names in the separate
 admission proxy. These are fixture lifecycle controls, not production routing
 changes. Bounded network readiness catches OSError across supported Python
 versions and still requires200.
+
+## Installation settings and Provider retirement
+
+- Serialize maintenance changes with durable acceptance. Existing accepted work and exact retries may settle; new records are refused. Retain historical Provider material and require successful canonical state boundaries before authorizing collection.

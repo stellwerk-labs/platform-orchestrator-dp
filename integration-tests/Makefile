@@ -73,7 +73,16 @@ test-historical-removal:
 	@test -f compose.yaml
 	$(MAKE) test-environment
 	python3 bootstrap-admission.py --iam-port $(IAM_PORT)
-	@$(RUN_TESTS) go tool gotestsum --format testname -- -tags=admissionintegration ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestHistoricalResourceRemoval$$' -test.v
+	@$(RUN_TESTS) go tool gotestsum --format testname -- -tags=admissionintegration -count=1 ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestHistoricalResourceRemoval$$' -test.v
+
+# Requires the matching new CP image; retirement is activated only on this
+# fully upgraded disposable fixture, after the normal real-admission phase.
+.PHONY: test-provider-retirement
+test-provider-retirement:
+	@test -f compose.yaml
+	$(MAKE) test-environment
+	python3 bootstrap-admission.py --iam-port $(IAM_PORT) --provider-retirement
+	@$(RUN_TESTS) go tool gotestsum --format testname -- -tags=admissionintegration -count=1 ./ -test.timeout $(TEST_TIMEOUT) -test.run '^TestProviderRetirementLifecycle$$' -test.v
 
 # Exercise the actual Score-to-process boundary before starting the test suite.
 .PHONY: test-environment

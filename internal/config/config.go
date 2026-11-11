@@ -7,7 +7,8 @@ import (
 
 // Configuration ...
 type Configuration struct {
-	Port int `env:"PORT, default=8080" validate:"required"`
+	UiHostUrl string `env:"UI_HOST_URL"        validate:"omitempty,url"`
+	Port      int    `env:"PORT, default=8080" validate:"required"`
 
 	DatabaseName     string `env:"DATABASE_NAME"     validate:"required"`
 	DatabaseUser     string `env:"DATABASE_USER"     validate:"required"`
