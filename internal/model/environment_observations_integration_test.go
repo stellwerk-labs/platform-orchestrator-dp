@@ -56,6 +56,8 @@ func TestObservationAdmissionReplayAndExactBaseline(t *testing.T) {
 	dep, manifest, tofu, graph, err := f.store.GetDeployment(f.ctx, nil, "queue-org", *receipt.RunId, GetModeDefault)
 	require.NoError(t, err)
 	require.Equal(t, DeploymentModeObservation, dep.Mode)
+	require.Equal(t, "info", dep.RunnerLogLevel, "observations emit sanitized aggregate cost entries")
+	require.False(t, dep.EncryptedLogsRecipient.IsSet(), "observations do not persist customer logs")
 	require.Equal(t, EncodedDeploymentManifest(`{"workloads":{}}`), manifest)
 	require.Equal(t, RawTofu("terraform {}"), tofu)
 	require.JSONEq(t, `{"nodes":{},"edges":{}}`, string(graph))
