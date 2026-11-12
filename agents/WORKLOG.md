@@ -225,3 +225,9 @@ workflow contracts and diff checks pass. Normal hosted checks still required.
 ## Installation settings and Provider retirement
 
 - Prepared persisted installation maintenance, drain evidence and conservative Provider usage/cleanup, with integration coverage and coordinated v4.3.0 notes. Security/compiler maintenance remains a preceding separate commit. Published shared SDKs preserve generated compatibility aliases; see DECISIONS.md and LEARNINGS.md.
+
+
+## 2026-11-12: Data Plane database TLS
+
+- Implemented the requested local change with targeted tests and documentation. Independent planning, green and final clean-code reviews passed after correcting partial-summary availability and removing an unsupported mTLS mount example.
+- TLS configuration was exercised against real PostgreSQL; UI and complete-history/permission boundaries were tested. Hosted release qualification and immutable public schema/image pins remain pending. No public publication or live deployment is established by this local checkpoint.

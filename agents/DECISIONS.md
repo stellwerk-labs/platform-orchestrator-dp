@@ -101,3 +101,9 @@ versions and still requires200.
 ## Installation settings and Provider retirement
 
 - Serialize maintenance changes with durable acceptance. Existing accepted work and exact retries may settle; new records are refused. Retain historical Provider material and require successful canonical state boundaries before authorizing collection.
+
+
+## 2026-11-12: Data Plane database TLS
+
+- Preserve existing permissions, confirmation and default behavior. PostgreSQL TLS is opt-in through `DATABASE_SSLMODE`; use existing driver and certificate mechanisms.
+- Catalogue filters use complete optional summaries, omit version data for core-only readers, and keep unavailable distinct from false. Verification remains unimplemented; its filter is intentionally present with an explicit limitation.

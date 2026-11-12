@@ -117,3 +117,9 @@ in DP and provides a safe, nonmutating identity probe.
 ## Installation settings and Provider retirement
 
 - A queued or deferred workflow is new work until its durable deployment is committed. Drain evidence must retain uncertain admission and Runner acknowledgement history rather than infer settlement from elapsed time.
+
+
+## 2026-11-12: qualification boundaries
+
+- A paginated first page cannot prove version absence. Complete catalogue summaries require version-read permission, not just catalogue read access.
+- `require` prevents plaintext fallback but does not generally authenticate server identity. CA verification uses existing driver settings; a private-key mount needs its own restrictive permissions.
