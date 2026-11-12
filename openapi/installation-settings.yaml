@@ -1,0 +1,197 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Installation settings",
+    "version": "1",
+    "description": "Installation-wide operator settings. Organization roles cannot grant these platform permissions. Requests use normal Orchestrator authentication; the gateway supplies the authenticated identity."
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "sessionCookie": []
+    }
+  ],
+  "paths": {
+    "/platform-settings/deployments": {
+      "get": {
+        "operationId": "GetDeploymentMaintenance",
+        "description": "Requires platform_settings_read. Maintenance rejects new durable deployment and queue entries with HTTP 503 system_maintenance. Existing accepted deployments and queued requests continue. Future Rollout stages and new Drift/plan runs are new work. Reads, results and cancellations remain available. This setting does not stop services or prove all external effects are finished.",
+        "responses": {
+          "200": {
+            "description": "Current settings. No-store; revision is also returned as an ETag.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentMaintenance"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Required platform permission or exact Console origin missing"
+          },
+          "503": {
+            "description": "Authorization or storage temporarily unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "UpdateDeploymentMaintenance",
+        "description": "Requires platform_settings_write. Cookie-authenticated browser writes require the exact configured Console Origin. Maintenance rejects new durable deployment and queue entries with HTTP 503 system_maintenance. Existing accepted deployments and queued requests continue. Future Rollout stages and new Drift/plan runs are new work. Reads, results and cancellations remain available. This setting does not stop services or prove all external effects are finished.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "description": "Quoted revision from the preceding GET, for example \"1\".",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current settings. No-store; revision is also returned as an ETag.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentMaintenance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Required platform permission or exact Console origin missing"
+          },
+          "412": {
+            "description": "Settings revision changed; reload and retry"
+          },
+          "415": {
+            "description": "application/json required"
+          },
+          "428": {
+            "description": "If-Match required"
+          },
+          "503": {
+            "description": "Authorization or storage temporarily unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session-token"
+      }
+    },
+    "schemas": {
+      "DeploymentMaintenance": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "executing_deployments": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "queued_deployments": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runner_reservations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unsettled_admissions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "executing_observations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "revision",
+          "updated_at",
+          "updated_by",
+          "enabled",
+          "executing_deployments",
+          "queued_deployments",
+          "runner_reservations",
+          "unsettled_admissions",
+          "executing_observations"
+        ]
+      }
+    }
+  }
+}

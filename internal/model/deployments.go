@@ -244,6 +244,9 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
 		return nil, err
 	}
+	if err := requireDeploymentAcceptance(ctx, tx, params.QueueItemID.Or(uuid.Nil), orgId, projectId, envId, params.DeploymentEnvUuid, params.CreatedBy, params.Mode); err != nil {
+		return nil, err
+	}
 	if err := RequireObservationStopped(ctx, tx, out.DeploymentEnvUuid); err != nil {
 		return nil, err
 	}
@@ -603,6 +606,14 @@ func (d *databaser) DeleteDeploymentsForEnv(ctx context.Context, tx Tx, orgId, p
 		var lockedCount int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT id FROM deployments WHERE de_id=$1 FOR UPDATE) locked`, environmentID).Scan(&lockedCount); err != nil {
 			return err
+		}
+
+		var unsettledAdmission bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM deployment_admission_receipts WHERE org_id=$1 AND environment_uuid=$2 AND disposition='committed' AND core_settled_at IS NULL)`, orgId, environmentID).Scan(&unsettledAdmission); err != nil {
+			return err
+		}
+		if unsettledAdmission {
+			return NewErrCodedConflict(CodeOutcomeUnreconciled, "Environment retains an unsettled Deployment admission; settle its authoritative outcome before deletion")
 		}
 
 		var live bool

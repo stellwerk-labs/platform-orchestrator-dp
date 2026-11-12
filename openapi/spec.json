@@ -1298,6 +1298,61 @@
         }
       }
     },
+    "/internal/orgs/{orgId}/actions/check-provider-usage": {
+      "post": {
+        "summary": "Report Provider bindings retained by managed deployment state.",
+        "description": "Returns a complete, conservative organisation snapshot for Provider\nretirement. Failed applies retain preceding bindings. Unknown history,\ndisabled admission protection or incomplete coverage returns 503.\n",
+        "operationId": "internalCheckProviderUsage",
+        "tags": [
+          "internal",
+          "Providers"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/orgIdPathParam"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "required_environment_uuids"
+                ],
+                "properties": {
+                  "required_environment_uuids": {
+                    "type": "array",
+                    "maxItems": 10000,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete managed-state Provider usage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalProviderUsage"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A complete protected-state scan is unavailable."
+          }
+        }
+      }
+    },
     "/internal/orgs/{orgId}/modules/{moduleId}/actions/check-usage": {
       "post": {
         "summary": "Check whether a given module is in use in a resource graph.",
@@ -3943,6 +3998,56 @@
           "e",
           "kid"
         ]
+      },
+      "InternalProviderUsage": {
+        "type": "object",
+        "required": [
+          "protocol_version",
+          "org_id",
+          "environment_uuids",
+          "complete",
+          "busy",
+          "providers",
+          "environments_scanned"
+        ],
+        "properties": {
+          "org_id": {
+            "type": "string"
+          },
+          "environment_uuids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "protocol_version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "busy": {
+            "type": "boolean",
+            "description": "A state writer or unresolved execution outcome prevents finalisation."
+          },
+          "providers": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact provider_type.id values still retained by managed state."
+          },
+          "environments_scanned": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
       },
       "InternalModuleUsage": {
         "type": "object",

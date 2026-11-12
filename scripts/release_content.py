@@ -440,7 +440,7 @@ def scan(directory, forbidden=()):
 KIN_MODULE = "github.com/getkin/kin-openapi"
 KIN_VERSION = "v0.144.0"
 KIN_SUM = "h1:hIRcTH+KjLfkLpYU6bSSfdFpi0fZi1fp+hSPi4aQu9Y="
-BINARY_POLICY = "verified-public-compiler-literals-go1.26.10-v2"
+BINARY_POLICY = "verified-public-compiler-literals-go1.26.11-v2"
 KIN_MATCH = "41678ee534db27563e9f7717169f4f1b0d2dc051912e2da8f8c9c33e724364b1"
 KIN_SECRET = "8b422fbcf44a15e60d9edc56c00c549209107dee95a0332e5cf560d4cbc961ab"
 KIN_BEFORE = "c70bd16e531b368f911bab880f76007541bf617d3488ae15455b1a389ea524da"
@@ -465,7 +465,7 @@ def known_kin_binary_finding(data, finding, sums, buildinfo):
     if identity not in [line.split() for line in sums.splitlines()]:
         return False
     rows = [line.split() for line in buildinfo.splitlines()]
-    if not buildinfo.splitlines() or not buildinfo.splitlines()[0].endswith(": go1.26.10"):
+    if not buildinfo.splitlines() or not buildinfo.splitlines()[0].endswith(": go1.26.11"):
         return False
     deps = [i for i, row in enumerate(rows) if len(row) > 1 and row[:2] == ["dep", KIN_MODULE]]
     if (len(deps) != 1 or rows[deps[0]] != ["dep"] + identity
@@ -512,7 +512,7 @@ def known_google_literal_adjacency(data, finding, sums, buildinfo):
             or match[59:79] != secret):
         return False
     lines = buildinfo.splitlines()
-    if not lines or not lines[0].endswith(": go1.26.10"):
+    if not lines or not lines[0].endswith(": go1.26.11"):
         return False
     rows = [line.split() for line in lines]
     for module, version, checksum in GOOGLE_LITERAL_MODULES:
@@ -711,7 +711,7 @@ def binary_scan(directory):
         findings = scan_binary_strings(strings, source)
         if not findings:
             continue
-        environment = dict(os.environ, GOTOOLCHAIN="go1.26.10", GOENV="off", GOWORK="off")
+        environment = dict(os.environ, GOTOOLCHAIN="go1.26.11", GOENV="off", GOWORK="off")
         metadata = subprocess.run(["go", "version", "-m", str(path)], capture_output=True,
                                   env=environment, timeout=15)
         if metadata.returncode or metadata.stderr:

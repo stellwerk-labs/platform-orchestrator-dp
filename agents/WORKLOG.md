@@ -221,3 +221,7 @@ failed local diagnostic attempts remain private and are not passes.
 Fresh planning/first-green reviews accept three localized routing concepts,
 with unchanged authentication and no runtime application changes. Source syntax,
 workflow contracts and diff checks pass. Normal hosted checks still required.
+
+## Installation settings and Provider retirement
+
+- Prepared persisted installation maintenance, drain evidence and conservative Provider usage/cleanup, with integration coverage and coordinated v4.3.0 notes. Security/compiler maintenance remains a preceding separate commit. Published shared SDKs preserve generated compatibility aliases; see DECISIONS.md and LEARNINGS.md.

@@ -294,6 +294,9 @@ func EnqueueDeployment(ctx context.Context, tx Tx, request NewDeploymentQueueIte
 			return nil, false, err
 		}
 	}
+	if err := requireDeploymentAcceptance(ctx, tx, uuid.Nil, request.OrgID, request.ProjectID, request.EnvID, request.EnvironmentUUID, request.CreatedBy, request.Mode); err != nil {
+		return nil, false, err
+	}
 	var stateHead uuid.NullUUID
 	var stateHeadStatus sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT e.last_state_deployment_id, d.status FROM deployment_environments e

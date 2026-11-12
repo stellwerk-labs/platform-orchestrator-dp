@@ -190,6 +190,11 @@ func (a *ExternalDeploymentHTTPAdapter) handleObservationRead(c echo.Context, ru
 	return c.JSON(http.StatusOK, value)
 }
 func writeObservationError(c echo.Context, err error) error {
+	if errors.Is(err, model.ErrSystemMaintenance) {
+		c.Response().Header().Set("Retry-After", "30")
+		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: systemMaintenanceCode, Message: model.ErrSystemMaintenance.Error()})
+	}
+
 	if errors.Is(err, model.ErrObservationRequestSealed) {
 		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "observation_request_not_started", Message: "This exact request was sealed without starting"})
 	}

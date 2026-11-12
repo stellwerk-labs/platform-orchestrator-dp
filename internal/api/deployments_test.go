@@ -150,6 +150,7 @@ func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 	mdb.EXPECT().InitActiveResourcesFromGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(3)
 
 	var dep1Graph model.EncodedDeploymentGraph
+	var dep1Tofu model.RawTofu
 	t.Run("first deployment", func(t *testing.T) {
 		mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
 			Return(nil, nil, nil, nil, model.NewErrNotFound("not found"))
@@ -216,7 +217,7 @@ func TestCreateDeployment_success_graph_and_redeploy(t *testing.T) {
 				assert.Equal(t, "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p", p.EncryptedOutputsRecipient.Or(""))
 				assert.Equal(t, uuid.NewMD5(uuid.Nil, []byte("my-env")), p.DeploymentEnvUuid)
 
-				dep1Graph = p.Graph
+				dep1Graph, dep1Tofu = p.Graph, p.Tofu
 				if g, err := graphs.FromJson(bytes.NewReader(p.Graph)); assert.NoError(t, err) {
 					assert.Equal(t, []string{
 						"type=postgres,class=default,id=shared.three",
@@ -427,7 +428,7 @@ output "two" {
 
 		t.Run("second deployment", func(t *testing.T) {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
-				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
+				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId, Mode: model.DeploymentModeDeploy, Status: model.DeploymentStatusSucceeded}, model.EncodedDeploymentManifest(`{}`), dep1Tofu, dep1Graph, nil)
 			mdb.EXPECT().ReadPendingEnvironmentChanges(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", envUuid).
 				Return(model.PendingEnvironmentChanges{Queued: 2}, nil)
 
@@ -610,7 +611,7 @@ output "one" {
 
 		t.Run("destroy", func(t *testing.T) {
 			mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
-				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId}, model.EncodedDeploymentManifest(`{}`), nil, dep1Graph, nil)
+				Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Id: depId, Mode: model.DeploymentModeDeploy, Status: model.DeploymentStatusSucceeded}, model.EncodedDeploymentManifest(`{}`), dep1Tofu, dep1Graph, nil)
 
 			cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 				PinnedModuleVersions: []string{"d1@v1", "d2@v1", "d3@v1"},
@@ -766,6 +767,9 @@ func TestCreateDeployment_with_rollback(t *testing.T) {
 	})
 	mdb.EXPECT().GetDeployment(gomock.Any(), gomock.Not(nil), "my-org", rollbackToId, model.GetModeDefault).
 		Return(&model.DeploymentSummary{DeploymentEnvUuid: envUuid, Status: model.DeploymentStatusSucceeded}, encodedManifest, nil, encodedGraph, nil)
+
+	mdb.EXPECT().GetLastDeployment(gomock.Any(), gomock.Not(nil), "my-org", "my-project", "my-env", model.GetLastDeploymentParams{StateChangeOnly: true}).
+		Return(&model.DeploymentSummary{Id: uuid.New(), DeploymentEnvUuid: envUuid, Mode: model.DeploymentModeDeploy, Status: model.DeploymentStatusSucceeded}, encodedManifest, nil, encodedGraph, nil)
 
 	cpClient.EXPECT().GenerateInternalModuleCatalogueWithResponse(gomock.Any(), "my-org", "my-project", "my-env", nil, platformorchestratorcp.GenerateInternalModuleCatalogueJSONRequestBody{
 		PinnedModuleVersions: []string{"some-def@some-ver"},

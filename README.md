@@ -65,3 +65,29 @@ container, Go module, and request-local marker ownership uses `stellwerk-labs`.
 ## License
 
 Licensed under the [European Union Public Licence 1.2](./LICENSE).
+
+## Installation maintenance
+
+`GET` and `PUT /platform-settings/deployments` expose persisted maintenance mode.
+The typed contract is in `openapi/installation-settings.yaml`. An IAM operator
+needs `platform_settings_read` or `platform_settings_write`, granted to explicit
+human users through IAM's `PLATFORM_SETTINGS_READERS/WRITERS` configuration.
+Writes use the quoted `If-Match` revision, exact Console origin for cookies, a
+30-second request deadline and an audit record. The normal gateway supplies the
+authenticated `From` identity; clients must not choose it themselves.
+
+Enabling maintenance serializes with durable deployment/queue acceptance in the
+same database. Existing deployments, exact idempotent retries and accepted queue
+promotion continue. New ordinary, external, observation, plan and destroy
+records are refused with `503 system_maintenance`. No internal actor bypasses the
+gate. Reading, cancellation, Runner completion and settlement remain available.
+Future Rollout stages and deferred destroy workflows without a committed Data
+Plane record are new work; existing retries, TTLs and deadlines still apply.
+The GUI counts executing and queued records, not a proof of stopped external
+effects. Maintenance does not stop services or carry out upgrades.
+
+All Data Plane replicas must be upgraded before relying on the gate. Its
+singleton row is shared by those replicas and survives restarts. Use the matching
+Helm routes and Console. The optional integration-tag
+`TestInstallationSettingsPeer` is a local real-IAM browser qualification peer,
+launched by IAM's cross-repository settings test rather than in normal CI.

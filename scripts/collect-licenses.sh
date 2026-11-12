@@ -10,7 +10,11 @@ test "$#" -gt 0
 test ! -e "$output"
 case "${GOARCH:-}" in amd64|arm64) ;; *) echo "explicit supported GOARCH required" >&2; exit 1 ;; esac
 export GOTOOLCHAIN="$release_go_version" GOWORK=off GOENV=off CGO_ENABLED=0 GOOS=linux GOAMD64=v1 GOARM64=v8.0
-unset GOFLAGS GOEXPERIMENT
+unset GOFLAGS GOEXPERIMENT GOROOT
+# go-licenses uses build.Default.GOROOT to recognize standard packages. Bind
+# it to this invocation's toolchain, including an isolated module cache.
+GOROOT="$(go env GOROOT)"
+export GOROOT
 go version -m "$(command -v go-licenses)" | grep -F "$go_licenses_module" | grep -F "$go_licenses_version" >/dev/null
 module="$(go list -m -f '{{.Path}}')"
 work="$(mktemp -d)"

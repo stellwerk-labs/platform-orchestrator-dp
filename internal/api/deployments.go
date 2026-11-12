@@ -495,6 +495,10 @@ func (s *Server) deploymentOptions(ctx context.Context, actor uuid.UUID, orgID s
 }
 
 func createDeploymentErrorResponse(err error) (CreateDeploymentResponseObject, error) {
+	if errors.Is(err, model.ErrSystemMaintenance) {
+		return nil, &herrors.PlatformOrchestratorError{StatusCode: http.StatusServiceUnavailable, Code: systemMaintenanceCode, Message: model.ErrSystemMaintenance.Error()}
+	}
+
 	var denied *deploymentAdmissionDeniedError
 	if errors.As(err, &denied) {
 		response, err := deploymentAdmissionDeniedResponse(denied.statusCode)

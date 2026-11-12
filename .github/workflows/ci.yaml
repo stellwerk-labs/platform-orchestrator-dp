@@ -125,7 +125,7 @@ jobs:
       - name: Setup pinned artifact Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch
@@ -304,7 +304,7 @@ jobs:
       - name: Setup pinned artifact Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch
@@ -600,6 +600,11 @@ jobs:
         env:
           TEST_TIMEOUT: 5m
 
+      - name: Test Provider retirement with real state and admission
+        run: make -C integration-tests test-provider-retirement
+        env:
+          TEST_TIMEOUT: 5m
+
       - name: Show integration test logs
         if: always()
         run: make test-integration-logs
@@ -682,7 +687,7 @@ jobs:
         if: steps.release.outputs.version != ''
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache: false
 
       - name: Install verified artifact tools and bind source epoch

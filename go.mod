@@ -1,6 +1,6 @@
 module github.com/stellwerk-labs/platform-orchestrator-dp
 
-go 1.26.10
+go 1.26.11
 
 require (
 	cloud.google.com/go/container v1.46.0
@@ -38,8 +38,8 @@ require (
 	github.com/stellwerk-labs/golib/hstandardoutbox v1.1.1
 	github.com/stellwerk-labs/golib/htelemetry v1.0.0
 	github.com/stellwerk-labs/golib/hvaultapi v1.0.0
-	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3 v3.2.0
-	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.1.0
+	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3 v3.3.0
+	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.2.0
 	github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0
 	github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.3.0
 	github.com/stretchr/testify v1.12.1

@@ -70,6 +70,8 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 	bound, err := BindDeploymentAdmissionReceipt(ctx, live, intent, deployment.Id, 11)
 	require.NoError(t, err)
 	require.Equal(t, "committed", bound.Disposition)
+	_, err = live.ExecContext(ctx, `UPDATE deployments SET status='succeeded',completed_at=now() WHERE id=$1`, deployment.Id)
+	require.NoError(t, err)
 	require.NoError(t, live.Commit())
 
 	select {
@@ -84,6 +86,14 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 	settlement, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	require.NoError(t, MarkDeploymentAdmissionCoreSettled(ctx, settlement, intent.OrgID, intent.AdmissionID, "succeeded", 11))
+	// An uncommitted settlement cannot permit deletion of its only outcome evidence.
+	for _, force := range []bool{false, true} {
+		deletion, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		err = store.DeleteDeploymentsForEnv(ctx, deletion, intent.OrgID, deployment.ProjectId, deployment.EnvId, force, opt.Of(intent.EnvironmentUUID))
+		require.ErrorContains(t, err, "unsettled Deployment admission")
+		require.NoError(t, deletion.Rollback())
+	}
 	require.NoError(t, settlement.Commit())
 
 	changed := intent

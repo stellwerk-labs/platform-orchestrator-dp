@@ -213,6 +213,11 @@ func (a *ExternalDeploymentHTTPAdapter) logger() *zap.Logger {
 }
 
 func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err error) error {
+	if errors.Is(err, model.ErrSystemMaintenance) {
+		c.Response().Header().Set("Retry-After", "30")
+		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: systemMaintenanceCode, Message: model.ErrSystemMaintenance.Error()})
+	}
+
 	if errors.Is(err, ErrExternalDeploymentUnauthorized) {
 		return c.JSON(http.StatusForbidden, externalDeploymentErrorResponse{Error: "external_operation_not_authorized", Message: "Core did not authorize this deployment dispatch"})
 	}

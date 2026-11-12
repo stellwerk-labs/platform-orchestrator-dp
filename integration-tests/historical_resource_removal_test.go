@@ -133,20 +133,30 @@ func TestHistoricalResourceRemoval(t *testing.T) {
 			setProvider(map[string]interface{}{"required_boolean": true})
 			removed := deploy(dp.DeploymentCreateBodyModeDeploy, false, &empty, nil, "succeeded")
 			require.Contains(t, MustGetDeploymentTofu(t, debug, org, removed.Id), alias)
-			reader, err := gzip.NewReader(bytes.NewReader(state().Data["tfstate"]))
-			require.NoError(t, err)
-			raw, err := io.ReadAll(reader)
-			require.NoError(t, err)
-			require.NoError(t, reader.Close())
-			var remaining struct{ Resources []json.RawMessage }
-			require.NoError(t, json.Unmarshal(raw, &remaining))
-			require.Empty(t, remaining.Resources)
+			require.Empty(t, removalStateResources(t, state()))
 			redeployed := deploy(dp.DeploymentCreateBodyModeDeploy, false, &empty, nil, "succeeded")
 			require.NotContains(t, MustGetDeploymentTofu(t, debug, org, redeployed.Id), alias, "completed tombstones must not persist")
 			deploy(dp.DeploymentCreateBodyModeRollback, false, nil, &base.Id, "succeeded")
 			var retainedGraph []byte
 			require.NoError(t, database.QueryRowContext(t.Context(), `SELECT graph FROM deployments WHERE id=$1`, base.Id).Scan(&retainedGraph))
 			require.Equal(t, originalGraph, retainedGraph, "historical deployment must remain immutable")
+			// The new version keeps the coordinate and removes its provider.
+			// Both direct deployment and rollback must remove the old state.
+			beforeReplacement := state()
+			replacementPlan := deploy(dp.DeploymentCreateBodyModeDeploy, true, &manifest, nil, "succeeded")
+			require.Contains(t, MustGetDeploymentTofu(t, debug, org, replacementPlan.Id), alias)
+			require.Equal(t, beforeReplacement.Data, state().Data)
+			replacement := deploy(dp.DeploymentCreateBodyModeDeploy, false, &manifest, nil, "succeeded")
+			require.Empty(t, removalStateResources(t, state()))
+
+			deploy(dp.DeploymentCreateBodyModeRollback, false, nil, &base.Id, "succeeded")
+			require.NotEmpty(t, removalStateResources(t, state()))
+			cleanupRollback := deploy(dp.DeploymentCreateBodyModeRollback, false, nil, &replacement.Id, "succeeded")
+			require.Contains(t, MustGetDeploymentTofu(t, debug, org, cleanupRollback.Id), alias)
+			require.Empty(t, removalStateResources(t, state()))
+			replacementAgain := deploy(dp.DeploymentCreateBodyModeDeploy, true, &manifest, nil, "succeeded")
+			require.NotContains(t, MustGetDeploymentTofu(t, debug, org, replacementAgain.Id), alias)
+
 			deleted, err := control.DeleteEnvironmentWithResponse(t.Context(), org, project.Id, environment.Id, &cp.DeleteEnvironmentParams{})
 			require.NoError(t, err)
 			require.Equal(t, http.StatusAccepted, deleted.StatusCode(), string(deleted.Body))
@@ -157,6 +167,18 @@ func TestHistoricalResourceRemoval(t *testing.T) {
 			}, time.Minute, time.Second)
 		})
 	}
+}
+
+func removalStateResources(t *testing.T, state *corev1.Secret) []json.RawMessage {
+	t.Helper()
+	reader, err := gzip.NewReader(bytes.NewReader(state.Data["tfstate"]))
+	require.NoError(t, err)
+	raw, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	var remaining struct{ Resources []json.RawMessage }
+	require.NoError(t, json.Unmarshal(raw, &remaining))
+	return remaining.Resources
 }
 
 func seedLegacyRemovalModule(t *testing.T, org, module, resourceType string) {

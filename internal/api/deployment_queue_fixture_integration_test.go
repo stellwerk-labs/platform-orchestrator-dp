@@ -85,6 +85,8 @@ func (c *queueCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var storage coreapi.StateStorageConfiguration
 		assert.NoError(c.t, storage.FromK8sStorageConfiguration(coreapi.K8sStorageConfiguration{Namespace: "test"}))
 		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Runner{Id: queueRunner, StateStorageConfiguration: storage}))
+	case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+queueOrg+"/projects/"+queueProject+"/envs/"+queueEnv+"/module-execution-catalogue":
+		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.InternalExecutionCatalogue{Modules: []coreapi.InternalExecutionCatalogueModule{}, Providers: []coreapi.ModuleProvider{}}))
 	case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+queueOrg+"/projects/"+queueProject+"/envs/"+queueEnv+"/module-catalogue":
 		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.InternalModuleCatalogue{Modules: []coreapi.InternalModuleCatalogueModule{}, Providers: []coreapi.ModuleProvider{}}))
 	default:
