@@ -1,6 +1,7 @@
 package runnercommon
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -60,13 +61,15 @@ func TestGenerateEnvVarsForRun_IncludesGatewayRunnerContract(t *testing.T) {
 }
 
 func TestObservationTransportRemainsReadOnlyForLegacyRunner(t *testing.T) {
-	deployment := &model.DeploymentSummary{Mode: model.DeploymentModeObservation}
+	deployment := &model.DeploymentSummary{Mode: model.DeploymentModeObservation, RunnerLogLevel: "info"}
 	values := map[string]string{}
 	for key, value := range GenerateEnvVarsForRun("", deployment) {
 		values[key] = value
 	}
 	require.Equal(t, "plan_only", values["MODE"])
 	require.Equal(t, "environment-observation/v1", values["OBSERVATION_PROTOCOL"])
+	require.Equal(t, "info", values["LOG_LEVEL"])
+	require.NotContains(t, values, "ENCRYPTING_LOGS_KEY")
 	for _, mode := range []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeRollback, model.DeploymentModeDeployPlan, model.DeploymentModeDestroy} {
 		values = map[string]string{}
 		for key, value := range GenerateEnvVarsForRun("", &model.DeploymentSummary{Mode: mode}) {
@@ -74,4 +77,28 @@ func TestObservationTransportRemainsReadOnlyForLegacyRunner(t *testing.T) {
 		}
 		require.NotContains(t, values, "OBSERVATION_PROTOCOL")
 	}
+}
+
+func TestCostPolicyExplicitFlagsForOrdinaryAndDriftExecutions(t *testing.T) {
+	for _, mode := range []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeDeployPlan, model.DeploymentModeObservation} {
+		for _, enabled := range []bool{false, true} {
+			for _, key := range []string{"", "fixture-key"} {
+				d := &model.DeploymentSummary{Mode: mode, CostPolicy: &model.DeploymentCostPolicy{Enabled: enabled}}
+				cfg := GatewayConfiguration{CostEstimation: &CostEstimationConfiguration{Enabled: true, APIKey: key}}
+				values := map[string]string{}
+				for k, v := range GenerateEnvVarsForRun("", d, cfg) {
+					values[k] = v
+				}
+				require.Equal(t, fmt.Sprint(enabled && key != ""), values[CostEstimationEnabledVariable])
+				wantKey := ""
+				if enabled {
+					wantKey = key
+				}
+				require.Equal(t, wantKey, values[InfracostAPIKeyVariable])
+			}
+		}
+	}
+	values := collectEnvVars("", &model.DeploymentSummary{})
+	require.NotContains(t, values, CostEstimationEnabledVariable)
+	require.NotContains(t, values, InfracostAPIKeyVariable)
 }

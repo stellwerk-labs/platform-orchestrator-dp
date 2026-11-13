@@ -109,7 +109,7 @@ func TestRunnerCapacityGatesRealKubernetesAndDurableAgentCommands(t *testing.T) 
 			defer func() { require.NoError(t, stream.DeleteConsumer(context.WithoutCancel(ctx), consumerName)) }()
 			commandPublisher := &runners.NATSRemoteRunnerCommandPublisher{Publisher: hnats.NewPublisher(js, hmessaging.RunnerCommandsStreamName, zap.NewNop())}
 			publisher := &hmessaging.RecordingPublisher{}
-			factory := runners.NewDefaultRunnerFactory(zap.NewNop(), nil, liveCapacityCluster{appk8s.NewKubernetesClient(cluster)}, nil, "registry.k8s.io/pause:3.10", "", commandPublisher, time.Minute, time.Hour)
+			factory := runners.NewDefaultRunnerFactory(zap.NewNop(), nil, nil, liveCapacityCluster{appk8s.NewKubernetesClient(cluster)}, nil, "registry.k8s.io/pause:3.10", "", commandPublisher, time.Minute, time.Hour)
 			handler := &CreateDepHandler{db: db, publisher: publisher, controlPlaneClient: cpClient, runnerFactory: factory}
 			var deployments []*model.DeploymentSummary
 			for range 3 {

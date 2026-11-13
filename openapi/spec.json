@@ -920,13 +920,22 @@
           "Deployment"
         ],
         "summary": "Get the logs produced by the runner execution during the deployment.",
-        "description": "These logs are only stored and available for 30 days and they are returned encrypted or decrypted according to the existence or not of the\ndecryption key query parameter.\n",
+        "description": "Logs are retained for 30 days. Without decrypt=true or DecryptKey, the response remains encrypted and requires deployment_read.\nPlaintext requests require deployment_logs_read. Use managed_logs:true when creating a Deployment to enable server-managed decryption.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/orgIdPathParam"
           },
           {
             "$ref": "#/components/parameters/deploymentIdPathParam"
+          },
+          {
+            "name": "decrypt",
+            "in": "query",
+            "required": false,
+            "description": "Return plaintext using the server-managed log identity. Requires deployment_logs_read on the deployment Environment (or organization). Cannot be combined with DecryptKey; returns 409 when no managed identity is retained.",
+            "schema": {
+              "type": "boolean"
+            }
           },
           {
             "name": "DecryptKey",
@@ -951,6 +960,16 @@
               }
             },
             "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Content-Disposition": {
                 "description": "Suggests the filename for the downloaded file.",
                 "schema": {
@@ -965,6 +984,9 @@
           },
           "404": {
             "$ref": "#/components/responses/404NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/409Conflict"
           }
         }
       }
@@ -3476,6 +3498,11 @@
             "x-pattern-error": "encrypted_outputs_recipient: does not look like an 'age' public key",
             "minLength": 1,
             "maxLength": 200
+          },
+          "managed_logs": {
+            "type": "boolean",
+            "default": false,
+            "description": "Capture encrypted runner logs with a server-managed key. Set true for automatic plaintext retrieval with deployment_logs_read; cannot be combined with encrypted_logs_recipient. Omitted or false preserves legacy skip-logs behavior."
           },
           "encrypted_logs_recipient": {
             "description": "A recipient public key must be provided in order to encrypt the logs produced by the runner. This must be an 'age' public key (see https://age-encryption.org).\nThe caller must hold the matching private key in order to decrypt the logs when the logs url is provided. If the recipient key is not set, no logs will be captured\nby the runner.\n",

@@ -113,9 +113,10 @@ func TryStartObservation(ctx context.Context, db Databaser, orgID, pluginID stri
 				if _, err := tx.ExecContext(ctx, `SAVEPOINT observation_capacity`); err != nil {
 					return nil, nil, err
 				}
+				// Runner discards private observation diagnostics. INFO retains aggregate costs and safe lifecycle metadata.
 				dep, err := db.CreateDeployment(ctx, tx, orgID, request.ProjectId, request.EnvId, CreateDeploymentParams{
 					CreatedBy: actorID, DeploymentEnvUuid: request.EnvironmentUuid, Mode: DeploymentModeObservation,
-					Manifest: manifest, Tofu: tofu, Graph: graph, RunnerId: runnerID, RunnerLogLevel: "error",
+					Manifest: manifest, Tofu: tofu, Graph: graph, RunnerId: runnerID, RunnerLogLevel: "info",
 					ModuleArtifacts: baseline.ModuleArtifacts, ModuleVersionRequestDigest: baseline.ModuleVersionRequestDigest, Metrics: baseline.Metrics,
 				})
 				if err != nil {

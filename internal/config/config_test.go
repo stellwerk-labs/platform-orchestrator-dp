@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 )
 
 func TestConfigLoading_CheckDefault(t *testing.T) {
+	t.Setenv("DATABASE_SSLMODE", "")
+	require.NoError(t, os.Unsetenv("DATABASE_SSLMODE"))
 	t.Setenv("DATABASE_NAME", "test_db")
 	t.Setenv("DATABASE_USER", "test_user")
 	t.Setenv("DATABASE_PASSWORD", "test_password")
@@ -35,6 +38,7 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 		DatabasePassword:                   "test_password",
 		DatabaseHost:                       "localhost",
 		DatabasePort:                       "5432",
+		DatabaseSSLMode:                    "disable",
 		NATSURL:                            "nats://nats:4222",
 		NATSStreamReplicas:                 1,
 		NATSBootstrap:                      false,
@@ -60,6 +64,9 @@ func TestConfigLoading_CheckDefault(t *testing.T) {
 		DeploymentQueueDefaultTTL:          2 * time.Hour,
 		DeploymentQueueMaxTTL:              24 * time.Hour,
 	}, cfg)
+	t.Setenv("DATABASE_SSLMODE", "require")
+	require.NoError(t, hconfig.LoadConfigWithoutRetag(cfg))
+	require.Equal(t, "require", cfg.DatabaseSSLMode)
 }
 
 func TestDeploymentQueueDefaultTTLMustNotExceedMaximum(t *testing.T) {

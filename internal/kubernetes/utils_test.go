@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	model "github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -217,4 +218,41 @@ func TestObservationPodTemplateCannotOverrideReadOnlyTransport(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCostPolicyOverridesPodTemplateCostEnvironmentOnly(t *testing.T) {
+	for _, key := range []string{"", "fixture-key"} {
+		template := map[string]interface{}{"spec": map[string]interface{}{"containers": []interface{}{map[string]interface{}{"name": RunnerContainerName, "envFrom": []interface{}{map[string]interface{}{"secretRef": map[string]interface{}{"name": "override"}}}, "env": []interface{}{
+			map[string]interface{}{"name": runnercommon.CostEstimationEnabledVariable, "value": "true"},
+			map[string]interface{}{"name": runnercommon.InfracostAPIKeyVariable, "valueFrom": map[string]interface{}{"secretKeyRef": map[string]interface{}{"name": "override", "key": "api-key"}}},
+			map[string]interface{}{"name": "TF_LOG", "value": "TRACE"},
+		}}}}}
+		dep := &model.DeploymentSummary{CostPolicy: &model.DeploymentCostPolicy{Enabled: true}}
+		cfg := runnercommon.GatewayConfiguration{CostEstimation: &runnercommon.CostEstimationConfiguration{Enabled: true, APIKey: key}}
+		spec, err := GetJobSpec(t.Context(), platformorchestratorcp.K8sRunnerJobConfig{PodTemplate: &template}, "runner:test", "", dep, cfg)
+		require.NoError(t, err)
+		values := map[string]string{}
+		for _, env := range spec.Template.Spec.Containers[0].Env {
+			if runnercommon.IsCostPolicyVariable(env.Name) {
+				require.Nil(t, env.ValueFrom)
+				require.NotContains(t, values, env.Name)
+			}
+			values[env.Name] = env.Value
+		}
+		require.Equal(t, strconv.FormatBool(key != ""), values[runnercommon.CostEstimationEnabledVariable])
+		require.Contains(t, values, runnercommon.InfracostAPIKeyVariable)
+		require.Equal(t, key, values[runnercommon.InfracostAPIKeyVariable])
+		require.Equal(t, "TRACE", values["TF_LOG"])
+		require.Len(t, spec.Template.Spec.Containers[0].EnvFrom, 1)
+	}
+}
+
+func TestCostAPIKeyExcludedFromMalformedPodTemplateErrors(t *testing.T) {
+	template := map[string]interface{}{"spec": map[string]interface{}{"containers": []interface{}{map[string]interface{}{"name": RunnerContainerName, "env": []interface{}{"invalid-scalar"}}}}}
+	dep := &model.DeploymentSummary{CostPolicy: &model.DeploymentCostPolicy{Enabled: true}}
+	cfg := runnercommon.GatewayConfiguration{CostEstimation: &runnercommon.CostEstimationConfiguration{Enabled: true, APIKey: "private-fixture-key-never-in-error"}}
+	_, err := GetJobSpec(t.Context(), platformorchestratorcp.K8sRunnerJobConfig{PodTemplate: &template}, "runner:test", "", dep, cfg)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), cfg.CostEstimation.APIKey)
+	require.NotContains(t, err.Error(), runnercommon.InfracostAPIKeyVariable)
 }

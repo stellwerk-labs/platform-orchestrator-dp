@@ -72,6 +72,7 @@ func (w *Worker) BuildRunnerStatusConsumer(ctx context.Context) (*hnats.Consumer
 	awsTemporaryAuth := &cloud.AwsTemporaryCredsProvider{OidcProvider: w.OidcProvider, CredentialsClient: aws.NewCredentialsClient()}
 	runnerFactory := runners.NewDefaultRunnerFactory(
 		w.Logger,
+		w.DB,
 		awsTemporaryAuth,
 		k8sFactory,
 		w.VaultClient,

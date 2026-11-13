@@ -225,3 +225,27 @@ workflow contracts and diff checks pass. Normal hosted checks still required.
 ## Installation settings and Provider retirement
 
 - Prepared persisted installation maintenance, drain evidence and conservative Provider usage/cleanup, with integration coverage and coordinated v4.3.0 notes. Security/compiler maintenance remains a preceding separate commit. Published shared SDKs preserve generated compatibility aliases; see DECISIONS.md and LEARNINGS.md.
+
+
+## 2026-11-12: Data Plane database TLS
+
+- Implemented the requested local change with targeted tests and documentation. Independent planning, green and final clean-code reviews passed after correcting partial-summary availability and removing an unsupported mTLS mount example.
+- TLS configuration was exercised against real PostgreSQL; UI and complete-history/permission boundaries were tested. Hosted release qualification and immutable public schema/image pins remain pending. No public publication or live deployment is established by this local checkpoint.
+
+## 2026-11-13: Infracost Admin backend
+
+- Replaced unreleased online/feed cost policy with disabled-by-default encrypted Infracost installation credential, revision-safe write-only HTTP contract and presence/change-only audit.
+- Added current-key Vault Transit resolution at runner dispatch, separate transient configuration and authoritative enabled/key environment on Kubernetes/ECS/remote paths; removed obsolete source configuration and online variables.
+- Real isolated PostgreSQL18.1/Vault1.20.4 integration passed policy defaults/revisions/audit/snapshots/legacy retries and actual encryption/current-key rotation/removal/unavailable Vault behavior. Fixtures retained for root-owned browser qualification.
+- Helm docs generation, lint and render passed with the existing exact cost-estimation route and no feed configuration. See `DECISIONS.md` and `LEARNINGS.md`; final lint/review evidence is recorded in campaign `INFRACOST-BACKEND-EVIDENCE.md`.
+- Fresh build review found malformed strategic merge errors could echo the plaintext key in the base environment. Cost variables now enter the Job only after successful template conversion; the actual malformed env scalar regression passes. Full6changed-package test suites passed after this correction; full CI-pinned lint was green immediately before it, final repeat held for root disk cleanup.
+- Final CI-pinned golangci-lint2.11.4 full lint passed0issues. Prescribed complexity found1factory nested block; replaced it with early returns, then reran the affected2package full suites and final full lint/complexity (including all untracked Go files via explicit patch), all green. Root owns final browser and independent final review.
+
+- Final independent review passed. Actual Console/IAM/DP/CP + PostgreSQL/Vault browser integration passed key preserve/replace/remove, RBAC, strict bodies, Origin/revision protection and password cleanup. Owned fixtures removed after proof. Runner artifact/security qualification remains separate; no public push or deployment in this commit.
+
+## 2026-11-13: Managed deployment logs, local review checkpoint
+
+- Added opt-in managed log capture, per-Deployment Vault-wrapped age identity persistence, same-transaction runner recipient binding, queue/admission/idempotency flag binding and dedicated scoped plaintext authorization. Generated API server/client from the pinned Go1.26.11 tools.
+- Added `decrypt=true` with fixed409 when managed material is unavailable; preserved ciphertext and explicit-key compatibility, bounded material reads and added no-store/nosniff response headers.
+- Real local PostgreSQL/Vault and validated DP HTTP tests passed managed/manual/raw retrieval, denied reads, ambiguous inputs, missing/wrong organization, Vault connection failure, tampered recipients, response bounds, fresh queue/rollback keys, direct idempotency and legacy skip/explicit/dry-run behavior. Existing queue and migration reconciliation regressions also passed (`api`12.658s, `model`2.510s); full `make lint` reported0issues. See `DECISIONS.md` for custody/recovery and `LEARNINGS.md` for fixture/middleware details.
+- No public publication, push or cluster change. Root owns independent green/final review and private rollout; no commit was made at this checkpoint.

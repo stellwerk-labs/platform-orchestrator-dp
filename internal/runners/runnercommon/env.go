@@ -2,6 +2,7 @@ package runnercommon
 
 import (
 	"iter"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -11,6 +12,13 @@ import (
 type GatewayConfiguration struct {
 	URL             string
 	RunnerTokenSalt string
+	// CostEstimation is transient dispatch material, never deployment model data.
+	CostEstimation *CostEstimationConfiguration
+}
+
+type CostEstimationConfiguration struct {
+	Enabled bool
+	APIKey  string
 }
 
 func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary, gatewayConfigurations ...GatewayConfiguration) iter.Seq2[string, string] {
@@ -24,6 +32,9 @@ func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary,
 			yield("DEPLOYMENT_ENV_UUID", d.DeploymentEnvUuid.String())
 		}
 		yield("MODE", RunnerModeForDeployment(d.Mode))
+		for k, v := range CostPolicyEnv(d, gatewayConfigurations...) {
+			yield(k, v)
+		}
 		if d.Mode == model.DeploymentModeObservation {
 			yield(ObservationProtocolVariable, ObservationProtocolV1)
 		}
@@ -58,5 +69,31 @@ func RunnerModeForDeployment(deploymentMode model.DeploymentMode) string {
 		return string(model.DeploymentModeDeployPlan)
 	default:
 		return string(deploymentMode)
+	}
+}
+
+const CostEstimationEnabledVariable = "COST_ESTIMATION_ENABLED"
+const InfracostAPIKeyVariable = "INFRACOST_API_KEY" // #nosec G101 -- Environment variable name, not a credential.
+
+func IsCostPolicyVariable(name string) bool {
+	return name == CostEstimationEnabledVariable || name == InfracostAPIKeyVariable
+}
+
+func CostPolicyEnv(d *model.DeploymentSummary, configurations ...GatewayConfiguration) iter.Seq2[string, string] {
+	return func(yield func(string, string) bool) {
+		if d.CostPolicy == nil {
+			return
+		}
+		var cfg CostEstimationConfiguration
+		if len(configurations) > 0 && configurations[0].CostEstimation != nil {
+			cfg = *configurations[0].CostEstimation
+		}
+		enabled := d.CostPolicy.Enabled && cfg.Enabled && cfg.APIKey != ""
+		key := ""
+		if enabled {
+			key = cfg.APIKey
+		}
+		yield(CostEstimationEnabledVariable, strconv.FormatBool(enabled))
+		yield(InfracostAPIKeyVariable, key)
 	}
 }

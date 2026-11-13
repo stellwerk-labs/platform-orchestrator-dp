@@ -273,6 +273,9 @@ func (s *Server) createDeployment(ctx context.Context, request CreateDeploymentR
 		}
 	}
 
+	if ref.DerefOr(request.Body.ManagedLogs, false) && request.Body.EncryptedLogsRecipient != nil {
+		return CreateDeployment400JSONResponse{N400BadRequestJSONResponse: Generate400Response("managed_logs cannot be combined with encrypted_logs_recipient")}, nil
+	}
 	if request.Body.EncryptedLogsRecipient != nil {
 		if _, err := age.ParseX25519Recipient(*request.Body.EncryptedLogsRecipient); err != nil {
 			logger.Error("invalid age recipient", zap.Error(err))
@@ -330,6 +333,7 @@ func (s *Server) createDeployment(ctx context.Context, request CreateDeploymentR
 		RestrictedConfirmations:   request.Body.ConfirmRestrictedModuleVersionUuids,
 		EncryptedOutputsRecipient: request.Body.EncryptedOutputsRecipient,
 		EncryptedLogsRecipient:    request.Body.EncryptedLogsRecipient,
+		ManagedLogs:               ref.DerefOr(request.Body.ManagedLogs, false),
 		RunnerLogLevel:            request.Body.RunnerLogLevel,
 	}
 	expectedBase := opt.OfRef(request.Body.ExpectedBaseDeploymentId)
@@ -458,6 +462,8 @@ func (s *Server) createRequestedDeployment(
 // authorization and, for mutating runs, a fresh Core admission attempt.
 func (s *Server) deploymentOptions(ctx context.Context, actor uuid.UUID, orgID string, env platformorchestratorcp.Environment, mode model.DeploymentMode, request deploymentRequest, admissionKey string, dryRun bool) DeploymentOptions {
 	options := DeploymentOptions{
+		ManagedLogs:             request.ManagedLogs,
+		LogMaterial:             &DeploymentLogMaterialService{Vault: s.Vault},
 		ExplicitModuleVersions:  request.ModuleVersions,
 		DraftTestSnapshots:      request.DraftTestSnapshots,
 		RestrictedConfirmations: request.RestrictedConfirmations,
@@ -1230,70 +1236,99 @@ func (s *Server) commonUpdateDeploymentResults(
 // Get the logs produced by the runner execution.
 // (GET /orgs/{orgId}/deployments/{deploymentId}/actions/getLogs)
 func (s *Server) GetDeploymentLogs(ctx context.Context, request GetDeploymentLogsRequestObject) (GetDeploymentLogsResponseObject, error) {
-	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).
-		With(logging.ZapOrgId(request.OrgId), logging.ZapDeploymentId(request.DeploymentId.String()))
-	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
-		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
-		return nil, err
+	uid, authErr := GetAuthenticatedUserIdOr401(ctx)
+	if authErr != nil {
+		return nil, authErr
 	}
-
+	managed := ref.DerefOr(request.Params.Decrypt, false)
+	plaintext := managed || request.Params.DecryptKey != nil
+	if !plaintext {
+		if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
+			return nil, err
+		}
+	}
 	ds, _, _, _, err := s.Database.GetDeployment(ctx, nil, request.OrgId, request.DeploymentId, model.GetModeDefault)
 	if err != nil {
 		if e, ok := model.IsErrNotFound(err); ok {
+			// No scoped resource exists to authorize. The authenticated lookup
+			// exposes only absence, like the other scoped Deployment handlers.
+			middleware.SetAuthCheckedCtx(ctx)
 			return GetDeploymentLogs404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 		}
 		return nil, err
 	}
-
+	if plaintext {
+		if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, ds.DeploymentEnvUuid, PermissionDeploymentLogsRead); err != nil {
+			return nil, err
+		}
+	}
+	if managed && request.Params.DecryptKey != nil {
+		return GetDeploymentLogs400JSONResponse{N400BadRequestJSONResponse: Generate400Response("decrypt cannot be combined with DecryptKey")}, nil
+	}
+	var identity age.Identity
+	if managed {
+		tx, err := s.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		material, err := model.GetDeploymentLogMaterial(ctx, tx, request.OrgId, request.DeploymentId)
+		if err != nil {
+			if _, missing := model.IsErrNotFound(err); missing {
+				return GetDeploymentLogs409JSONResponse{N409ConflictJSONResponse: Generate409Response("server-managed deployment log identity is not retained")}, nil
+			}
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		identity, err = (DeploymentLogMaterialService{Vault: s.Vault}).Identity(ctx, *material)
+		if err != nil {
+			return nil, err
+		}
+	} else if request.Params.DecryptKey != nil {
+		identity, err = age.ParseX25519Identity(*request.Params.DecryptKey)
+		if err != nil {
+			return GetDeploymentLogs400JSONResponse{N400BadRequestJSONResponse: Generate400Response("the supplied key is not a valid 'age' private key")}, nil
+		}
+	}
 	logsReader, err := s.RunnerLogsReader(ctx, ds.DeploymentEnvUuid.String()+"/"+request.DeploymentId.String())
 	if err != nil {
 		if errors.Is(err, ErrRunnerLogsNotFound) {
 			return GetDeploymentLogs404JSONResponse{N404NotFoundJSONResponse: Generate404Response(fmt.Sprintf("logs for deployment %s not found", request.DeploymentId))}, nil
 		}
-		return nil, errors.Wrap(err, "failed to create log reader")
+		return nil, errors.New("deployment log storage is unavailable")
 	}
-	defer func() {
-		if err := logsReader.Close(); err != nil {
-			logger.Error("failed to close logs reader", zap.Error(err))
+	defer func() { _ = logsReader.Close() }()
+	encoded, err := io.ReadAll(io.LimitReader(logsReader, maxExternalMaterialEncodedBytes+1))
+	if err != nil {
+		return nil, errors.New("failed to read deployment logs")
+	}
+	if len(encoded) > maxExternalMaterialEncodedBytes {
+		return nil, errors.New("deployment logs exceed the response limit")
+	}
+	content, err := base64.StdEncoding.DecodeString(string(encoded))
+	if err != nil {
+		return nil, errors.New("stored deployment logs are invalid")
+	}
+	if identity != nil {
+		decrypted, err := age.Decrypt(bytes.NewReader(content), identity)
+		if err != nil {
+			return GetDeploymentLogs400JSONResponse{N400BadRequestJSONResponse: Generate400Response("logs cannot be decrypted with the selected identity")}, nil
 		}
-	}()
-
-	var logs bytes.Buffer
-	if _, err := logs.ReadFrom(logsReader); err != nil {
-		return nil, errors.Wrap(err, "failed to read logs")
+		content, err = io.ReadAll(io.LimitReader(decrypted, maxExternalMaterialBytes+1))
+		if err != nil {
+			return nil, errors.New("failed to read decrypted deployment logs")
+		}
+		if len(content) > maxExternalMaterialBytes {
+			return nil, errors.New("deployment logs exceed the response limit")
+		}
 	}
-
-	decodedContent, err := base64.StdEncoding.DecodeString(logs.String())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode encrypted logs content from base64")
-	}
-
-	if request.Params.DecryptKey == nil {
-		return GetDeploymentLogs200TextResponse{Body: string(decodedContent), Headers: GetDeploymentLogs200ResponseHeaders{ContentDisposition: ref.Ref(fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId))}}, nil
-	}
-
-	agePrivateKey, err := age.ParseX25519Identity(*request.Params.DecryptKey)
-	if err != nil {
-		return GetDeploymentLogs400JSONResponse{N400BadRequestJSONResponse: Generate400Response("the supplied key is not a valid 'age' private key")}, nil
-	}
-
-	decryptedLogs, err := age.Decrypt(bytes.NewReader(decodedContent), agePrivateKey)
-	if err != nil {
-		return GetDeploymentLogs400JSONResponse{N400BadRequestJSONResponse: Generate400Response(fmt.Sprintf("logs can't be decrypted with the supplied key: %v", err))}, nil
-	}
-
-	var decryptedBuf bytes.Buffer
-	if _, err := io.Copy(&decryptedBuf, decryptedLogs); err != nil {
-		return nil, errors.Wrap(err, "failed to read decrypted logs")
-	}
-
-	return GetDeploymentLogs200TextResponse{
-		Body: decryptedBuf.String(),
-		Headers: GetDeploymentLogs200ResponseHeaders{
-			ContentDisposition: ref.Ref(fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId)),
-		},
-	}, nil
+	return GetDeploymentLogs200TextResponse{Body: string(content), Headers: GetDeploymentLogs200ResponseHeaders{
+		ContentDisposition:  ref.Ref(fmt.Sprintf("attachment; filename=\"%s.log\"", request.DeploymentId)),
+		CacheControl:        ref.Ref("no-store"),
+		XContentTypeOptions: ref.Ref("nosniff"),
+	}}, nil
 }
 
 const waitForDeploymentPollTime = time.Second * 10

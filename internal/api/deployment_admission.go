@@ -79,6 +79,7 @@ type ordinaryDeploymentCompiledIntent struct {
 	Graph                           []byte
 	Tofu                            []byte
 	EncryptedOutputsRecipient       string
+	ManagedLogs                     bool
 	EncryptedLogsRecipient          string
 	RunnerLogLevel                  string
 	CarryForwardModuleVersions      map[string]uuid.UUID
@@ -150,6 +151,7 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 		ArtifactsSHA256                 string               `json:"module_artifacts_sha256"`
 		OutputsRecipient                string               `json:"encrypted_outputs_recipient"`
 		LogsRecipient                   string               `json:"encrypted_logs_recipient"`
+		ManagedLogs                     bool                 `json:"managed_logs,omitempty"`
 		RunnerLogLevel                  string               `json:"runner_log_level"`
 		DraftTestSnapshots              map[string]uuid.UUID `json:"draft_test_snapshots,omitempty"`
 	}{
@@ -158,7 +160,7 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 		compiled.ProjectID, compiled.EnvironmentID, compiled.RunnerID, compiled.EffectiveBaseDeploymentID,
 		compiled.RollbackToDeploymentID, hex.EncodeToString(manifestDigest[:]), hex.EncodeToString(graphDigest[:]),
 		hex.EncodeToString(tofuDigest[:]), hex.EncodeToString(artifactsDigest[:]), compiled.EncryptedOutputsRecipient,
-		compiled.EncryptedLogsRecipient, compiled.RunnerLogLevel, a.draftTestSnapshots,
+		compiled.EncryptedLogsRecipient, compiled.ManagedLogs, compiled.RunnerLogLevel, a.draftTestSnapshots,
 	})
 	if err != nil {
 		return err

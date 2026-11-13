@@ -79,6 +79,8 @@ func CreateDeployment(
 }
 
 type DeploymentOptions struct {
+	LogMaterial                 *DeploymentLogMaterialService
+	ManagedLogs                 bool
 	DraftTestSnapshots          map[string]uuid.UUID
 	ExecutionCatalogue          platformorchestratorcp.ClientWithResponsesInterface
 	ModuleMaterialCatalogue     platformorchestratorcp.ClientWithResponsesInterface
@@ -146,6 +148,10 @@ func CreateDeploymentWithOptions(
 		idempotencyKeyDigest = opt.Of(digestIdempotencyKey(*idempotencyKey))
 	}
 	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations, options.DraftTestSnapshots)
+	if options.ManagedLogs {
+		digest := sha256.Sum256([]byte("managed_logs:true:" + requestDigest))
+		requestDigest = hex.EncodeToString(digest[:])
+	}
 	if idempotencyKeyDigest.IsSet() {
 		if d, m, err := db.GetDeploymentByIdempotencyKeyDigest(ctx, tx, orgId, projectId, envId, idempotencyKeyDigest.Must()); err != nil {
 			if _, ok := model.IsErrNotFound(err); !ok {
@@ -466,6 +472,7 @@ func CreateDeploymentWithOptions(
 			Manifest:                  rawManifest, Graph: rawNewGraph, Tofu: rawTofu,
 			EncryptedOutputsRecipient:  ref.DerefOr(encryptedOutputsRecipient, ""),
 			EncryptedLogsRecipient:     ref.DerefOr(encryptedLogsRecipient, ""),
+			ManagedLogs:                options.ManagedLogs,
 			RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
 			CarryForwardModuleVersions: carryForwardVersions, ConfirmedRestrictedVersionUUIDs: confirmedRestrictedVersions,
 		}); err != nil {
@@ -513,6 +520,11 @@ func CreateDeploymentWithOptions(
 		}, nil, &diff, nil
 	}
 
+	encryptedLogsRecipient, logMaterial, err := options.prepareLogMaterial(ctx, encryptedLogsRecipient)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, model.CreateDeploymentParams{
 		CreatedBy:                   createdBy,
 		DeploymentEnvUuid:           env.Uuid,
@@ -536,6 +548,11 @@ func CreateDeploymentWithOptions(
 	})
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
+	}
+	if logMaterial != nil {
+		if err := model.StoreDeploymentLogMaterial(ctx, tx, orgId, d.Id, *logMaterial); err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to retain deployment log identity")
+		}
 	}
 	if err := options.Admission.Bind(ctx, tx, d.Id); err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to bind Deployment admission receipt")

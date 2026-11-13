@@ -141,6 +141,9 @@ func (e *ecsRunnerInstance) Start(ctx context.Context) error {
 	logger := hlogger.TraceScopedLoggerFromCtx(zap.L(), ctx).WithLazy(ids.AsLogField())
 
 	runCfg := e.mustRunnerConfiguration()
+	if err := validateECSCostPolicyEnvironment(e.Deployment, runCfg.Job.Environment, runCfg.Job.Secrets); err != nil {
+		return err
+	}
 	if err := validateECSObservationEnvironment(e.Deployment.Mode, runCfg.Job.Environment, runCfg.Job.Secrets); err != nil {
 		return err
 	}
@@ -442,6 +445,20 @@ func validateECSObservationEnvironment(mode model.DeploymentMode, environment, s
 		for _, name := range []string{"MODE", runnercommon.ObservationProtocolVariable} {
 			if _, overridden := values[name]; overridden {
 				return errors.New("observation transport environment cannot be overridden by ECS configuration")
+			}
+		}
+	}
+	return nil
+}
+
+func validateECSCostPolicyEnvironment(deployment *model.DeploymentSummary, environment, secrets map[string]string) error {
+	if deployment.CostPolicy == nil {
+		return nil
+	}
+	for _, values := range []map[string]string{environment, secrets} {
+		for name := range values {
+			if runnercommon.IsCostPolicyVariable(name) {
+				return errors.New("cost policy environment cannot be overridden by ECS configuration")
 			}
 		}
 	}

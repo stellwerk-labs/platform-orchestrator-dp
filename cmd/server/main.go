@@ -136,9 +136,7 @@ func main() {
 		zap.L().Fatal("Failed to initialize iam client", zap.Error(err))
 	}
 
-	dbConnStr := fmt.Sprintf(
-		"dbname=%s user=%s password=%s host=%s port=%s connect_timeout=5 sslmode=disable",
-		cfg.DatabaseName, cfg.DatabaseUser, cfg.DatabasePassword, cfg.DatabaseHost, cfg.DatabasePort)
+	dbConnStr := cfg.DatabaseConnectionString()
 	db, err := model.NewDatabaser(context.Background(), zap.L(), dbConnStr)
 	if err != nil {
 		zap.L().Fatal("Failed to initialize database", zap.Error(err))

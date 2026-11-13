@@ -10,11 +10,12 @@ type Configuration struct {
 	UiHostUrl string `env:"UI_HOST_URL"        validate:"omitempty,url"`
 	Port      int    `env:"PORT, default=8080" validate:"required"`
 
-	DatabaseName     string `env:"DATABASE_NAME"     validate:"required"`
-	DatabaseUser     string `env:"DATABASE_USER"     validate:"required"`
-	DatabasePassword string `env:"DATABASE_PASSWORD" validate:"required"`
-	DatabaseHost     string `env:"DATABASE_HOST"     validate:"required"`
-	DatabasePort     string `env:"DATABASE_PORT"     validate:"required"`
+	DatabaseName     string `env:"DATABASE_NAME"                     validate:"required"`
+	DatabaseUser     string `env:"DATABASE_USER"                     validate:"required"`
+	DatabasePassword string `env:"DATABASE_PASSWORD"                 validate:"required"`
+	DatabaseHost     string `env:"DATABASE_HOST"                     validate:"required"`
+	DatabasePort     string `env:"DATABASE_PORT"                     validate:"required"`
+	DatabaseSSLMode  string `env:"DATABASE_SSLMODE, default=disable"`
 
 	NATSURL            string `env:"NATS_URL"                        validate:"required,url"`
 	NATSCredsFile      string `env:"NATS_CREDS_FILE"`

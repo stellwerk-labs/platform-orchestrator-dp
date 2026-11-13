@@ -11,6 +11,7 @@ import (
 const (
 	PermissionActiveResourceRead              = "active_resource_read"
 	PermissionDeploymentRead                  = "deployment_read"
+	PermissionDeploymentLogsRead              = "deployment_logs_read"
 	PermissionDeploymentWrite                 = "deployment_write"
 	PermissionDeploymentDebugRead             = "deployment_debug_read"
 	PermissionMetadataKeyRead                 = "metadata_key_read"

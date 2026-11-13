@@ -66,6 +66,7 @@ func Setup(
 		executionClient:    executionClient,
 		runnerFactory: runners.NewDefaultRunnerFactory(
 			logger,
+			db,
 			awsTemporaryAuth,
 			k8sClientBuilder,
 			vlt,
@@ -209,6 +210,9 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	}
 	if err := h.db.ReserveRunnerDispatch(ctx, d, limit); err != nil {
 		return hmessaging.NewRetryError(errors.Wrap(err, "waiting for Runner job capacity"))
+	}
+	if err := h.db.FreezeDeploymentCostPolicy(ctx, d); err != nil {
+		return hmessaging.NewRetryError(errors.Wrap(err, "failed to freeze cost policy"))
 	}
 	runner, err := h.runnerFactory.CreateRunner(ctx, rn, d)
 	if err != nil {

@@ -46,3 +46,9 @@ func TestOptionalObservationSpecValidatesAndMatchesRunnerResultSchema(t *testing
 		require.JSONEq(t, string(expected), string(actual), "Runner transport and optional safe-result schema must be exactly equal")
 	}
 }
+
+func TestInstallationSettingsSpecValidates(t *testing.T) {
+	source, err := openapi3.NewLoader().LoadFromFile("../../openapi/installation-settings.yaml")
+	require.NoError(t, err)
+	require.NoError(t, source.Validate(t.Context(), openapi3.EnableExamplesValidation()))
+}

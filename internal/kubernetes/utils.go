@@ -37,6 +37,9 @@ func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJ
 					Args:            []string{"standard"},
 					Env: slices.Collect(func(yield func(corev1.EnvVar) bool) {
 						for k, v := range runnercommon.GenerateEnvVarsForRun(metadataOutputKey, d, gatewayConfigurations...) {
+							if runnercommon.IsCostPolicyVariable(k) {
+								continue
+							}
 							yield(corev1.EnvVar{Name: k, Value: v})
 						}
 					}),
@@ -86,6 +89,24 @@ func GetJobSpec(ctx context.Context, jobConfig platformorchestratorcp.K8sRunnerJ
 			return nil, errors.Wrap(err, "failed to build pod template from the merged")
 		}
 		jobTemplate = podTemplate
+	}
+
+	if d.CostPolicy != nil {
+		found := false
+		for i := range jobTemplate.Spec.Containers {
+			container := &jobTemplate.Spec.Containers[i]
+			if container.Name != RunnerContainerName {
+				continue
+			}
+			found = true
+			container.Env = slices.DeleteFunc(container.Env, func(env corev1.EnvVar) bool { return runnercommon.IsCostPolicyVariable(env.Name) })
+			for k, v := range runnercommon.CostPolicyEnv(d, gatewayConfigurations...) {
+				container.Env = append(container.Env, corev1.EnvVar{Name: k, Value: v})
+			}
+		}
+		if !found {
+			return nil, errors.New("cost policy requires the Runner container")
+		}
 	}
 
 	if d.Mode == model.DeploymentModeObservation {

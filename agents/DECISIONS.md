@@ -101,3 +101,27 @@ versions and still requires200.
 ## Installation settings and Provider retirement
 
 - Serialize maintenance changes with durable acceptance. Existing accepted work and exact retries may settle; new records are refused. Retain historical Provider material and require successful canonical state boundaries before authorizing collection.
+
+
+## 2026-11-12: Data Plane database TLS
+
+- Preserve existing permissions, confirmation and default behavior. PostgreSQL TLS is opt-in through `DATABASE_SSLMODE`; use existing driver and certificate mechanisms.
+- Catalogue filters use complete optional summaries, omit version data for core-only readers, and keep unavailable distinct from false. Verification remains unimplemented; its filter is intentionally present with an explicit limitation.
+
+## 2026-11-13: Infracost installation credential
+
+- Cost estimates default disabled. Admin writes require a boolean `enabled`; an omitted `api_key` preserves, empty clears, nonempty replaces. Keys are write-only, bounded to4096bytes, and reject whitespace/control characters/null.
+- Reuse Vault Transit with the dedicated `cost-estimation-api-key` non-exportable AES key and existing720hrotation policy. Store only ciphertext in the installation singleton, audit only credential presence/change flags, snapshot only enabled/revision.
+- Resolve the current key at each fresh runner factory dispatch, including retries. Transient dispatch configuration carries the key separately from deployment models; unavailable credentials log one fixed warning and disable optional estimation, with a5sresolution deadline.
+- Both `COST_ESTIMATION_ENABLED` and `INFRACOST_API_KEY` are authoritative for snapshotted runs, including disabled/empty values. Kubernetes replaces template values and shadows envFrom; ECS reserves both environment and secret names. Existing legacy runs without snapshots keep their environment.
+- Environment transport has the existing deployment-token trust boundary. Job/task-definition administrators, JetStream storage readers and diode frame readers can see dispatched keys; queued copied commands are not revoked by rotation. No new credential-fetch protocol or backend-specific secret provisioning.
+- Migration42is unreleased and was replaced in place with the Infracost schema. No released schema migration, dependency, image/chart version, commit or push is part of this change.
+
+## 2026-11-13: Managed deployment logs
+
+- Preserve existing API skip semantics: only `managed_logs:true` opts into server-owned log custody. An explicit recipient remains client-owned and cannot be combined with the opt-in. Console and CLI may select the new opt-in by default.
+- Generate one age identity per actual Deployment after admission and dry-run, before persistence and runner events. Persist only its public recipient and Vault Transit ciphertext in migration43's deployment-owned row. Queue promotion and rollback use the same creation seam; dry runs and implicit Environment destruction do not create keys.
+- Bind the managed flag into queued intent and admission request digests. Domain-separate the existing persisted deployment selection digest only for managed requests so changing true/false under the same idempotency key conflicts while legacy false digests remain byte-compatible.
+- Preserve `get-logs` without header/query as ciphertext with `deployment_read`. Explicit private keys and `decrypt=true` plaintext both require `deployment_logs_read` on the exact historical Environment, with the existing organization fallback. A missing or inconsistent managed identity returns409; there is no ciphertext fallback for managed plaintext requests.
+- External plugin plaintext continues to trust the signed exact-action Core claim minted after Core authorization. No new independent Data Plane IAM adapter or plaintext plugin capability is introduced.
+- Recovery requires both database `deployment_log_material` rows and retained versions of the non-exportable Vault `deployment-log-material` key. Migration43 down drops identities; restore both stores to recover logs. Bootstrap Vault policy already grants `transit/*`; no Helm policy change is required.
