@@ -73,6 +73,7 @@ type DeploymentSummary struct {
 	ModuleVersionRequestDigest string
 	// Internal only: caps buffered Runner commands at the immutable first attempt budget.
 	DispatchDeadline time.Time
+	CostPolicy       *DeploymentCostPolicy
 	// EnvironmentFence is set by ListLastDeployments only, while the item's
 	// Environment refuses new Deployments behind an unreconciled plugin dispatch.
 	EnvironmentFence opt.Opt[EnvironmentFence]

@@ -123,3 +123,9 @@ in DP and provides a safe, nonmutating identity probe.
 
 - A paginated first page cannot prove version absence. Complete catalogue summaries require version-read permission, not just catalogue read access.
 - `require` prevents plaintext fallback but does not generally authenticate server identity. CA verification uses existing driver settings; a private-key mount needs its own restrictive permissions.
+
+## 2026-11-13: Infracost custody qualification
+
+- A4096bytewrite-only key needs a settings body bound above1024bytes. The shared strict decoder now bounds JSON at32KiB, covering escaped4096bytekeys while preserving strict object/field decoding.
+- Cached CNPG PostgreSQL18.1 images have no startup entrypoint. Disposable fixtures need explicit initdb/postgres, a UID26-owned tmpfs, UTF8initdb and bridge-host pg_hba authorization; bind only loopback ports.
+- Vault1.20.4cold startup under constrained emulation is slow. Use bounded health/mount HTTP probes; a transient connection refusal is fixture readiness, not an application failure.

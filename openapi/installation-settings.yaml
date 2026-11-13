@@ -121,6 +121,120 @@
           }
         }
       }
+    },
+    "/platform-settings/cost-estimation": {
+      "get": {
+        "operationId": "GetCostPolicy",
+        "description": "Requires platform_settings_read. Cost estimation defaults disabled. Enabled decisions and policy revision are snapshotted for new executions; each fresh dispatch resolves the current encrypted Infracost API key, including retries. Missing or unavailable credentials skip optional estimation without blocking deployment. The key is write-only and never returned. Jobs, ECS task definitions, remote JetStream commands and diode frames carry the plaintext key within the existing deployment-token administrator trust boundary; queued commands retain their copied key after rotation.",
+        "responses": {
+          "200": {
+            "description": "Current settings. No-store; revision is also returned as an ETag.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Required platform permission or exact Console origin missing"
+          },
+          "503": {
+            "description": "Authorization or storage temporarily unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "UpdateCostPolicy",
+        "description": "Requires platform_settings_write. Cookie-authenticated writes require the exact configured Console Origin. Omit api_key to preserve, use an empty string to clear, or a nonempty string to replace. Enabling requires an effective configured key. Cost estimation defaults disabled. Enabled decisions and policy revision are snapshotted for new executions; each fresh dispatch resolves the current encrypted Infracost API key, including retries. Missing or unavailable credentials skip optional estimation without blocking deployment. The key is write-only and never returned. Jobs, ECS task definitions, remote JetStream commands and diode frames carry the plaintext key within the existing deployment-token administrator trust boundary; queued commands retain their copied key after rotation.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "description": "Quoted revision from the preceding GET, for example \"1\".",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "api_key": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "writeOnly": true,
+                    "description": "At most 4096 UTF-8 bytes; no whitespace or control characters. Null is rejected."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current settings. No-store; revision is also returned as an ETag.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Required platform permission or exact Console origin missing"
+          },
+          "412": {
+            "description": "Settings revision changed; reload and retry"
+          },
+          "415": {
+            "description": "application/json required"
+          },
+          "428": {
+            "description": "If-Match required"
+          },
+          "503": {
+            "description": "Authorization or storage temporarily unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -190,6 +304,40 @@
           "runner_reservations",
           "unsettled_admissions",
           "executing_observations"
+        ]
+      },
+      "CostPolicy": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "api_key_configured": {
+            "type": "boolean",
+            "description": "Only credential presence; never plaintext or ciphertext."
+          }
+        },
+        "required": [
+          "revision",
+          "updated_at",
+          "updated_by",
+          "enabled",
+          "api_key_configured"
         ]
       }
     }

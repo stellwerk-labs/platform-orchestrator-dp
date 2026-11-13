@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/vault"
 	iamapi "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -50,6 +52,14 @@ func TestInstallationSettingsPeer(t *testing.T) {
 	client, err := iamapi.NewClientWithResponses(os.Getenv("PLATFORM_SETTINGS_IAM_URL"), iamapi.WithHTTPClient(&http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}}))
 	require.NoError(t, err)
 	server := &Server{Database: store, IamClient: client, Logger: zap.NewNop(), UiHostUrl: os.Getenv("PLATFORM_SETTINGS_IAM_URL")}
+	if address := os.Getenv("COST_POLICY_TEST_VAULT_ADDR"); address != "" {
+		config := vaultapi.DefaultConfig()
+		config.Address = address
+		client, err := vaultapi.NewClient(config)
+		require.NoError(t, err)
+		client.SetToken(os.Getenv("COST_POLICY_TEST_VAULT_TOKEN"))
+		server.Vault = vault.NewVaultClient(client, zap.NewNop())
+	}
 	e := echo.New()
 	server.MapRoutes(e)
 	peer := httptest.NewServer(e)

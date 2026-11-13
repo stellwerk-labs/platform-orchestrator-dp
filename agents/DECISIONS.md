@@ -107,3 +107,12 @@ versions and still requires200.
 
 - Preserve existing permissions, confirmation and default behavior. PostgreSQL TLS is opt-in through `DATABASE_SSLMODE`; use existing driver and certificate mechanisms.
 - Catalogue filters use complete optional summaries, omit version data for core-only readers, and keep unavailable distinct from false. Verification remains unimplemented; its filter is intentionally present with an explicit limitation.
+
+## 2026-11-13: Infracost installation credential
+
+- Cost estimates default disabled. Admin writes require a boolean `enabled`; an omitted `api_key` preserves, empty clears, nonempty replaces. Keys are write-only, bounded to4096bytes, and reject whitespace/control characters/null.
+- Reuse Vault Transit with the dedicated `cost-estimation-api-key` non-exportable AES key and existing720hrotation policy. Store only ciphertext in the installation singleton, audit only credential presence/change flags, snapshot only enabled/revision.
+- Resolve the current key at each fresh runner factory dispatch, including retries. Transient dispatch configuration carries the key separately from deployment models; unavailable credentials log one fixed warning and disable optional estimation, with a5sresolution deadline.
+- Both `COST_ESTIMATION_ENABLED` and `INFRACOST_API_KEY` are authoritative for snapshotted runs, including disabled/empty values. Kubernetes replaces template values and shadows envFrom; ECS reserves both environment and secret names. Existing legacy runs without snapshots keep their environment.
+- Environment transport has the existing deployment-token trust boundary. Job/task-definition administrators, JetStream storage readers and diode frame readers can see dispatched keys; queued copied commands are not revoked by rotation. No new credential-fetch protocol or backend-specific secret provisioning.
+- Migration42is unreleased and was replaced in place with the Infracost schema. No released schema migration, dependency, image/chart version, commit or push is part of this change.

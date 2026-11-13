@@ -231,3 +231,14 @@ workflow contracts and diff checks pass. Normal hosted checks still required.
 
 - Implemented the requested local change with targeted tests and documentation. Independent planning, green and final clean-code reviews passed after correcting partial-summary availability and removing an unsupported mTLS mount example.
 - TLS configuration was exercised against real PostgreSQL; UI and complete-history/permission boundaries were tested. Hosted release qualification and immutable public schema/image pins remain pending. No public publication or live deployment is established by this local checkpoint.
+
+## 2026-11-13: Infracost Admin backend
+
+- Replaced unreleased online/feed cost policy with disabled-by-default encrypted Infracost installation credential, revision-safe write-only HTTP contract and presence/change-only audit.
+- Added current-key Vault Transit resolution at runner dispatch, separate transient configuration and authoritative enabled/key environment on Kubernetes/ECS/remote paths; removed obsolete source configuration and online variables.
+- Real isolated PostgreSQL18.1/Vault1.20.4 integration passed policy defaults/revisions/audit/snapshots/legacy retries and actual encryption/current-key rotation/removal/unavailable Vault behavior. Fixtures retained for root-owned browser qualification.
+- Helm docs generation, lint and render passed with the existing exact cost-estimation route and no feed configuration. See `DECISIONS.md` and `LEARNINGS.md`; final lint/review evidence is recorded in campaign `INFRACOST-BACKEND-EVIDENCE.md`.
+- Fresh build review found malformed strategic merge errors could echo the plaintext key in the base environment. Cost variables now enter the Job only after successful template conversion; the actual malformed env scalar regression passes. Full6changed-package test suites passed after this correction; full CI-pinned lint was green immediately before it, final repeat held for root disk cleanup.
+- Final CI-pinned golangci-lint2.11.4 full lint passed0issues. Prescribed complexity found1factory nested block; replaced it with early returns, then reran the affected2package full suites and final full lint/complexity (including all untracked Go files via explicit patch), all green. Root owns final browser and independent final review.
+
+- Final independent review passed. Actual Console/IAM/DP/CP + PostgreSQL/Vault browser integration passed key preserve/replace/remove, RBAC, strict bodies, Origin/revision protection and password cleanup. Owned fixtures removed after proof. Runner artifact/security qualification remains separate; no public push or deployment in this commit.

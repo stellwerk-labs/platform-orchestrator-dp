@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
+	batchv1 "k8s.io/api/batch/v1"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/runners/runnercommon"
@@ -41,13 +42,14 @@ func TestRemoteKubernetesRunnerQueuesCreateJob(t *testing.T) {
 	deployment := &model.DeploymentSummary{
 		OrgId: "test-org", RunnerId: "edge-1", Id: uuid.New(), Revision: 3,
 		DeploymentEnvUuid: uuid.New(), Mode: model.DeploymentModeDeploy,
+		CostPolicy: &model.DeploymentCostPolicy{Enabled: true},
 	}
 	publisher := new(recordingCommandPublisher)
 	runner := NewRemoteKubernetesRunner(
 		"runner:feat-nats", zaptest.NewLogger(t),
 		platformorchestratorcp.InternalRunner{Id: "edge-1", RunnerConfiguration: *configuration},
 		deployment, publisher, time.Hour,
-		runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
+		runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt", CostEstimation: &runnercommon.CostEstimationConfiguration{Enabled: true, APIKey: "fixture-key"}},
 	)
 
 	require.NoError(t, runner.Start(t.Context()))
@@ -61,6 +63,25 @@ func TestRemoteKubernetesRunnerQueuesCreateJob(t *testing.T) {
 	configurationJSON, err := json.Marshal(publisher.command.Configuration)
 	require.NoError(t, err)
 	assert.Contains(t, string(configurationJSON), "RUNNER_GATEWAY_URL")
+	assert.Contains(t, string(configurationJSON), "COST_ESTIMATION_ENABLED")
+	assert.Contains(t, string(configurationJSON), "INFRACOST_API_KEY")
+	recorder := new(hmessaging.RecordingPublisher)
+	transport := &NATSRemoteRunnerCommandPublisher{Publisher: recorder}
+	require.NoError(t, transport.PublishCreateJob(t.Context(), publisher.organizationID, publisher.runnerID, publisher.deploymentID, publisher.revision, publisher.expiresAt, publisher.command))
+	var envelope hmessaging.CommandEnvelope
+	require.NoError(t, json.Unmarshal(recorder.Messages()[0].Data, &envelope))
+	var command hmessaging.CreateJobCommand
+	require.NoError(t, json.Unmarshal(envelope.Payload, &command))
+	configurationJSON, err = json.Marshal(command.Configuration)
+	require.NoError(t, err)
+	var spec batchv1.JobSpec
+	require.NoError(t, json.Unmarshal(configurationJSON, &spec))
+	environment := map[string]string{}
+	for _, entry := range spec.Template.Spec.Containers[0].Env {
+		environment[entry.Name] = entry.Value
+	}
+	require.Equal(t, "true", environment[runnercommon.CostEstimationEnabledVariable])
+	require.Equal(t, "fixture-key", environment[runnercommon.InfracostAPIKeyVariable])
 	assert.NotContains(t, string(configurationJSON), "NATS_URL", "runner jobs must never receive broker credentials")
 }
 

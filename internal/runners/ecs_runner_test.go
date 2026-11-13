@@ -46,7 +46,7 @@ func Test_full_nominal(t *testing.T) {
 	})
 	r := &ecsRunnerInstance{
 		RunnerImage:          "my-image",
-		GatewayConfiguration: runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt"},
+		GatewayConfiguration: runnercommon.GatewayConfiguration{URL: "https://gateway.example.test", RunnerTokenSalt: "salt", CostEstimation: &runnercommon.CostEstimationConfiguration{Enabled: true, APIKey: "fixture-key"}},
 
 		TemporaryAuthProvider: TemporaryAuthProviderFunc(func(ctx context.Context, orgId, runnerId, region string, auth platformorchestratorcp.AwsTemporaryAuth) (*aws.AWSCredentials, error) {
 			return &aws.AWSCredentials{
@@ -66,6 +66,7 @@ func Test_full_nominal(t *testing.T) {
 			EnvId:          "my-env",
 			Mode:           model.DeploymentModeDeployPlan,
 			RunnerLogLevel: "info",
+			CostPolicy:     &model.DeploymentCostPolicy{Enabled: true},
 		},
 	}
 
@@ -99,6 +100,8 @@ func Test_full_nominal(t *testing.T) {
 						{Name: ref.Ref("ORG_ID"), Value: ref.Ref("my-org")},
 						{Name: ref.Ref("DEPLOYMENT_ID"), Value: ref.Ref("00000000-0000-0000-0000-000000000000")},
 						{Name: ref.Ref("MODE"), Value: ref.Ref("plan_only")},
+						{Name: ref.Ref("COST_ESTIMATION_ENABLED"), Value: ref.Ref("true")},
+						{Name: ref.Ref("INFRACOST_API_KEY"), Value: ref.Ref("fixture-key")},
 						{Name: ref.Ref("LOG_LEVEL"), Value: ref.Ref("info")},
 						{Name: ref.Ref("RUNNER_GATEWAY_URL"), Value: ref.Ref("https://gateway.example.test")},
 						{Name: ref.Ref("TOKEN"), Value: ref.Ref("36DE7KHt1pgv5ZOsoYocb7jVbZDTlIh5FEy3aROv3TM")},
@@ -522,4 +525,14 @@ func TestECSObservationCannotOverrideReadOnlyTransport(t *testing.T) {
 	require.Error(t, validateECSObservationEnvironment(model.DeploymentModeObservation, map[string]string{"MODE": "deploy"}, nil))
 	require.Error(t, validateECSObservationEnvironment(model.DeploymentModeObservation, nil, map[string]string{"OBSERVATION_PROTOCOL": "secret-path"}))
 	require.NoError(t, validateECSObservationEnvironment(model.DeploymentModeDeploy, map[string]string{"MODE": "deploy"}, nil))
+}
+
+func TestECSCostPolicyRejectsOnlyCostEnvironmentAndSecretCollisions(t *testing.T) {
+	dep := &model.DeploymentSummary{CostPolicy: &model.DeploymentCostPolicy{Enabled: true}}
+	require.NoError(t, validateECSCostPolicyEnvironment(dep, map[string]string{"TF_LOG": "TRACE"}, map[string]string{"CLOUD_TOKEN": "secret"}))
+	for _, key := range []string{"COST_ESTIMATION_ENABLED", "INFRACOST_API_KEY"} {
+		require.Error(t, validateECSCostPolicyEnvironment(dep, map[string]string{key: "override"}, nil))
+		require.Error(t, validateECSCostPolicyEnvironment(dep, nil, map[string]string{key: "secret"}))
+		require.NoError(t, validateECSCostPolicyEnvironment(&model.DeploymentSummary{}, map[string]string{key: "legacy"}, nil))
+	}
 }

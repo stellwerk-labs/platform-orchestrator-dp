@@ -19,7 +19,7 @@ import (
 
 const systemMaintenanceCode = "system_maintenance"
 
-const maximumSettingsBodyBytes = 1024
+const maximumSettingsBodyBytes = 32 * 1024
 
 const settingsReadPermission = "platform_settings_read"
 const settingsWritePermission = "platform_settings_write"

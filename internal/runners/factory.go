@@ -9,6 +9,7 @@ import (
 
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/costestimation"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/kubernetes"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -18,6 +19,7 @@ import (
 
 // DefaultRunnerFactory implements RunnerFactory interface
 type DefaultRunnerFactory struct {
+	database                           model.Databaser
 	awsTemporaryAuthProvider           AwsTemporaryAuthProvider
 	k8sClusterClientFactory            kubernetes.ClientFactory
 	vlt                                vault.VaultClientInterface
@@ -32,6 +34,7 @@ type DefaultRunnerFactory struct {
 
 func NewDefaultRunnerFactory(
 	logger *zap.Logger,
+	database model.Databaser,
 	awsTemporaryAuthProvider AwsTemporaryAuthProvider,
 	k8sClusterClientFactory kubernetes.ClientFactory,
 	vlt vault.VaultClientInterface,
@@ -48,6 +51,7 @@ func NewDefaultRunnerFactory(
 	}
 	return &DefaultRunnerFactory{
 		logger:                             logger,
+		database:                           database,
 		awsTemporaryAuthProvider:           awsTemporaryAuthProvider,
 		k8sClusterClientFactory:            k8sClusterClientFactory,
 		vlt:                                vlt,
@@ -66,6 +70,16 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 	runnerType, err := internalRunner.RunnerConfiguration.Discriminator()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get runner type")
+	}
+
+	if deploymentSummary.CostPolicy != nil && runnerType == string(platformorchestratorcp.RunnerTypeServerlessEcs) {
+		config, err := internalRunner.RunnerConfiguration.AsServerlessEcsRunnerConfiguration()
+		if err != nil {
+			return nil, err
+		}
+		if err := validateECSCostPolicyEnvironment(deploymentSummary, config.Job.Environment, config.Job.Secrets); err != nil {
+			return nil, err
+		}
 	}
 
 	if deploymentSummary.Mode == model.DeploymentModeObservation {
@@ -89,6 +103,10 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			}
 		}
 	}
+	publicConfig, internalConfig := f.gatewayConfiguration.public(), f.gatewayConfiguration.internal()
+	costConfiguration := f.costEstimationConfiguration(ctx, logger, deploymentSummary.CostPolicy)
+	publicConfig.CostEstimation = costConfiguration
+	internalConfig.CostEstimation = costConfiguration
 	switch runnerType {
 	case string(platformorchestratorcp.RunnerTypeKubernetesAgent):
 		return NewRemoteKubernetesRunner(
@@ -98,7 +116,7 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			deploymentSummary,
 			f.remoteRunnerCommandPublisher,
 			f.runnerCommandTTL,
-			f.gatewayConfiguration.public(),
+			publicConfig,
 		), nil
 	case string(platformorchestratorcp.RunnerTypeKubernetes), string(platformorchestratorcp.RunnerTypeKubernetesGke), string(platformorchestratorcp.RunnerTypeKubernetesEks):
 		return NewKubernetesRunner(
@@ -110,7 +128,7 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			internalRunner,
 			deploymentSummary,
 			f.kubernetesRunnerPodSchedulingDelay,
-			f.gatewayConfiguration.internal(),
+			internalConfig,
 		), nil
 	case string(platformorchestratorcp.RunnerTypeServerlessEcs):
 		return &ecsRunnerInstance{
@@ -119,11 +137,23 @@ func (f *DefaultRunnerFactory) CreateRunner(ctx context.Context, internalRunner 
 			RunnerImage:           f.runnerImage,
 			MetadataOutputKey:     f.metadataOutputKey,
 			Deployment:            deploymentSummary,
-			GatewayConfiguration:  f.gatewayConfiguration.public(),
+			GatewayConfiguration:  publicConfig,
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported runner type: %s", runnerType)
 	}
+}
+
+func (f *DefaultRunnerFactory) costEstimationConfiguration(ctx context.Context, logger *zap.Logger, policy *model.DeploymentCostPolicy) *runnercommon.CostEstimationConfiguration {
+	if policy == nil || !policy.Enabled {
+		return nil
+	}
+	key, err := costestimation.Resolve(ctx, f.database, f.vlt)
+	if err != nil {
+		logger.Warn("cost estimation skipped: credential unavailable")
+		return nil
+	}
+	return &runnercommon.CostEstimationConfiguration{Enabled: true, APIKey: key}
 }
 
 type RunnerLogsDeleter func(ctx context.Context, envUuid string) error
