@@ -2644,7 +2644,7 @@ func TestGetDeploymentLogs_private_key_not_matching(t *testing.T) {
 
 	require.NoError(t, err)
 	require.IsTypef(t, GetDeploymentLogs400JSONResponse{}, r, "%+v", r)
-	require.Contains(t, r.(GetDeploymentLogs400JSONResponse).Message, "logs can't be decrypted with the supplied key")
+	require.Equal(t, "logs cannot be decrypted with the selected identity", r.(GetDeploymentLogs400JSONResponse).Message)
 }
 
 func TestGetDeploymentLogs_valid_key(t *testing.T) {

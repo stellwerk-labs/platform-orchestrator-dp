@@ -129,3 +129,9 @@ in DP and provides a safe, nonmutating identity probe.
 - A4096bytewrite-only key needs a settings body bound above1024bytes. The shared strict decoder now bounds JSON at32KiB, covering escaped4096bytekeys while preserving strict object/field decoding.
 - Cached CNPG PostgreSQL18.1 images have no startup entrypoint. Disposable fixtures need explicit initdb/postgres, a UID26-owned tmpfs, UTF8initdb and bridge-host pg_hba authorization; bind only loopback ports.
 - Vault1.20.4cold startup under constrained emulation is slow. Use bounded health/mount HTTP probes; a transient connection refusal is fixture readiness, not an application failure.
+
+## 2026-11-13: Managed deployment logs
+
+- Existing database fixtures append keyword `search_path=...`; use a keyword PostgreSQL DSN rather than a URL DSN for these fixtures or connection initialization retries until timeout.
+- The strict API authorization middleware requires the authorization marker even for an authenticated absent-resource404. Follow existing scoped Deployment handlers for absent lookups; perform plaintext authorization before Vault/blob access and before mixed-decryption400 validation.
+- Reusing the ordinary deployment options seam covers direct requests, queue promotion, Draft selection and rollback without persisting generated recipients into queued caller intent.

@@ -242,3 +242,10 @@ workflow contracts and diff checks pass. Normal hosted checks still required.
 - Final CI-pinned golangci-lint2.11.4 full lint passed0issues. Prescribed complexity found1factory nested block; replaced it with early returns, then reran the affected2package full suites and final full lint/complexity (including all untracked Go files via explicit patch), all green. Root owns final browser and independent final review.
 
 - Final independent review passed. Actual Console/IAM/DP/CP + PostgreSQL/Vault browser integration passed key preserve/replace/remove, RBAC, strict bodies, Origin/revision protection and password cleanup. Owned fixtures removed after proof. Runner artifact/security qualification remains separate; no public push or deployment in this commit.
+
+## 2026-11-13: Managed deployment logs, local review checkpoint
+
+- Added opt-in managed log capture, per-Deployment Vault-wrapped age identity persistence, same-transaction runner recipient binding, queue/admission/idempotency flag binding and dedicated scoped plaintext authorization. Generated API server/client from the pinned Go1.26.11 tools.
+- Added `decrypt=true` with fixed409 when managed material is unavailable; preserved ciphertext and explicit-key compatibility, bounded material reads and added no-store/nosniff response headers.
+- Real local PostgreSQL/Vault and validated DP HTTP tests passed managed/manual/raw retrieval, denied reads, ambiguous inputs, missing/wrong organization, Vault connection failure, tampered recipients, response bounds, fresh queue/rollback keys, direct idempotency and legacy skip/explicit/dry-run behavior. Existing queue and migration reconciliation regressions also passed (`api`12.658s, `model`2.510s); full `make lint` reported0issues. See `DECISIONS.md` for custody/recovery and `LEARNINGS.md` for fixture/middleware details.
+- No public publication, push or cluster change. Root owns independent green/final review and private rollout; no commit was made at this checkpoint.
