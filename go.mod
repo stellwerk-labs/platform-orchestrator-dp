@@ -38,10 +38,10 @@ require (
 	github.com/stellwerk-labs/golib/hstandardoutbox v1.1.1
 	github.com/stellwerk-labs/golib/htelemetry v1.0.0
 	github.com/stellwerk-labs/golib/hvaultapi v1.0.0
-	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3 v3.3.0
-	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.2.0
+	github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3 v3.4.0
+	github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3 v3.3.0
 	github.com/stellwerk-labs/platform-orchestrator-graph v1.0.0
-	github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.3.0
+	github.com/stellwerk-labs/platform-orchestrator-iam/shared v1.4.0
 	github.com/stretchr/testify v1.12.1
 	github.com/zclconf/go-cty v1.18.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
