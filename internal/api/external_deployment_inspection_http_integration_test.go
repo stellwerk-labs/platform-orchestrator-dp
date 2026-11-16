@@ -35,6 +35,8 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 
 	const orgID, pluginID, projectID, envID = "acme", "dev.example.rollouts", "checkout", "production"
 	projectUUID, environmentUUID, moduleUUID, baseVersionUUID, versionUUID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	const emptyEnvID = "never-deployed"
+	emptyEnvironmentUUID := uuid.New()
 	baseTx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	baseDeployment, err := store.CreateDeployment(ctx, baseTx, orgID, projectID, envID, model.CreateDeploymentParams{
@@ -75,14 +77,21 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	coreServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != "/orgs/acme/projects/checkout/envs/production" {
+		id, identity := envID, environmentUUID
+		if request.URL.Path == "/orgs/acme/projects/checkout/envs/"+emptyEnvID {
+			id, identity = emptyEnvID, emptyEnvironmentUUID
+		} else if request.URL.Path != "/orgs/acme/projects/checkout/envs/production" {
+			http.NotFound(response, request)
+			return
+		}
+		if request.Method != http.MethodGet {
 			http.NotFound(response, request)
 			return
 		}
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]any{
 			"created_at": time.Now(), "updated_at": time.Now(), "display_name": "Production", "env_type_id": "production",
-			"id": envID, "project_id": projectID, "project_uuid": projectUUID, "status": "active", "uuid": environmentUUID,
+			"id": id, "project_id": projectID, "project_uuid": projectUUID, "status": "active", "uuid": identity,
 		})
 	}))
 	t.Cleanup(coreServer.Close)
@@ -98,9 +107,10 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	server.POST(ExternalDeploymentReadinessPath, adapter.HandleReadiness)
 	server.GET(ExternalDeploymentReadPath, adapter.HandleRead)
 	server.GET(ExternalDeploymentDispatchReadPath, adapter.HandleDispatchRead)
-	body, err := json.Marshal(externalDeploymentReadinessBody{Environments: []externalEnvironmentRef{{
-		ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
-	}}})
+	body, err := json.Marshal(externalDeploymentReadinessBody{Environments: []externalEnvironmentRef{
+		{ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID},
+		{ProjectID: projectID, EnvID: emptyEnvID, ProjectUUID: projectUUID, EnvironmentUUID: emptyEnvironmentUUID},
+	}})
 	require.NoError(t, err)
 	path, requestID := "/orgs/acme/plugins/dev.example.rollouts/external-deployment-readiness", "readiness-1"
 	claims := plugincontext.Claims{
@@ -126,9 +136,20 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.NotContains(t, response.Body.String(), "private-source")
 	var decoded externalDeploymentReadinessResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &decoded))
+	require.Len(t, decoded.Items, 2)
 	require.Equal(t, "ready", decoded.Items[0].State)
 	require.Equal(t, moduleUUID, *decoded.Items[0].ActiveModules[0].ModuleUUID)
 	require.Equal(t, versionUUID, *decoded.Items[0].ActiveModules[0].VersionUUID)
+	require.Equal(t, "unreconciled", decoded.Items[1].State)
+	require.Equal(t, emptyEnvironmentUUID, *decoded.Items[1].EnvironmentUUID)
+	require.Equal(t, projectUUID, decoded.Items[1].ProjectUUID)
+	require.Empty(t, decoded.Items[1].ActiveModules)
+	require.Nil(t, decoded.Items[1].LatestDeploymentID)
+	require.Nil(t, decoded.Items[1].EffectiveBaseDeploymentID)
+	unchanged, err := store.GetEnvironmentDeploymentReadiness(ctx, nil, orgID, []model.EnvironmentRef{{ProjectID: projectID, EnvID: emptyEnvID}})
+	require.NoError(t, err)
+	require.Len(t, unchanged, 1)
+	require.False(t, unchanged[0].EnvironmentUUID.IsSet())
 
 	tampered := bytes.Replace(body, []byte(envID), []byte("staging"), 1)
 	require.Equal(t, http.StatusUnauthorized, do(tampered).Code)
@@ -175,4 +196,36 @@ func TestExternalReadinessRequiresExactSignedBodyAndReturnsImmutableInventory(t 
 	require.Empty(t, dispatch.RollbackModules[0].SemanticVersion)
 	require.Equal(t, moduleUUID, *dispatch.RollbackModules[0].ModuleUUID)
 	require.Equal(t, baseVersionUUID, *dispatch.RollbackModules[0].VersionUUID)
+
+	staleTx, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = store.CreateDeployment(ctx, staleTx, orgID, projectID, emptyEnvID, model.CreateDeploymentParams{
+		CreatedBy: uuid.New(), DeploymentEnvUuid: uuid.New(), Mode: model.DeploymentModeDeploy,
+		Manifest: model.EncodedDeploymentManifest(`{"workloads":{}}`),
+		Graph:    model.EncodedDeploymentGraph(`{"nodes":{},"edges":{},"workloads":{},"shared_resources":{},"leaf_resources":{}}`),
+		Tofu:     model.RawTofu("terraform {}"), RunnerId: "runner", RunnerLogLevel: "info",
+	})
+	require.NoError(t, err)
+	require.NoError(t, staleTx.Commit())
+	for _, mismatch := range []struct {
+		name    string
+		ref     externalEnvironmentRef
+		message string
+	}{
+		{"changed Core identity", externalEnvironmentRef{ProjectID: projectID, EnvID: envID, ProjectUUID: projectUUID, EnvironmentUUID: uuid.New()}, "an authorized Environment identity is no longer current"},
+		{"history from another identity", externalEnvironmentRef{ProjectID: projectID, EnvID: emptyEnvID, ProjectUUID: projectUUID, EnvironmentUUID: emptyEnvironmentUUID}, "deployment history belongs to a different Environment identity"},
+	} {
+		t.Run(mismatch.name, func(t *testing.T) {
+			payload, err := json.Marshal(externalDeploymentReadinessBody{Environments: []externalEnvironmentRef{mismatch.ref}})
+			require.NoError(t, err)
+			mismatchClaims := claims
+			mismatchClaims.BodySHA256 = plugincontext.Digest(payload)
+			assertion, err = plugincontext.Sign(privateKey, mismatchClaims, now)
+			require.NoError(t, err)
+			response := do(payload)
+			require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), externalEnvironmentIdentityChangedCode)
+			require.Contains(t, response.Body.String(), mismatch.message)
+		})
+	}
 }

@@ -469,11 +469,12 @@ func (a *ExternalDeploymentHTTPAdapter) HandleReadiness(c echo.Context) error {
 	}
 	response := externalDeploymentReadinessResponse{Items: make([]externalEnvironmentReadiness, len(items))}
 	for index := range items {
-		if !items[index].EnvironmentUUID.IsSet() || items[index].EnvironmentUUID.Must() != body.Environments[index].EnvironmentUUID {
+		if items[index].EnvironmentUUID.IsSet() && items[index].EnvironmentUUID.Must() != body.Environments[index].EnvironmentUUID {
 			return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: "deployment history belongs to a different Environment identity"})
 		}
 		response.Items[index] = projectEnvironmentReadiness(items[index])
 		response.Items[index].ProjectUUID = body.Environments[index].ProjectUUID
+		response.Items[index].EnvironmentUUID = &body.Environments[index].EnvironmentUUID
 	}
 	return c.JSON(http.StatusOK, response)
 }
