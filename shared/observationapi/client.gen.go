@@ -69,6 +69,7 @@ func (e ObservationReceiptDisposition) Valid() bool {
 // Defines values for ObservationReceiptReason.
 const (
 	ObservationReceiptReasonAccepted            ObservationReceiptReason = "accepted"
+	ObservationReceiptReasonBaselineChanged     ObservationReceiptReason = "baseline_changed"
 	ObservationReceiptReasonBusy                ObservationReceiptReason = "busy"
 	ObservationReceiptReasonExpired             ObservationReceiptReason = "expired"
 	ObservationReceiptReasonNoBaseline          ObservationReceiptReason = "no_baseline"
@@ -81,6 +82,8 @@ const (
 func (e ObservationReceiptReason) Valid() bool {
 	switch e {
 	case ObservationReceiptReasonAccepted:
+		return true
+	case ObservationReceiptReasonBaselineChanged:
 		return true
 	case ObservationReceiptReasonBusy:
 		return true
@@ -237,6 +240,34 @@ func (e ObservationRunStatus) Valid() bool {
 	}
 }
 
+// Defines values for PipelineReferenceBuiltin.
+const (
+	Default PipelineReferenceBuiltin = "default"
+)
+
+// Valid indicates whether the value is a known member of the PipelineReferenceBuiltin enum.
+func (e PipelineReferenceBuiltin) Valid() bool {
+	switch e {
+	case Default:
+		return true
+	default:
+		return false
+	}
+}
+
+// DeploymentPipelineLifecycle defines model for DeploymentPipelineLifecycle.
+type DeploymentPipelineLifecycle struct {
+	AttentionReason       *string             `json:"attention_reason,omitempty"`
+	Digest                string              `json:"digest"`
+	InfrastructureApplied bool                `json:"infrastructure_applied"`
+	Phase                 string              `json:"phase"`
+	PipelineId            *openapi_types.UUID `json:"pipeline_id,omitempty"`
+	PlanSubject           *string             `json:"plan_subject,omitempty"`
+	Reference             PipelineReference   `json:"reference"`
+	Version               int                 `json:"version"`
+	VersionId             *openapi_types.UUID `json:"version_id,omitempty"`
+}
+
 // ObservationCapabilities defines model for ObservationCapabilities.
 type ObservationCapabilities struct {
 	Protocols []string `json:"protocols"`
@@ -271,10 +302,13 @@ type ObservationReceiptReason string
 
 // ObservationRedeployReceipt defines model for ObservationRedeployReceipt.
 type ObservationRedeployReceipt struct {
-	BaselineId   openapi_types.UUID               `json:"baseline_id"`
-	DeploymentId openapi_types.UUID               `json:"deployment_id"`
-	RequestId    openapi_types.UUID               `json:"request_id"`
-	Status       ObservationRedeployReceiptStatus `json:"status"`
+	AdmissionClosed              *bool                            `json:"admission_closed,omitempty"`
+	BaselineId                   openapi_types.UUID               `json:"baseline_id"`
+	DeploymentId                 openapi_types.UUID               `json:"deployment_id"`
+	Pipeline                     *DeploymentPipelineLifecycle     `json:"pipeline,omitempty"`
+	RequestId                    openapi_types.UUID               `json:"request_id"`
+	ResultingBaselineFingerprint *string                          `json:"resulting_baseline_fingerprint,omitempty"`
+	Status                       ObservationRedeployReceiptStatus `json:"status"`
 }
 
 // ObservationRedeployReceiptStatus defines model for ObservationRedeployReceipt.Status.
@@ -286,6 +320,7 @@ type ObservationRedeployRequest struct {
 	BaselineId          openapi_types.UUID `json:"baseline_id"`
 	EnvId               string             `json:"env_id"`
 	EnvironmentUuid     openapi_types.UUID `json:"environment_uuid"`
+	Pipeline            *PipelineReference `json:"pipeline,omitempty"`
 	ProjectId           string             `json:"project_id"`
 	ProjectUuid         openapi_types.UUID `json:"project_uuid"`
 	RequestId           openapi_types.UUID `json:"request_id"`
@@ -309,15 +344,17 @@ type ObservationRedeployResolveRequest struct {
 
 // ObservationRequest defines model for ObservationRequest.
 type ObservationRequest struct {
-	AdmissionDeadline time.Time          `json:"admission_deadline"`
-	EnvId             string             `json:"env_id"`
-	EnvironmentUuid   openapi_types.UUID `json:"environment_uuid"`
-	GrantId           openapi_types.UUID `json:"grant_id"`
-	GrantRevision     int64              `json:"grant_revision"`
-	Occurrence        time.Time          `json:"occurrence"`
-	ProjectId         string             `json:"project_id"`
-	ProjectUuid       openapi_types.UUID `json:"project_uuid"`
-	RequestId         openapi_types.UUID `json:"request_id"`
+	AdmissionDeadline           time.Time           `json:"admission_deadline"`
+	EnvId                       string              `json:"env_id"`
+	EnvironmentUuid             openapi_types.UUID  `json:"environment_uuid"`
+	ExpectedBaselineFingerprint *string             `json:"expected_baseline_fingerprint,omitempty"`
+	ExpectedBaselineId          *openapi_types.UUID `json:"expected_baseline_id,omitempty"`
+	GrantId                     openapi_types.UUID  `json:"grant_id"`
+	GrantRevision               int64               `json:"grant_revision"`
+	Occurrence                  time.Time           `json:"occurrence"`
+	ProjectId                   string              `json:"project_id"`
+	ProjectUuid                 openapi_types.UUID  `json:"project_uuid"`
+	RequestId                   openapi_types.UUID  `json:"request_id"`
 }
 
 // ObservationResolution Receipt is present exactly when disposition is accepted, and then identifies actual admitted work.
@@ -360,6 +397,16 @@ type ObservationRun struct {
 
 // ObservationRunStatus defines model for ObservationRun.Status.
 type ObservationRunStatus string
+
+// PipelineReference defines model for PipelineReference.
+type PipelineReference struct {
+	Builtin   *PipelineReferenceBuiltin `json:"builtin,omitempty"`
+	Digest    string                    `json:"digest"`
+	VersionId *openapi_types.UUID       `json:"version_id,omitempty"`
+}
+
+// PipelineReferenceBuiltin defines model for PipelineReference.Builtin.
+type PipelineReferenceBuiltin string
 
 // OrgID defines model for OrgID.
 type OrgID = string

@@ -164,6 +164,28 @@ components:
       required: true
       schema: {type: string}
   schemas:
+    PipelineReference:
+      type: object
+      additionalProperties: false
+      required: [digest]
+      properties:
+        version_id: {type: string, format: uuid}
+        builtin: {type: string, enum: [default]}
+        digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+    DeploymentPipelineLifecycle:
+      type: object
+      additionalProperties: false
+      required: [reference, version, digest, phase, infrastructure_applied]
+      properties:
+        reference: {$ref: '#/components/schemas/PipelineReference'}
+        pipeline_id: {type: string, format: uuid}
+        version_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        phase: {type: string}
+        infrastructure_applied: {type: boolean}
+        attention_reason: {type: string}
+        plan_subject: {type: string}
     ObservationChange:
       type: object
       additionalProperties: false
@@ -224,6 +246,8 @@ components:
       additionalProperties: false
       required: [grant_id, grant_revision, project_id, env_id, project_uuid, environment_uuid, request_id, occurrence, admission_deadline]
       properties:
+        expected_baseline_id: {type: string, format: uuid}
+        expected_baseline_fingerprint: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
         grant_id: {type: string, format: uuid}
         grant_revision: {type: integer, format: int64, minimum: 1}
         project_id: {type: string, minLength: 1, maxLength: 63}
@@ -240,7 +264,7 @@ components:
       properties:
         request_id: {type: string, format: uuid}
         disposition: {type: string, enum: [accepted, skipped]}
-        reason: {type: string, enum: [accepted, busy, runner_full, unsupported, no_baseline, outcome_unreconciled, expired]}
+        reason: {type: string, enum: [accepted, busy, runner_full, unsupported, no_baseline, outcome_unreconciled, expired, baseline_changed]}
         recorded_at: {type: string, format: date-time}
         run_id: {type: string, format: uuid}
         baseline_id: {type: string, format: uuid}
@@ -261,6 +285,7 @@ components:
       additionalProperties: false
       required: [request_id, project_id, env_id, project_uuid, environment_uuid, baseline_id, baseline_fingerprint]
       properties:
+        pipeline: {$ref: '#/components/schemas/PipelineReference'}
         request_id: {type: string, format: uuid}
         project_id: {type: string, minLength: 1, maxLength: 63}
         env_id: {type: string, minLength: 1, maxLength: 63}
@@ -273,6 +298,9 @@ components:
       additionalProperties: false
       required: [request_id, deployment_id, baseline_id, status]
       properties:
+        resulting_baseline_fingerprint: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+        pipeline: {$ref: '#/components/schemas/DeploymentPipelineLifecycle'}
+        admission_closed: {type: boolean}
         request_id: {type: string, format: uuid}
         deployment_id: {type: string, format: uuid}
         baseline_id: {type: string, format: uuid}
