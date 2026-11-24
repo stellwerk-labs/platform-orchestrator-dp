@@ -132,3 +132,90 @@ func TestApplicationErrorRetriesOnlyRecoverableResults(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeFramingRequiresScopedDeliveryAndRejectsLegacyReservedIDs(t *testing.T) {
+	token, err := hmessaging.NativeRunnerToken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	require.NoError(t, err)
+	for _, test := range []struct {
+		name, runner, inner, outer, kind string
+		accepted                         bool
+	}{
+		{"native scoped", token, "inner", "scoped", EventTypeDeploymentResult, true},
+		{"native raw", token, "inner", "inner", EventTypeDeploymentResult, false},
+		{"native foreign scoped", token, "inner", "foreign", EventTypeDeploymentResult, false},
+		{"native error", token, "inner", "scoped", EventTypeRunnerError, false},
+		{"legacy reserved inner", "runner-1", hmessaging.NativeMessageIDPrefix + "x", "inner", EventTypeDeploymentResult, false},
+		{"legacy reserved outer", "runner-1", "inner", hmessaging.NativeMessageIDPrefix + "x", EventTypeDeploymentResult, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			applier := new(recordingApplier)
+			handler := &Handler{Applier: applier}
+			delivery := runnerEventDelivery(t, test.kind, map[string]any{"status": "success", "code": "failed", "message": "failed"})
+			var envelope hmessaging.EventEnvelope
+			require.NoError(t, json.Unmarshal(delivery.Data, &envelope))
+			envelope.RunnerID, envelope.EventID = test.runner, test.inner
+			delivery.ID = test.outer
+			if test.outer == "scoped" || test.outer == "foreign" {
+				scope := token
+				if test.outer == "foreign" {
+					scope, err = hmessaging.NativeRunnerToken("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+					require.NoError(t, err)
+				}
+				delivery.ID, err = hmessaging.NativeMessageID(envelope.OrganizationID, scope, "events", envelope.Type, envelope.EventID)
+				require.NoError(t, err)
+			}
+			delivery.Subject, err = hmessaging.RunnerEventSubject(envelope.OrganizationID, envelope.RunnerID, envelope.Type)
+			require.NoError(t, err)
+			delivery.Data, err = json.Marshal(envelope)
+			require.NoError(t, err)
+			err = handler.Handle(t.Context(), zaptest.NewLogger(t), delivery)
+			if test.accepted {
+				require.NoError(t, err)
+				require.Equal(t, 1, applier.resultCalls)
+			} else {
+				require.Error(t, err)
+				require.True(t, hmessaging.IsTerminalError(err))
+				require.Zero(t, applier.resultCalls)
+				require.Zero(t, applier.errorCalls)
+			}
+		})
+	}
+}
+
+// This callback checks transport routing only. Retained receipt authority is
+// exercised by the real PostgreSQL API tests, not supplied by this fixture.
+func TestHandleNativeControlResultRequiresCapturedTransportIdentity(t *testing.T) {
+	route, err := hmessaging.NativeRunnerToken(uuid.NewString())
+	require.NoError(t, err)
+	id := uuid.NewString()
+	event := hmessaging.EventEnvelope{
+		ProtocolVersion: hmessaging.ProtocolVersionV1,
+		EventID:         "pipeline-control:" + id + ":result",
+		CommandID:       "pipeline-control:" + id,
+		OrganizationID:  "org",
+		RunnerID:        route,
+		DeploymentID:    uuid.NewString(),
+		Type:            EventTypeControlResult,
+		CreatedAt:       time.Now().UTC(),
+		Payload:         json.RawMessage(`{}`),
+	}
+	raw, err := json.Marshal(event)
+	require.NoError(t, err)
+	subject, err := hmessaging.RunnerEventSubject(event.OrganizationID, route, event.Type)
+	require.NoError(t, err)
+	messageID, err := hmessaging.NativeMessageID(event.OrganizationID, route, "events", event.Type, event.EventID)
+	require.NoError(t, err)
+	delivery := hmessaging.Delivery{Message: hmessaging.Message{ID: messageID, Subject: subject, Data: raw}}
+	called := 0
+	handler := Handler{ControlResult: func(_ context.Context, data []byte) error { called++; require.Equal(t, raw, data); return nil }}
+	invalid := delivery
+	invalid.ID = event.EventID
+	require.Error(t, handler.Handle(t.Context(), zaptest.NewLogger(t), invalid))
+	require.Zero(t, called)
+	invalid = delivery
+	invalid.Subject += ".foreign"
+	require.Error(t, handler.Handle(t.Context(), zaptest.NewLogger(t), invalid))
+	require.Zero(t, called)
+	require.NoError(t, handler.Handle(t.Context(), zaptest.NewLogger(t), delivery))
+	require.Equal(t, 1, called)
+}

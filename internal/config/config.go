@@ -7,6 +7,9 @@ import (
 
 // Configuration ...
 type Configuration struct {
+	// Restored history must be reconciled before any application worker starts.
+	RestoreQuarantine bool `env:"RESTORE_QUARANTINE, default=false"`
+
 	UiHostUrl string `env:"UI_HOST_URL"        validate:"omitempty,url"`
 	Port      int    `env:"PORT, default=8080" validate:"required"`
 
@@ -35,8 +38,14 @@ type Configuration struct {
 	RunnerGatewayInternalURL string `env:"RUNNER_GATEWAY_INTERNAL_URL" validate:"omitempty,url"`
 
 	// ControlPlaneUrl is the api url for the control plane port 8080
-	ControlPlaneUrl string `env:"CONTROL_PLANE_URL" validate:"required,url"`
-	RunnerTokenSalt string `env:"RUNNER_TOKEN_SALT" validate:"required"`
+	ControlPlaneUrl         string `env:"CONTROL_PLANE_URL"          validate:"required,url"`
+	RunnerTokenSalt         string `env:"RUNNER_TOKEN_SALT"          validate:"required"`
+	PipelineSigningKeyFile  string `env:"PIPELINE_SIGNING_KEY_FILE"`
+	PipelineToolsDigest     string `env:"PIPELINE_TOOLS_DIGEST"`
+	RunnerRolloutsURL       string `env:"RUNNER_ROLLOUTS_URL"`
+	RunnerRolloutsTokenFile string `env:"RUNNER_ROLLOUTS_TOKEN_FILE"`
+	RunnerRolloutsOrgID     string `env:"RUNNER_ROLLOUTS_ORG_ID"`
+	RunnerRolloutsRunnerID  string `env:"RUNNER_ROLLOUTS_RUNNER_ID"`
 
 	PluginDeployEnabled bool   `env:"EXTERNAL_DEPLOYMENT_ENABLED, default=false"`
 	PluginIssuer        string `env:"EXTERNAL_DEPLOYMENT_ISSUER"`

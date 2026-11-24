@@ -45,7 +45,7 @@ func TestObservationAdmissionReplayAndExactBaseline(t *testing.T) {
 	f, base := observationBaselineFixture(t)
 	request := observationRequest(f)
 	actor := uuid.New()
-	receipt, messages, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	receipt, messages, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	require.Equal(t, base.Id, *receipt.BaselineId)
@@ -61,13 +61,13 @@ func TestObservationAdmissionReplayAndExactBaseline(t *testing.T) {
 	require.Equal(t, EncodedDeploymentManifest(`{"workloads":{}}`), manifest)
 	require.Equal(t, RawTofu("terraform {}"), tofu)
 	require.JSONEq(t, `{"nodes":{},"edges":{}}`, string(graph))
-	again, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 0, false)
+	again, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 0, false, testNativeTarget())
 	require.NoError(t, err)
 	require.Equal(t, receipt, again)
 	require.Empty(t, pending)
 	changed := request
 	changed.GrantRevision++
-	_, _, err = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, changed, "runner", 2, true)
+	_, _, err = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, changed, "runner", 2, true, nil)
 	require.Error(t, err)
 	require.Equal(t, 1, readObservationCount(t, f, `SELECT count(*) FROM runner_job_reservations WHERE released_at IS NULL`))
 	// Every ordinary mode shares the observation exclusion, even public plan-only.
@@ -108,13 +108,13 @@ func TestObservationBusyExpiredAndCapacitySkipsAreSealed(t *testing.T) {
 				require.NoError(t, ReserveRunnerJob(f.ctx, tx, other, 1))
 				require.NoError(t, tx.Commit())
 			}
-			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", limit, supported)
+			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", limit, supported, nil)
 			require.NoError(t, err)
 			require.Equal(t, reason, receipt.Reason)
 			require.Nil(t, receipt.RunId)
 			require.Empty(t, pending)
 			require.Equal(t, 0, readObservationCount(t, f, `SELECT count(*) FROM deployments WHERE mode='observation'`))
-			again, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 100, true)
+			again, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 100, true, nil)
 			require.NoError(t, err)
 			require.Equal(t, receipt, again)
 		})
@@ -133,7 +133,7 @@ func TestObservationConcurrentAdmissionAndEnqueue(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, observationRequest(f), "runner", 2, true)
+			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, observationRequest(f), "runner", 2, true, nil)
 			if err != nil {
 				errs <- err
 			} else {
@@ -225,7 +225,7 @@ func TestRunnerCapacityConcurrentReservationsAndUnknownOutcome(t *testing.T) {
 func TestObservationUnknownCompletionFencesAndLateReceiptReleases(t *testing.T) {
 	f, _ := observationBaselineFixture(t)
 	request := observationRequest(f)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	dep, _, _, _, err := f.store.GetDeployment(f.ctx, nil, "queue-org", *receipt.RunId, GetModeDefault)
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestObservationUnknownCompletionFencesAndLateReceiptReleases(t *testing.T) 
 
 func TestObservationSafeResultRetention(t *testing.T) {
 	f, _ := observationBaselineFixture(t)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 	require.NoError(t, err)
 	result := observation.ObservationResult{
 		SchemaVersion:   "1",
@@ -316,7 +316,7 @@ func TestObservationCannotOvertakeUncommittedEnqueue(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+		receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 		done <- result{receipt, err}
 	}()
 	select {
@@ -347,7 +347,7 @@ func TestObservationConcurrentIdenticalRequestHasOneEffect(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 			done <- result{receipt, len(pending), err}
 		}()
 	}
@@ -385,7 +385,7 @@ func TestObservationRequiresCurrentSuccessfulMutationSnapshot(t *testing.T) {
 			}
 			_, err = f.store.UpdateDeploymentStatusAndOutputs(f.ctx, nil, next.Id, UpdateDeploymentStatusAndOutputsParams{Status: status, RunnerCompletionProven: true})
 			require.NoError(t, err)
-			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 			require.NoError(t, err)
 			if mode == DeploymentModeRollback {
 				require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
@@ -488,7 +488,7 @@ func TestObservationCapturesModuleArtifactsAndRejectsMissingIdentity(t *testing.
 	require.NoError(t, err)
 	_, err = f.store.UpdateDeploymentStatusAndOutputs(f.ctx, nil, base.Id, UpdateDeploymentStatusAndOutputsParams{Status: DeploymentStatusSucceeded, RunnerCompletionProven: true})
 	require.NoError(t, err)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	dep, _, _, capturedGraph, err := f.store.GetDeployment(f.ctx, nil, "queue-org", *receipt.RunId, GetModeDefault)
@@ -503,14 +503,14 @@ func TestObservationCapturesModuleArtifactsAndRejectsMissingIdentity(t *testing.
 	_, err = tx.ExecContext(f.ctx, `UPDATE deployments SET module_artifacts='[]'::jsonb WHERE id=$1`, base.Id)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	unavailable, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+	unavailable, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptReasonNoBaseline, unavailable.Reason)
 }
 
 func TestObservationDeletionCannotEraseLiveRunnerOwnership(t *testing.T) {
 	f, _ := observationBaselineFixture(t)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 	require.NoError(t, err)
 	tx, err := f.store.BeginTx(f.ctx, nil)
 	require.NoError(t, err)
@@ -539,7 +539,7 @@ func TestObservationReadProjectsStaleAndUntrustworthyCurrentBaselines(t *testing
 	for _, nextStatus := range []DeploymentStatus{DeploymentStatusSucceeded, DeploymentStatusFailed} {
 		t.Run(string(nextStatus), func(t *testing.T) {
 			f, _ := observationBaselineFixture(t)
-			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+			receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 			require.NoError(t, err)
 			result := observation.ObservationResult{SchemaVersion: "1", Complete: true, Tool: "terraform", ToolVersion: "1.9.0", ObservedChanges: []observation.ObservationChange{}, ProposedChanges: []observation.ObservationChange{}}
 			tx, err := f.store.BeginTx(f.ctx, nil)
@@ -625,7 +625,7 @@ func TestObservationDeadlineCannotExpireWhileWaitingForRunnerReservation(t *test
 	}
 	done := make(chan result, 1)
 	go func() {
-		receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true)
+		receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true, nil)
 		done <- result{receipt, err}
 	}()
 	select {
@@ -645,7 +645,7 @@ func TestObservationDeadlineCannotExpireWhileWaitingForRunnerReservation(t *test
 func TestObservationReadinessFencesUnknownOwnershipUntilAuditedStop(t *testing.T) {
 	f, base := observationBaselineFixture(t)
 	request := observationRequest(f)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	refs := []EnvironmentRef{{ProjectID: "p", EnvID: "e"}}
 	lookup := func() ([]EnvironmentDeploymentReadiness, error) {
@@ -703,7 +703,7 @@ func TestObservationRejectsOlderUnknownOrdinaryOwnerBehindNewerSuccess(t *testin
 	require.NoError(t, err)
 	actor := uuid.New()
 	request := observationRequest(f)
-	skipped, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	skipped, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptReasonOutcomeUnreconciled, skipped.Reason)
 	require.Nil(t, skipped.RunId)
@@ -715,11 +715,11 @@ func TestObservationRejectsOlderUnknownOrdinaryOwnerBehindNewerSuccess(t *testin
 	_, _, err = AcknowledgeDeploymentOutcome(f.ctx, tx, "queue-org", older.Id, uuid.New(), "authoritatively deleted older ordinary Job", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	replayed, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	replayed, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, skipped, replayed, "sealed skip is never resurrected")
 	request.RequestId = uuid.New()
-	accepted, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	accepted, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, accepted.Disposition)
 	require.Equal(t, newer.Id, *accepted.BaselineId)
@@ -766,7 +766,7 @@ func TestObservationInlineNoDigestDoesNotRelaxExternalOrDraftProvenance(t *testi
 			require.NoError(t, err)
 			_, err = f.store.UpdateDeploymentStatusAndOutputs(f.ctx, nil, base.Id, UpdateDeploymentStatusAndOutputsParams{Status: DeploymentStatusSucceeded, RunnerCompletionProven: true})
 			require.NoError(t, err)
-			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+			receipt, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 			require.NoError(t, err)
 			require.Equal(t, observation.ObservationReceiptReasonNoBaseline, receipt.Reason)
 			require.Nil(t, receipt.RunId)
@@ -795,7 +795,7 @@ func TestObservationPinnedGitNoDigestAdmitsExactRetainedSelector(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.store.UpdateDeploymentStatusAndOutputs(f.ctx, nil, base.Id, UpdateDeploymentStatusAndOutputsParams{Status: DeploymentStatusSucceeded, RunnerCompletionProven: true})
 	require.NoError(t, err)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", uuid.New(), observationRequest(f), "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	actual, _, tofu, _, err := f.store.GetDeployment(f.ctx, nil, "queue-org", *receipt.RunId, GetModeDefault)

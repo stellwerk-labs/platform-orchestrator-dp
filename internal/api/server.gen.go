@@ -118,6 +118,180 @@ func (e DeploymentDiffChangeType) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentPipelineCatalogueDefaultSource.
+const (
+	Environment DeploymentPipelineCatalogueDefaultSource = "environment"
+	None        DeploymentPipelineCatalogueDefaultSource = "none"
+	Project     DeploymentPipelineCatalogueDefaultSource = "project"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineCatalogueDefaultSource enum.
+func (e DeploymentPipelineCatalogueDefaultSource) Valid() bool {
+	switch e {
+	case Environment:
+		return true
+	case None:
+		return true
+	case Project:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineControlIntentAction.
+const (
+	DeploymentPipelineControlIntentActionApprove DeploymentPipelineControlIntentAction = "approve"
+	DeploymentPipelineControlIntentActionCancel  DeploymentPipelineControlIntentAction = "cancel"
+	DeploymentPipelineControlIntentActionDeny    DeploymentPipelineControlIntentAction = "deny"
+	DeploymentPipelineControlIntentActionRepair  DeploymentPipelineControlIntentAction = "repair"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineControlIntentAction enum.
+func (e DeploymentPipelineControlIntentAction) Valid() bool {
+	switch e {
+	case DeploymentPipelineControlIntentActionApprove:
+		return true
+	case DeploymentPipelineControlIntentActionCancel:
+		return true
+	case DeploymentPipelineControlIntentActionDeny:
+		return true
+	case DeploymentPipelineControlIntentActionRepair:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineControlReceiptAction.
+const (
+	DeploymentPipelineControlReceiptActionApprove DeploymentPipelineControlReceiptAction = "approve"
+	DeploymentPipelineControlReceiptActionCancel  DeploymentPipelineControlReceiptAction = "cancel"
+	DeploymentPipelineControlReceiptActionDeny    DeploymentPipelineControlReceiptAction = "deny"
+	DeploymentPipelineControlReceiptActionRepair  DeploymentPipelineControlReceiptAction = "repair"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineControlReceiptAction enum.
+func (e DeploymentPipelineControlReceiptAction) Valid() bool {
+	switch e {
+	case DeploymentPipelineControlReceiptActionApprove:
+		return true
+	case DeploymentPipelineControlReceiptActionCancel:
+		return true
+	case DeploymentPipelineControlReceiptActionDeny:
+		return true
+	case DeploymentPipelineControlReceiptActionRepair:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineControlReceiptStatus.
+const (
+	DeploymentPipelineControlReceiptStatusPending  DeploymentPipelineControlReceiptStatus = "pending"
+	DeploymentPipelineControlReceiptStatusResolved DeploymentPipelineControlReceiptStatus = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineControlReceiptStatus enum.
+func (e DeploymentPipelineControlReceiptStatus) Valid() bool {
+	switch e {
+	case DeploymentPipelineControlReceiptStatusPending:
+		return true
+	case DeploymentPipelineControlReceiptStatusResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineControlResultOutcome.
+const (
+	Applied DeploymentPipelineControlResultOutcome = "applied"
+	Refused DeploymentPipelineControlResultOutcome = "refused"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineControlResultOutcome enum.
+func (e DeploymentPipelineControlResultOutcome) Valid() bool {
+	switch e {
+	case Applied:
+		return true
+	case Refused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineControlResultVersion.
+const (
+	StellwerkPipelineControlResultv1 DeploymentPipelineControlResultVersion = "stellwerk.pipeline.control-result/v1"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineControlResultVersion enum.
+func (e DeploymentPipelineControlResultVersion) Valid() bool {
+	switch e {
+	case StellwerkPipelineControlResultv1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelineExecutionAvailableControls.
+const (
+	DeploymentPipelineExecutionAvailableControlsApprove DeploymentPipelineExecutionAvailableControls = "approve"
+	DeploymentPipelineExecutionAvailableControlsCancel  DeploymentPipelineExecutionAvailableControls = "cancel"
+	DeploymentPipelineExecutionAvailableControlsDeny    DeploymentPipelineExecutionAvailableControls = "deny"
+	DeploymentPipelineExecutionAvailableControlsRepair  DeploymentPipelineExecutionAvailableControls = "repair"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelineExecutionAvailableControls enum.
+func (e DeploymentPipelineExecutionAvailableControls) Valid() bool {
+	switch e {
+	case DeploymentPipelineExecutionAvailableControlsApprove:
+		return true
+	case DeploymentPipelineExecutionAvailableControlsCancel:
+		return true
+	case DeploymentPipelineExecutionAvailableControlsDeny:
+		return true
+	case DeploymentPipelineExecutionAvailableControlsRepair:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeploymentPipelinePlanStatusState.
+const (
+	DeploymentPipelinePlanStatusStateBusy        DeploymentPipelinePlanStatusState = "busy"
+	DeploymentPipelinePlanStatusStatePending     DeploymentPipelinePlanStatusState = "pending"
+	DeploymentPipelinePlanStatusStateReady       DeploymentPipelinePlanStatusState = "ready"
+	DeploymentPipelinePlanStatusStateSuperseded  DeploymentPipelinePlanStatusState = "superseded"
+	DeploymentPipelinePlanStatusStateUnavailable DeploymentPipelinePlanStatusState = "unavailable"
+	DeploymentPipelinePlanStatusStateUsed        DeploymentPipelinePlanStatusState = "used"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentPipelinePlanStatusState enum.
+func (e DeploymentPipelinePlanStatusState) Valid() bool {
+	switch e {
+	case DeploymentPipelinePlanStatusStateBusy:
+		return true
+	case DeploymentPipelinePlanStatusStatePending:
+		return true
+	case DeploymentPipelinePlanStatusStateReady:
+		return true
+	case DeploymentPipelinePlanStatusStateSuperseded:
+		return true
+	case DeploymentPipelinePlanStatusStateUnavailable:
+		return true
+	case DeploymentPipelinePlanStatusStateUsed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeploymentQueueItemMode.
 const (
 	DeploymentQueueItemModeDeploy   DeploymentQueueItemMode = "deploy"
@@ -388,6 +562,63 @@ func (e MetadataKeySchemaType) Valid() bool {
 	}
 }
 
+// Defines values for NativePhaseLogAuthorityPhase.
+const (
+	NativePhaseLogAuthorityPhaseApply NativePhaseLogAuthorityPhase = "apply"
+	NativePhaseLogAuthorityPhasePlan  NativePhaseLogAuthorityPhase = "plan"
+)
+
+// Valid indicates whether the value is a known member of the NativePhaseLogAuthorityPhase enum.
+func (e NativePhaseLogAuthorityPhase) Valid() bool {
+	switch e {
+	case NativePhaseLogAuthorityPhaseApply:
+		return true
+	case NativePhaseLogAuthorityPhasePlan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NativePhaseLogDescriptorStatus.
+const (
+	LogExportNotManaged  NativePhaseLogDescriptorStatus = "log_export_not_managed"
+	LogExportTooLarge    NativePhaseLogDescriptorStatus = "log_export_too_large"
+	LogExportUnavailable NativePhaseLogDescriptorStatus = "log_export_unavailable"
+	PendingTransfer      NativePhaseLogDescriptorStatus = "pending_transfer"
+)
+
+// Valid indicates whether the value is a known member of the NativePhaseLogDescriptorStatus enum.
+func (e NativePhaseLogDescriptorStatus) Valid() bool {
+	switch e {
+	case LogExportNotManaged:
+		return true
+	case LogExportTooLarge:
+		return true
+	case LogExportUnavailable:
+		return true
+	case PendingTransfer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NativePhaseLogDescriptorVersion.
+const (
+	NativePhaseLogDescriptorVersionN1 NativePhaseLogDescriptorVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the NativePhaseLogDescriptorVersion enum.
+func (e NativePhaseLogDescriptorVersion) Valid() bool {
+	switch e {
+	case NativePhaseLogDescriptorVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ObservationChangeActions.
 const (
 	Create ObservationChangeActions = "create"
@@ -481,6 +712,51 @@ func (e PendingEnvironmentChangesCode) Valid() bool {
 	}
 }
 
+// Defines values for PipelineNoEffectReceiptEffect.
+const (
+	NotStarted PipelineNoEffectReceiptEffect = "not_started"
+)
+
+// Valid indicates whether the value is a known member of the PipelineNoEffectReceiptEffect enum.
+func (e PipelineNoEffectReceiptEffect) Valid() bool {
+	switch e {
+	case NotStarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PipelineNoEffectReceiptVersion.
+const (
+	StellwerkNoEffectv1 PipelineNoEffectReceiptVersion = "stellwerk.no-effect/v1"
+)
+
+// Valid indicates whether the value is a known member of the PipelineNoEffectReceiptVersion enum.
+func (e PipelineNoEffectReceiptVersion) Valid() bool {
+	switch e {
+	case StellwerkNoEffectv1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PipelineReferenceBuiltin.
+const (
+	Default PipelineReferenceBuiltin = "default"
+)
+
+// Valid indicates whether the value is a known member of the PipelineReferenceBuiltin enum.
+func (e PipelineReferenceBuiltin) Valid() bool {
+	switch e {
+	case Default:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateMetadataKeySchemaType.
 const (
 	UpdateMetadataKeySchemaTypeString UpdateMetadataKeySchemaType = "string"
@@ -538,6 +814,54 @@ func (e ListDeploymentsParamsByStatus) Valid() bool {
 	case Failed:
 		return true
 	case Succeeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDeploymentsParamsQuickFilter.
+const (
+	All            ListDeploymentsParamsQuickFilter = "all"
+	Deployments    ListDeploymentsParamsQuickFilter = "deployments"
+	NeedsApproval  ListDeploymentsParamsQuickFilter = "needs_approval"
+	NeedsAttention ListDeploymentsParamsQuickFilter = "needs_attention"
+	Plans          ListDeploymentsParamsQuickFilter = "plans"
+	UnusedPlans    ListDeploymentsParamsQuickFilter = "unused_plans"
+)
+
+// Valid indicates whether the value is a known member of the ListDeploymentsParamsQuickFilter enum.
+func (e ListDeploymentsParamsQuickFilter) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Deployments:
+		return true
+	case NeedsApproval:
+		return true
+	case NeedsAttention:
+		return true
+	case Plans:
+		return true
+	case UnusedPlans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetDeploymentLogsParamsPhase.
+const (
+	GetDeploymentLogsParamsPhaseApply GetDeploymentLogsParamsPhase = "apply"
+	GetDeploymentLogsParamsPhasePlan  GetDeploymentLogsParamsPhase = "plan"
+)
+
+// Valid indicates whether the value is a known member of the GetDeploymentLogsParamsPhase enum.
+func (e GetDeploymentLogsParamsPhase) Valid() bool {
+	switch e {
+	case GetDeploymentLogsParamsPhaseApply:
+		return true
+	case GetDeploymentLogsParamsPhasePlan:
 		return true
 	default:
 		return false
@@ -640,6 +964,7 @@ type Deployment struct {
 	// is now; those Deployments change it first, so the result may still change. Plan-only requests and dry runs are
 	// never queued.
 	PendingChanges *PendingEnvironmentChanges `json:"pending_changes,omitempty"`
+	Pipeline       *DeploymentPipelineSummary `json:"pipeline,omitempty"`
 
 	// PlanOnly Whether the deployment is executed in plan mode.
 	//
@@ -728,7 +1053,8 @@ type DeploymentCreateBody struct {
 	Mode DeploymentCreateBodyMode `json:"mode"`
 
 	// ModuleVersions Exact canonical SemVer selections by Module slug. Proposed versions require the scoped module.version.use-proposed capability.
-	ModuleVersions map[string]string `json:"module_versions,omitempty"`
+	ModuleVersions map[string]string            `json:"module_versions,omitempty"`
+	Pipeline       *DeploymentPipelineSelection `json:"pipeline,omitempty"`
 
 	// PlanOnly Whether the deployment should be planned only and not executed. This defaults to 'false' unless the mode is
 	// set to 'plan_only'.
@@ -945,6 +1271,313 @@ type DeploymentPage struct {
 	NextPageToken *string `json:"next_page_token,omitempty"`
 }
 
+// DeploymentPipelineActionResponse defines model for DeploymentPipelineActionResponse.
+type DeploymentPipelineActionResponse struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+// DeploymentPipelineApproval defines model for DeploymentPipelineApproval.
+type DeploymentPipelineApproval struct {
+	Mode          string  `json:"mode"`
+	PolicyId      *string `json:"policy_id,omitempty"`
+	PolicyVersion *string `json:"policy_version,omitempty"`
+}
+
+// DeploymentPipelineApprovalDecision defines model for DeploymentPipelineApprovalDecision.
+type DeploymentPipelineApprovalDecision struct {
+	ActorId        *string   `json:"actor_id,omitempty"`
+	DecidedAt      time.Time `json:"decided_at"`
+	Decision       string    `json:"decision"`
+	EvidenceDigest *string   `json:"evidence_digest,omitempty"`
+	PolicyId       *string   `json:"policy_id,omitempty"`
+	PolicyVersion  *string   `json:"policy_version,omitempty"`
+	Reason         *string   `json:"reason,omitempty"`
+	Source         string    `json:"source"`
+	Subject        string    `json:"subject"`
+}
+
+// DeploymentPipelineBindings defines model for DeploymentPipelineBindings.
+type DeploymentPipelineBindings struct {
+	Forward     PipelineReference  `json:"forward"`
+	ForwardOnly bool               `json:"forward_only"`
+	Rollback    *PipelineReference `json:"rollback,omitempty"`
+}
+
+// DeploymentPipelineCatalogue defines model for DeploymentPipelineCatalogue.
+type DeploymentPipelineCatalogue struct {
+	DefaultPipelineId string                                    `json:"default_pipeline_id"`
+	DefaultSource     *DeploymentPipelineCatalogueDefaultSource `json:"default_source,omitempty"`
+	Items             []DeploymentPipelineCatalogueItem         `json:"items"`
+	Policy            *DeploymentPipelinePolicy                 `json:"policy,omitempty"`
+}
+
+// DeploymentPipelineCatalogueDefaultSource defines model for DeploymentPipelineCatalogue.DefaultSource.
+type DeploymentPipelineCatalogueDefaultSource string
+
+// DeploymentPipelineCatalogueItem defines model for DeploymentPipelineCatalogueItem.
+type DeploymentPipelineCatalogueItem struct {
+	Approval               *DeploymentPipelineApproval  `json:"approval,omitempty"`
+	Compatible             bool                         `json:"compatible"`
+	Cost                   *DeploymentPipelineCost      `json:"cost,omitempty"`
+	Digest                 *string                      `json:"digest,omitempty"`
+	Id                     string                       `json:"id"`
+	IntendedStrategy       *string                      `json:"intended_strategy,omitempty"`
+	Name                   string                       `json:"name"`
+	PipelineId             *string                      `json:"pipeline_id,omitempty"`
+	ProjectId              *string                      `json:"project_id,omitempty"`
+	Reason                 string                       `json:"reason"`
+	RequestIdentityVersion *int                         `json:"request_identity_version,omitempty"`
+	RequestedSelection     *DeploymentPipelineSelection `json:"requested_selection,omitempty"`
+	RequiredCapabilities   *[]string                    `json:"required_capabilities,omitempty"`
+	Steps                  []DeploymentPipelineStep     `json:"steps"`
+	Strategy               string                       `json:"strategy"`
+	Version                int                          `json:"version"`
+}
+
+// DeploymentPipelineControlIntent Approve/deny require the exact subject; repair requires failed_step and revision. Cancel has no extra authority; it binds the accepted execution digest.
+type DeploymentPipelineControlIntent struct {
+	Action     DeploymentPipelineControlIntentAction `json:"action"`
+	FailedStep *string                               `json:"failed_step,omitempty"`
+	Revision   *int64                                `json:"revision,omitempty"`
+	Subject    *string                               `json:"subject,omitempty"`
+}
+
+// DeploymentPipelineControlIntentAction defines model for DeploymentPipelineControlIntent.Action.
+type DeploymentPipelineControlIntentAction string
+
+// DeploymentPipelineControlReceipt defines model for DeploymentPipelineControlReceipt.
+type DeploymentPipelineControlReceipt struct {
+	Action       DeploymentPipelineControlReceiptAction `json:"action"`
+	ActorId      openapi_types.UUID                     `json:"actor_id"`
+	CreatedAt    time.Time                              `json:"created_at"`
+	DeploymentId openapi_types.UUID                     `json:"deployment_id"`
+	ExpiresAt    time.Time                              `json:"expires_at"`
+	Id           openapi_types.UUID                     `json:"id"`
+	Result       *DeploymentPipelineControlResult       `json:"result,omitempty"`
+	Status       DeploymentPipelineControlReceiptStatus `json:"status"`
+}
+
+// DeploymentPipelineControlReceiptAction defines model for DeploymentPipelineControlReceipt.Action.
+type DeploymentPipelineControlReceiptAction string
+
+// DeploymentPipelineControlReceiptStatus defines model for DeploymentPipelineControlReceipt.Status.
+type DeploymentPipelineControlReceiptStatus string
+
+// DeploymentPipelineControlResult defines model for DeploymentPipelineControlResult.
+type DeploymentPipelineControlResult struct {
+	Code            string                                 `json:"code"`
+	ControlId       openapi_types.UUID                     `json:"control_id"`
+	ExecutionDigest string                                 `json:"execution_digest"`
+	Outcome         DeploymentPipelineControlResultOutcome `json:"outcome"`
+	Phase           string                                 `json:"phase"`
+	RequestDigest   string                                 `json:"request_digest"`
+	Revision        int64                                  `json:"revision"`
+	RolloutId       openapi_types.UUID                     `json:"rollout_id"`
+	Version         DeploymentPipelineControlResultVersion `json:"version"`
+}
+
+// DeploymentPipelineControlResultOutcome defines model for DeploymentPipelineControlResult.Outcome.
+type DeploymentPipelineControlResultOutcome string
+
+// DeploymentPipelineControlResultVersion defines model for DeploymentPipelineControlResult.Version.
+type DeploymentPipelineControlResultVersion string
+
+// DeploymentPipelineCost defines model for DeploymentPipelineCost.
+type DeploymentPipelineCost struct {
+	Enabled        bool   `json:"enabled"`
+	PolicyRevision *int64 `json:"policy_revision,omitempty"`
+}
+
+// DeploymentPipelineCostComparison defines model for DeploymentPipelineCostComparison.
+type DeploymentPipelineCostComparison struct {
+	AfterCoverage  DeploymentPipelineCostCoverage `json:"after_coverage"`
+	AfterMonthly   *string                        `json:"after_monthly,omitempty"`
+	BeforeCoverage DeploymentPipelineCostCoverage `json:"before_coverage"`
+	BeforeMonthly  *string                        `json:"before_monthly,omitempty"`
+	Build          string                         `json:"build"`
+	Currency       string                         `json:"currency"`
+	DeltaMonthly   *string                        `json:"delta_monthly,omitempty"`
+	Estimator      string                         `json:"estimator"`
+	GeneratedAt    time.Time                      `json:"generated_at"`
+	Reason         *string                        `json:"reason,omitempty"`
+	Status         string                         `json:"status"`
+	Version        string                         `json:"version"`
+}
+
+// DeploymentPipelineCostCoverage defines model for DeploymentPipelineCostCoverage.
+type DeploymentPipelineCostCoverage struct {
+	Free         int `json:"free"`
+	MissingUsage int `json:"missing_usage"`
+	Priced       int `json:"priced"`
+	Resources    int `json:"resources"`
+	Unknown      int `json:"unknown"`
+	Unpriced     int `json:"unpriced"`
+}
+
+// DeploymentPipelineDefinition defines model for DeploymentPipelineDefinition.
+type DeploymentPipelineDefinition struct {
+	Approval               *DeploymentPipelineApproval  `json:"approval,omitempty"`
+	Cost                   *DeploymentPipelineCost      `json:"cost,omitempty"`
+	Digest                 *string                      `json:"digest,omitempty"`
+	Id                     string                       `json:"id"`
+	IntendedStrategy       *string                      `json:"intended_strategy,omitempty"`
+	Name                   string                       `json:"name"`
+	PipelineId             *string                      `json:"pipeline_id,omitempty"`
+	ProjectId              *string                      `json:"project_id,omitempty"`
+	RequestIdentityVersion *int                         `json:"request_identity_version,omitempty"`
+	RequestedSelection     *DeploymentPipelineSelection `json:"requested_selection,omitempty"`
+	RequiredCapabilities   *[]string                    `json:"required_capabilities,omitempty"`
+	Steps                  []DeploymentPipelineStep     `json:"steps"`
+	Strategy               string                       `json:"strategy"`
+	Version                int                          `json:"version"`
+}
+
+// DeploymentPipelineExecution defines model for DeploymentPipelineExecution.
+type DeploymentPipelineExecution struct {
+	// AvailableControls Candidate Native actions from last observed progress; the site remains authoritative.
+	AvailableControls *[]DeploymentPipelineExecutionAvailableControls `json:"available_controls,omitempty"`
+	Definition        DeploymentPipelineDefinition                    `json:"definition"`
+
+	// NativeLogs Captured Native execution uses retained central phase logs.
+	NativeLogs      *bool                         `json:"native_logs,omitempty"`
+	Origin          *DeploymentPipelineOrigin     `json:"origin,omitempty"`
+	Plan            *DeploymentPipelinePlanStatus `json:"plan,omitempty"`
+	Progress        DeploymentPipelineProgress    `json:"progress"`
+	ReplannedFromId *openapi_types.UUID           `json:"replanned_from_id,omitempty"`
+	SourcePlanId    *openapi_types.UUID           `json:"source_plan_id,omitempty"`
+}
+
+// DeploymentPipelineExecutionAvailableControls defines model for DeploymentPipelineExecution.AvailableControls.
+type DeploymentPipelineExecutionAvailableControls string
+
+// DeploymentPipelineLifecycle defines model for DeploymentPipelineLifecycle.
+type DeploymentPipelineLifecycle struct {
+	AttentionReason       *string             `json:"attention_reason,omitempty"`
+	Digest                string              `json:"digest"`
+	InfrastructureApplied bool                `json:"infrastructure_applied"`
+	Phase                 string              `json:"phase"`
+	PipelineId            *openapi_types.UUID `json:"pipeline_id,omitempty"`
+	PlanSubject           *string             `json:"plan_subject,omitempty"`
+	Reference             PipelineReference   `json:"reference"`
+	Version               int                 `json:"version"`
+	VersionId             *openapi_types.UUID `json:"version_id,omitempty"`
+}
+
+// DeploymentPipelineOrigin defines model for DeploymentPipelineOrigin.
+type DeploymentPipelineOrigin struct {
+	ObservationRunId *openapi_types.UUID `json:"observation_run_id,omitempty"`
+	OperationRef     *string             `json:"operation_ref,omitempty"`
+	PluginId         string              `json:"plugin_id"`
+	RequestId        string              `json:"request_id"`
+}
+
+// DeploymentPipelinePlanStatus defines model for DeploymentPipelinePlanStatus.
+type DeploymentPipelinePlanStatus struct {
+	ApplyDeploymentId   *openapi_types.UUID               `json:"apply_deployment_id,omitempty"`
+	BaseDeploymentId    *openapi_types.UUID               `json:"base_deployment_id,omitempty"`
+	CanReplan           bool                              `json:"can_replan"`
+	CurrentDeploymentId *openapi_types.UUID               `json:"current_deployment_id,omitempty"`
+	Reason              *string                           `json:"reason,omitempty"`
+	State               DeploymentPipelinePlanStatusState `json:"state"`
+	Subject             *string                           `json:"subject,omitempty"`
+}
+
+// DeploymentPipelinePlanStatusState defines model for DeploymentPipelinePlanStatus.State.
+type DeploymentPipelinePlanStatusState string
+
+// DeploymentPipelinePolicy defines model for DeploymentPipelinePolicy.
+type DeploymentPipelinePolicy struct {
+	AllowedVersionIds            []openapi_types.UUID                `json:"allowed_version_ids"`
+	DefaultVersionId             *openapi_types.UUID                 `json:"default_version_id,omitempty"`
+	Enabled                      bool                                `json:"enabled"`
+	EnvironmentDefaultVersionIds *map[string]openapi_types.UUID      `json:"environment_default_version_ids,omitempty"`
+	ResourceVersion              int64                               `json:"resource_version"`
+	RollbackDefaults             *DeploymentPipelineRollbackDefaults `json:"rollback_defaults,omitempty"`
+	UpdatedAt                    *time.Time                          `json:"updated_at,omitempty"`
+	UpdatedBy                    *openapi_types.UUID                 `json:"updated_by,omitempty"`
+}
+
+// DeploymentPipelinePostRepairAuthority Public metadata for an accepted signed post-task repair. It does not authorize Plan or Apply.
+type DeploymentPipelinePostRepairAuthority struct {
+	ControlId openapi_types.UUID `json:"control_id"`
+	ExpiresAt time.Time          `json:"expires_at"`
+}
+
+// DeploymentPipelineProgress defines model for DeploymentPipelineProgress.
+type DeploymentPipelineProgress struct {
+	ApplyChanges          *PipelineResourceChanges            `json:"apply_changes,omitempty"`
+	ApprovalDecision      *DeploymentPipelineApprovalDecision `json:"approval_decision,omitempty"`
+	Changes               *PipelineResourceChanges            `json:"changes,omitempty"`
+	Cost                  *DeploymentPipelineCostComparison   `json:"cost,omitempty"`
+	CreatedAt             time.Time                           `json:"created_at"`
+	EnvironmentId         openapi_types.UUID                  `json:"environment_id"`
+	ErrorCode             *string                             `json:"error_code,omitempty"`
+	FailedStep            *string                             `json:"failed_step,omitempty"`
+	Id                    openapi_types.UUID                  `json:"id"`
+	InfrastructureApplied bool                                `json:"infrastructure_applied"`
+	LastReceivedAt        *time.Time                          `json:"last_received_at,omitempty"`
+	LogCapture            *NativePhaseLogDescriptor           `json:"log_capture,omitempty"`
+	LogReferences         *[]NativePhaseLogDescriptor         `json:"log_references,omitempty"`
+	LogReferencesLimited  *bool                               `json:"log_references_limited,omitempty"`
+	Phase                 string                              `json:"phase"`
+	PlanChanges           *PipelineResourceChanges            `json:"plan_changes,omitempty"`
+
+	// PostRepair Public metadata for an accepted signed post-task repair. It does not authorize Plan or Apply.
+	PostRepair *DeploymentPipelinePostRepairAuthority            `json:"post_repair,omitempty"`
+	Revision   int64                                             `json:"revision"`
+	Steps      nullable.Nullable[[]DeploymentPipelineStepResult] `json:"steps"`
+	Subject    *string                                           `json:"subject,omitempty"`
+}
+
+// DeploymentPipelineRollbackDefaults defines model for DeploymentPipelineRollbackDefaults.
+type DeploymentPipelineRollbackDefaults struct {
+	DefaultVersionId             *openapi_types.UUID            `json:"default_version_id,omitempty"`
+	EnvironmentDefaultVersionIds *map[string]openapi_types.UUID `json:"environment_default_version_ids,omitempty"`
+}
+
+// DeploymentPipelineSelection defines model for DeploymentPipelineSelection.
+type DeploymentPipelineSelection struct {
+	// Id Immutable published pipeline Version UUID or an eligible builtin recipe ID.
+	Id      string `json:"id"`
+	Version int    `json:"version"`
+}
+
+// DeploymentPipelineStep defines model for DeploymentPipelineStep.
+type DeploymentPipelineStep struct {
+	Id         string                 `json:"id"`
+	Parameters map[string]interface{} `json:"parameters"`
+	Phase      string                 `json:"phase"`
+	ToolId     string                 `json:"tool_id"`
+}
+
+// DeploymentPipelineStepOutcome defines model for DeploymentPipelineStepOutcome.
+type DeploymentPipelineStepOutcome struct {
+	Meaning     *string `json:"meaning,omitempty"`
+	ToolId      *string `json:"tool_id,omitempty"`
+	ToolName    *string `json:"tool_name,omitempty"`
+	ToolVersion *string `json:"tool_version,omitempty"`
+	Verdict     string  `json:"verdict"`
+}
+
+// DeploymentPipelineStepResult defines model for DeploymentPipelineStepResult.
+type DeploymentPipelineStepResult struct {
+	Code    *string                        `json:"code,omitempty"`
+	Id      string                         `json:"id"`
+	Outcome *DeploymentPipelineStepOutcome `json:"outcome,omitempty"`
+	Phase   string                         `json:"phase"`
+	Status  string                         `json:"status"`
+}
+
+// DeploymentPipelineSummary defines model for DeploymentPipelineSummary.
+type DeploymentPipelineSummary struct {
+	Id                    string `json:"id"`
+	InfrastructureApplied bool   `json:"infrastructure_applied"`
+	Name                  string `json:"name"`
+	Phase                 string `json:"phase"`
+	Strategy              string `json:"strategy"`
+	Version               int    `json:"version"`
+}
+
 // DeploymentQueueCancelBody defines model for DeploymentQueueCancelBody.
 type DeploymentQueueCancelBody struct {
 	// Reason Why the request is no longer wanted.
@@ -1040,7 +1673,10 @@ type DeploymentResultsUpdateBody struct {
 	Error *Error `json:"error,omitempty"`
 
 	// Metadata The metadata produced by the resources involved in the deployment.
-	Metadata          DeploymentResultMetadata `json:"metadata,omitempty"`
+	Metadata DeploymentResultMetadata `json:"metadata,omitempty"`
+
+	// NoEffectReceipt Authenticated site evidence that a terminal imported pipeline claimed no mutating effect. Bound to the exact signed command payload.
+	NoEffectReceipt   *PipelineNoEffectReceipt `json:"no_effect_receipt,omitempty"`
 	ObservationResult *ObservationResult       `json:"observation_result,omitempty"`
 
 	// Outputs The encrypted outputs produced by the runner.
@@ -1100,7 +1736,8 @@ type DeploymentSummary struct {
 	// OrgId The Organization ID
 	//
 	// Example: my-org
-	OrgId OrganizationId `json:"org_id"`
+	OrgId    OrganizationId             `json:"org_id"`
+	Pipeline *DeploymentPipelineSummary `json:"pipeline,omitempty"`
 
 	// PlanOnly Whether the deployment is executed in plan mode.
 	//
@@ -1217,6 +1854,7 @@ type ExternalDeploymentAdmissionBody struct {
 	FirstForwardDeploymentId *openapi_types.UUID                            `json:"first_forward_deployment_id,omitempty"`
 	Mode                     ExternalDeploymentAdmissionBodyMode            `json:"mode"`
 	OperationRef             openapi_types.UUID                             `json:"operation_ref"`
+	Pipeline                 *PipelineReference                             `json:"pipeline,omitempty"`
 	Plan                     *ExternalDeploymentAdmissionPlan               `json:"plan,omitempty"`
 	ProjectId                string                                         `json:"project_id"`
 	ProjectUuid              openapi_types.UUID                             `json:"project_uuid"`
@@ -1261,14 +1899,15 @@ type ExternalDeploymentPlanBody struct {
 // ExternalDeploymentPlanResponse defines model for ExternalDeploymentPlanResponse.
 type ExternalDeploymentPlanResponse struct {
 	// Diff Describes a diff between the resource graphs of two deployments.
-	Diff                      DeploymentDiff            `json:"diff"`
-	EffectiveBaseDeploymentId openapi_types.UUID        `json:"effective_base_deployment_id"`
-	EnvironmentUuid           openapi_types.UUID        `json:"environment_uuid"`
-	Fingerprint               string                    `json:"fingerprint"`
-	Graph                     ExternalGraphStructure    `json:"graph"`
-	Manifest                  ExternalManifestStructure `json:"manifest"`
-	ModuleVersions            []ExternalModuleInventory `json:"module_versions"`
-	SnapshotId                openapi_types.UUID        `json:"snapshot_id"`
+	Diff                      DeploymentDiff              `json:"diff"`
+	EffectiveBaseDeploymentId openapi_types.UUID          `json:"effective_base_deployment_id"`
+	EnvironmentUuid           openapi_types.UUID          `json:"environment_uuid"`
+	Fingerprint               string                      `json:"fingerprint"`
+	Graph                     ExternalGraphStructure      `json:"graph"`
+	Manifest                  ExternalManifestStructure   `json:"manifest"`
+	ModuleVersions            []ExternalModuleInventory   `json:"module_versions"`
+	Pipelines                 *DeploymentPipelineBindings `json:"pipelines,omitempty"`
+	SnapshotId                openapi_types.UUID          `json:"snapshot_id"`
 }
 
 // ExternalDeploymentReadinessBody defines model for ExternalDeploymentReadinessBody.
@@ -1284,6 +1923,7 @@ type ExternalDeploymentReadinessResponse struct {
 // ExternalDeploymentStatusResponse defines model for ExternalDeploymentStatusResponse.
 type ExternalDeploymentStatusResponse struct {
 	AdmissionBaseDeploymentId   *openapi_types.UUID                  `json:"admission_base_deployment_id,omitempty"`
+	AdmissionClosed             *bool                                `json:"admission_closed,omitempty"`
 	CompletedAt                 *time.Time                           `json:"completed_at,omitempty"`
 	CreatedAt                   time.Time                            `json:"created_at"`
 	DeploymentId                openapi_types.UUID                   `json:"deployment_id"`
@@ -1296,6 +1936,7 @@ type ExternalDeploymentStatusResponse struct {
 	Mode                        ExternalDeploymentStatusResponseMode `json:"mode"`
 	ModuleVersions              map[string]openapi_types.UUID        `json:"module_versions"`
 	OperationRef                openapi_types.UUID                   `json:"operation_ref"`
+	Pipeline                    *DeploymentPipelineLifecycle         `json:"pipeline,omitempty"`
 	ProjectId                   string                               `json:"project_id"`
 	ProjectUuid                 openapi_types.UUID                   `json:"project_uuid"`
 	ReceiptCreatedAt            time.Time                            `json:"receipt_created_at"`
@@ -1552,6 +2193,50 @@ type ModuleTestDeploymentCreateBody struct {
 	DraftTestSnapshots map[string]openapi_types.UUID `json:"draft_test_snapshots"`
 }
 
+// NativePhaseLogAuthority defines model for NativePhaseLogAuthority.
+type NativePhaseLogAuthority struct {
+	CaptureRevision int64                        `json:"capture_revision"`
+	CommandDigest   string                       `json:"command_digest"`
+	DeploymentId    openapi_types.UUID           `json:"deployment_id"`
+	EnvironmentId   openapi_types.UUID           `json:"environment_id"`
+	ExecutionId     string                       `json:"execution_id"`
+	Inherited       *bool                        `json:"inherited,omitempty"`
+	OrganizationId  string                       `json:"organization_id"`
+	Phase           NativePhaseLogAuthorityPhase `json:"phase"`
+	SourcePlanId    *openapi_types.UUID          `json:"source_plan_id,omitempty"`
+	SourceSubject   *string                      `json:"source_subject,omitempty"`
+	StepId          *string                      `json:"step_id,omitempty"`
+	Subject         *string                      `json:"subject,omitempty"`
+	Target          struct {
+		PipelineVersion          string             `json:"pipeline_version"`
+		RunnerId                 string             `json:"runner_id"`
+		RunnerUuid               openapi_types.UUID `json:"runner_uuid"`
+		RuntimeVersion           string             `json:"runtime_version"`
+		StateBackendType         string             `json:"state_backend_type"`
+		StateConfigurationDigest string             `json:"state_configuration_digest"`
+		ToolsDigest              string             `json:"tools_digest"`
+	} `json:"target"`
+}
+
+// NativePhaseLogAuthorityPhase defines model for NativePhaseLogAuthority.Phase.
+type NativePhaseLogAuthorityPhase string
+
+// NativePhaseLogDescriptor defines model for NativePhaseLogDescriptor.
+type NativePhaseLogDescriptor struct {
+	Authority        NativePhaseLogAuthority         `json:"authority"`
+	CiphertextBytes  *int                            `json:"ciphertext_bytes,omitempty"`
+	CiphertextSha256 *string                         `json:"ciphertext_sha256,omitempty"`
+	ObjectKey        *string                         `json:"object_key,omitempty"`
+	Status           NativePhaseLogDescriptorStatus  `json:"status"`
+	Version          NativePhaseLogDescriptorVersion `json:"version"`
+}
+
+// NativePhaseLogDescriptorStatus defines model for NativePhaseLogDescriptor.Status.
+type NativePhaseLogDescriptorStatus string
+
+// NativePhaseLogDescriptorVersion defines model for NativePhaseLogDescriptor.Version.
+type NativePhaseLogDescriptorVersion int
+
 // ObservationChange defines model for ObservationChange.
 type ObservationChange struct {
 	Actions      []ObservationChangeActions `json:"actions"`
@@ -1620,6 +2305,36 @@ type PendingEnvironmentChanges struct {
 // PendingEnvironmentChangesCode Example: result_may_change
 type PendingEnvironmentChangesCode string
 
+// PipelineNoEffectReceipt Authenticated site evidence that a terminal imported pipeline claimed no mutating effect. Bound to the exact signed command payload.
+type PipelineNoEffectReceipt struct {
+	CommandSha256 string                         `json:"command_sha256"`
+	Effect        PipelineNoEffectReceiptEffect  `json:"effect"`
+	Version       PipelineNoEffectReceiptVersion `json:"version"`
+}
+
+// PipelineNoEffectReceiptEffect defines model for PipelineNoEffectReceipt.Effect.
+type PipelineNoEffectReceiptEffect string
+
+// PipelineNoEffectReceiptVersion defines model for PipelineNoEffectReceipt.Version.
+type PipelineNoEffectReceiptVersion string
+
+// PipelineReference defines model for PipelineReference.
+type PipelineReference struct {
+	Builtin   *PipelineReferenceBuiltin `json:"builtin,omitempty"`
+	Digest    string                    `json:"digest"`
+	VersionId *openapi_types.UUID       `json:"version_id,omitempty"`
+}
+
+// PipelineReferenceBuiltin defines model for PipelineReference.Builtin.
+type PipelineReferenceBuiltin string
+
+// PipelineResourceChanges defines model for PipelineResourceChanges.
+type PipelineResourceChanges struct {
+	Add    int `json:"add"`
+	Change int `json:"change"`
+	Remove int `json:"remove"`
+}
+
 // ResourceClass A resource class requested by the resource graph. 'default' is the default value.
 //
 // Example: classic
@@ -1685,6 +2400,9 @@ type PageTokenQueryParam = string
 
 // PerPageQueryParam defines model for perPageQueryParam.
 type PerPageQueryParam = int
+
+// PipelineIdempotencyKeyHeader defines model for pipelineIdempotencyKeyHeader.
+type PipelineIdempotencyKeyHeader = string
 
 // PluginIdPathParam defines model for pluginIdPathParam.
 type PluginIdPathParam = string
@@ -1783,10 +2501,8 @@ type ListDeploymentsParams struct {
 	ProjectId *ProjectIdQueryParam `form:"project_id,omitempty" json:"project_id,omitempty"`
 
 	// EnvId The Environment ID
-	EnvId *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
-
-	// PerPage The maximum number of items to return in a page of results
-	PerPage *PerPageQueryParam `form:"per_page,omitempty" json:"per_page,omitempty"`
+	EnvId   *EnvIdQueryParam `form:"env_id,omitempty" json:"env_id,omitempty"`
+	PerPage *int             `form:"per_page,omitempty" json:"per_page,omitempty"`
 
 	// Page The page token to request from
 	Page *PageTokenQueryParam `form:"page,omitempty" json:"page,omitempty"`
@@ -1796,6 +2512,10 @@ type ListDeploymentsParams struct {
 
 	// ByStatus Filter deployments by status
 	ByStatus *ByStatusQueryParam `form:"by_status,omitempty" json:"by_status,omitempty"`
+
+	// Q Literal search over deployment ID, creator ID, project/environment slug and pipeline name or ID.
+	Q           *string                           `form:"q,omitempty" json:"q,omitempty"`
+	QuickFilter *ListDeploymentsParamsQuickFilter `form:"quick_filter,omitempty" json:"quick_filter,omitempty"`
 }
 
 // ListDeploymentsParamsByMode defines parameters for ListDeployments.
@@ -1803,6 +2523,9 @@ type ListDeploymentsParamsByMode string
 
 // ListDeploymentsParamsByStatus defines parameters for ListDeployments.
 type ListDeploymentsParamsByStatus string
+
+// ListDeploymentsParamsQuickFilter defines parameters for ListDeployments.
+type ListDeploymentsParamsQuickFilter string
 
 // CreateDeploymentParams defines parameters for CreateDeployment.
 type CreateDeploymentParams struct {
@@ -1824,9 +2547,24 @@ type GetDeploymentLogsParams struct {
 	// Decrypt Return plaintext using the server-managed log identity. Requires deployment_logs_read on the deployment Environment (or organization). Cannot be combined with DecryptKey; returns 409 when no managed identity is retained.
 	Decrypt *bool `form:"decrypt,omitempty" json:"decrypt,omitempty"`
 
+	// Phase Native phase; defaults to plan for a plan-only Deployment and apply otherwise.
+	Phase *GetDeploymentLogsParamsPhase `form:"phase,omitempty" json:"phase,omitempty"`
+
+	// ExecutionId Exact captured Native execution identity.
+	ExecutionId *string `form:"execution_id,omitempty" json:"execution_id,omitempty"`
+
+	// CaptureRevision Exact positive Native capture revision; omitted selects the greatest accepted revision.
+	CaptureRevision *int64 `form:"capture_revision,omitempty" json:"capture_revision,omitempty"`
+
+	// Subject Exact displayed Plan subject; use an empty value for failed diagnostics without a subject.
+	Subject *string `form:"subject,omitempty" json:"subject,omitempty"`
+
 	// DecryptKey The private key needed to decrypt the logs. It should be an 'age' private key (see https://age-encryption.org).
 	DecryptKey *string `json:"DecryptKey,omitempty"`
 }
+
+// GetDeploymentLogsParamsPhase defines parameters for GetDeploymentLogs.
+type GetDeploymentLogsParamsPhase string
 
 // WaitForDeploymentCompleteParams defines parameters for WaitForDeploymentComplete.
 type WaitForDeploymentCompleteParams struct {
@@ -1837,6 +2575,29 @@ type WaitForDeploymentCompleteParams struct {
 // GetDeploymentBundleParams defines parameters for GetDeploymentBundle.
 type GetDeploymentBundleParams struct {
 	XDeploymentToken string `json:"X-Deployment-Token"`
+}
+
+// ApplyDeploymentPipelinePlanJSONBody defines parameters for ApplyDeploymentPipelinePlan.
+type ApplyDeploymentPipelinePlanJSONBody struct {
+	Subject string `json:"subject"`
+}
+
+// ApplyDeploymentPipelinePlanParams defines parameters for ApplyDeploymentPipelinePlan.
+type ApplyDeploymentPipelinePlanParams struct {
+	IdempotencyKey PipelineIdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
+// ReplanDeploymentPipelinePlanJSONBody defines parameters for ReplanDeploymentPipelinePlan.
+type ReplanDeploymentPipelinePlanJSONBody = map[string]interface{}
+
+// ReplanDeploymentPipelinePlanParams defines parameters for ReplanDeploymentPipelinePlan.
+type ReplanDeploymentPipelinePlanParams struct {
+	IdempotencyKey PipelineIdempotencyKeyHeader `json:"Idempotency-Key"`
+}
+
+// CreateDeploymentPipelineControlParams defines parameters for CreateDeploymentPipelineControl.
+type CreateDeploymentPipelineControlParams struct {
+	IdempotencyKey PipelineIdempotencyKeyHeader `json:"Idempotency-Key"`
 }
 
 // UpdateDeploymentResultsParams defines parameters for UpdateDeploymentResults.
@@ -1890,6 +2651,15 @@ type CancelDeploymentQueueItemJSONRequestBody = DeploymentQueueCancelBody
 
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody = DeploymentCreateBody
+
+// ApplyDeploymentPipelinePlanJSONRequestBody defines body for ApplyDeploymentPipelinePlan for application/json ContentType.
+type ApplyDeploymentPipelinePlanJSONRequestBody ApplyDeploymentPipelinePlanJSONBody
+
+// ReplanDeploymentPipelinePlanJSONRequestBody defines body for ReplanDeploymentPipelinePlan for application/json ContentType.
+type ReplanDeploymentPipelinePlanJSONRequestBody = ReplanDeploymentPipelinePlanJSONBody
+
+// CreateDeploymentPipelineControlJSONRequestBody defines body for CreateDeploymentPipelineControl for application/json ContentType.
+type CreateDeploymentPipelineControlJSONRequestBody = DeploymentPipelineControlIntent
 
 // UpdateDeploymentResultsJSONRequestBody defines body for UpdateDeploymentResults for application/json ContentType.
 type UpdateDeploymentResultsJSONRequestBody = DeploymentResultsUpdateBody
@@ -1962,6 +2732,21 @@ type ServerInterface interface {
 	// GetDeploymentEncryptedOutputs Get the encrypted outputs produced by the deployment.
 	// (GET /orgs/{orgId}/deployments/{deploymentId}/encrypted-outputs)
 	GetDeploymentEncryptedOutputs(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error
+	// GetDeploymentPipeline Read the retained pipeline execution and manual Plan eligibility.
+	// (GET /orgs/{orgId}/deployments/{deploymentId}/pipeline)
+	GetDeploymentPipeline(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error
+	// ApplyDeploymentPipelinePlan Apply this exact saved Plan once through ordinary Deployment admission.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/actions/apply-plan)
+	ApplyDeploymentPipelinePlan(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params ApplyDeploymentPipelinePlanParams) error
+	// ReplanDeploymentPipelinePlan Create a new manual Plan without changing or applying this saved Plan.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/actions/replan)
+	ReplanDeploymentPipelinePlan(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params ReplanDeploymentPipelinePlanParams) error
+	// CreateDeploymentPipelineControl Queue an immutable signed control for the accepted Native execution.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/controls)
+	CreateDeploymentPipelineControl(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params CreateDeploymentPipelineControlParams) error
+	// GetDeploymentPipelineControl Read retained control delivery or the immutable applied/refused result.
+	// (GET /orgs/{orgId}/deployments/{deploymentId}/pipeline/controls/{controlId})
+	GetDeploymentPipelineControl(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, controlId openapi_types.UUID) error
 	// ListDeploymentResourceNodes List resource nodes for a deployment
 	// (GET /orgs/{orgId}/deployments/{deploymentId}/resources)
 	ListDeploymentResourceNodes(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error
@@ -1992,6 +2777,9 @@ type ServerInterface interface {
 	// CreateModuleTestDeployment Create a new deployment in the target project and environment.
 	// (POST /orgs/{orgId}/module-test-deployments)
 	CreateModuleTestDeployment(ctx echo.Context, orgId OrgIdPathParam, params CreateModuleTestDeploymentParams) error
+	// ListDeploymentPipelines List project pipelines qualified for the Environment's selected Runner.
+	// (GET /orgs/{orgId}/projects/{projectId}/envs/{envId}/deployment-pipelines)
+	ListDeploymentPipelines(ctx echo.Context, orgId OrgIdPathParam, projectId string, envId string) error
 }
 
 // ServerInterfaceWrapper converts echo contexts to parameters.
@@ -2359,6 +3147,20 @@ func (w *ServerInterfaceWrapper) ListDeployments(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter by_status: %s", err))
 	}
 
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", ctx.QueryParams(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter q: %s", err))
+	}
+
+	// ------------- Optional query parameter "quick_filter" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "quick_filter", ctx.QueryParams(), &params.QuickFilter, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter quick_filter: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListDeployments(ctx, orgId, params)
 	return err
@@ -2493,6 +3295,34 @@ func (w *ServerInterfaceWrapper) GetDeploymentLogs(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter decrypt: %s", err))
 	}
 
+	// ------------- Optional query parameter "phase" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "phase", ctx.QueryParams(), &params.Phase, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter phase: %s", err))
+	}
+
+	// ------------- Optional query parameter "execution_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "execution_id", ctx.QueryParams(), &params.ExecutionId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter execution_id: %s", err))
+	}
+
+	// ------------- Optional query parameter "capture_revision" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "capture_revision", ctx.QueryParams(), &params.CaptureRevision, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter capture_revision: %s", err))
+	}
+
+	// ------------- Optional query parameter "subject" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "subject", ctx.QueryParams(), &params.Subject, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter subject: %s", err))
+	}
+
 	headers := ctx.Request().Header
 	// ------------- Optional header parameter "DecryptKey" -------------
 	if valueList, found := headers[http.CanonicalHeaderKey("DecryptKey")]; found {
@@ -2619,6 +3449,210 @@ func (w *ServerInterfaceWrapper) GetDeploymentEncryptedOutputs(ctx echo.Context)
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.GetDeploymentEncryptedOutputs(ctx, orgId, deploymentId)
+	return err
+}
+
+// GetDeploymentPipeline converts echo context to params.
+func (w *ServerInterfaceWrapper) GetDeploymentPipeline(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetDeploymentPipeline(ctx, orgId, deploymentId)
+	return err
+}
+
+// ApplyDeploymentPipelinePlan converts echo context to params.
+func (w *ServerInterfaceWrapper) ApplyDeploymentPipelinePlan(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyDeploymentPipelinePlanParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey PipelineIdempotencyKeyHeader
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Idempotency-Key, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Idempotency-Key: %s", err))
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Idempotency-Key is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ApplyDeploymentPipelinePlan(ctx, orgId, deploymentId, params)
+	return err
+}
+
+// ReplanDeploymentPipelinePlan converts echo context to params.
+func (w *ServerInterfaceWrapper) ReplanDeploymentPipelinePlan(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReplanDeploymentPipelinePlanParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey PipelineIdempotencyKeyHeader
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Idempotency-Key, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Idempotency-Key: %s", err))
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Idempotency-Key is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ReplanDeploymentPipelinePlan(ctx, orgId, deploymentId, params)
+	return err
+}
+
+// CreateDeploymentPipelineControl converts echo context to params.
+func (w *ServerInterfaceWrapper) CreateDeploymentPipelineControl(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateDeploymentPipelineControlParams
+
+	headers := ctx.Request().Header
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey PipelineIdempotencyKeyHeader
+		n := len(valueList)
+		if n != 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Expected one value for Idempotency-Key, got %d", n))
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter Idempotency-Key: %s", err))
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+	} else {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Header parameter Idempotency-Key is required, but not found"))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.CreateDeploymentPipelineControl(ctx, orgId, deploymentId, params)
+	return err
+}
+
+// GetDeploymentPipelineControl converts echo context to params.
+func (w *ServerInterfaceWrapper) GetDeploymentPipelineControl(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "deploymentId" -------------
+	var deploymentId DeploymentIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentId", ctx.Param("deploymentId"), &deploymentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter deploymentId: %s", err))
+	}
+
+	// ------------- Path parameter "controlId" -------------
+	var controlId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "controlId", ctx.Param("controlId"), &controlId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter controlId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetDeploymentPipelineControl(ctx, orgId, deploymentId, controlId)
 	return err
 }
 
@@ -2943,6 +3977,40 @@ func (w *ServerInterfaceWrapper) CreateModuleTestDeployment(ctx echo.Context) er
 	return err
 }
 
+// ListDeploymentPipelines converts echo context to params.
+func (w *ServerInterfaceWrapper) ListDeploymentPipelines(ctx echo.Context) error {
+	var err error
+	// ------------- Path parameter "orgId" -------------
+	var orgId OrgIdPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "orgId", ctx.Param("orgId"), &orgId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter orgId: %s", err))
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", ctx.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter projectId: %s", err))
+	}
+
+	// ------------- Path parameter "envId" -------------
+	var envId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "envId", ctx.Param("envId"), &envId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter envId: %s", err))
+	}
+
+	ctx.Set(string(UserIdHeaderScopes), []string{})
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListDeploymentPipelines(ctx, orgId, projectId, envId)
+	return err
+}
+
 // This is a simple interface which specifies echo.Route addition functions which
 // are present on both echo.Echo and echo.Group, since we want to allow using
 // either of them for path registration
@@ -2990,6 +4058,12 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 		Handler: si,
 	}
 
+	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/pipeline", wrapper.GetDeploymentPipeline, options.OperationMiddlewares["getDeploymentPipeline"]...)
+	router.POST(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/pipeline/controls", wrapper.CreateDeploymentPipelineControl, options.OperationMiddlewares["createDeploymentPipelineControl"]...)
+	router.GET(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/pipeline/controls/:controlId", wrapper.GetDeploymentPipelineControl, options.OperationMiddlewares["getDeploymentPipelineControl"]...)
+	router.GET(options.BaseURL+"/orgs/:orgId/projects/:projectId/envs/:envId/deployment-pipelines", wrapper.ListDeploymentPipelines, options.OperationMiddlewares["listDeploymentPipelines"]...)
+	router.POST(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/pipeline/actions/apply-plan", wrapper.ApplyDeploymentPipelinePlan, options.OperationMiddlewares["applyDeploymentPipelinePlan"]...)
+	router.POST(options.BaseURL+"/orgs/:orgId/deployments/:deploymentId/pipeline/actions/replan", wrapper.ReplanDeploymentPipelinePlan, options.OperationMiddlewares["replanDeploymentPipelinePlan"]...)
 	router.GET(options.BaseURL+"/orgs/:orgId/deployments", wrapper.ListDeployments, options.OperationMiddlewares["listDeployments"]...)
 	router.POST(options.BaseURL+"/orgs/:orgId/deployments", wrapper.CreateDeployment, options.OperationMiddlewares["createDeployment"]...)
 	router.POST(options.BaseURL+"/orgs/:orgId/module-test-deployments", wrapper.CreateModuleTestDeployment, options.OperationMiddlewares["createModuleTestDeployment"]...)
@@ -4004,6 +5078,472 @@ func (response GetDeploymentEncryptedOutputs404JSONResponse) VisitGetDeploymentE
 	return err
 }
 
+type GetDeploymentPipelineRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+}
+
+type GetDeploymentPipelineResponseObject interface {
+	VisitGetDeploymentPipelineResponse(w http.ResponseWriter) error
+}
+
+type GetDeploymentPipeline200JSONResponse DeploymentPipelineExecution
+
+func (response GetDeploymentPipeline200JSONResponse) VisitGetDeploymentPipelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipeline401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response GetDeploymentPipeline401JSONResponse) VisitGetDeploymentPipelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipeline403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response GetDeploymentPipeline403JSONResponse) VisitGetDeploymentPipelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipeline404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response GetDeploymentPipeline404JSONResponse) VisitGetDeploymentPipelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlanRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+	Params       ApplyDeploymentPipelinePlanParams
+	Body         *ApplyDeploymentPipelinePlanJSONRequestBody
+}
+
+type ApplyDeploymentPipelinePlanResponseObject interface {
+	VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+type ApplyDeploymentPipelinePlan201JSONResponse DeploymentPipelineActionResponse
+
+func (response ApplyDeploymentPipelinePlan201JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response ApplyDeploymentPipelinePlan400JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response ApplyDeploymentPipelinePlan401JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response ApplyDeploymentPipelinePlan403JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response ApplyDeploymentPipelinePlan409JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan413JSONResponse Error
+
+func (response ApplyDeploymentPipelinePlan413JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyDeploymentPipelinePlan503JSONResponse struct{ N503UnavailableJSONResponse }
+
+func (response ApplyDeploymentPipelinePlan503JSONResponse) VisitApplyDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlanRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+	Params       ReplanDeploymentPipelinePlanParams
+	Body         *ReplanDeploymentPipelinePlanJSONRequestBody
+}
+
+type ReplanDeploymentPipelinePlanResponseObject interface {
+	VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+type ReplanDeploymentPipelinePlan201JSONResponse DeploymentPipelineActionResponse
+
+func (response ReplanDeploymentPipelinePlan201JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response ReplanDeploymentPipelinePlan400JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response ReplanDeploymentPipelinePlan401JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response ReplanDeploymentPipelinePlan403JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response ReplanDeploymentPipelinePlan409JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan413JSONResponse Error
+
+func (response ReplanDeploymentPipelinePlan413JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplanDeploymentPipelinePlan503JSONResponse struct{ N503UnavailableJSONResponse }
+
+func (response ReplanDeploymentPipelinePlan503JSONResponse) VisitReplanDeploymentPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControlRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+	Params       CreateDeploymentPipelineControlParams
+	Body         *CreateDeploymentPipelineControlJSONRequestBody
+}
+
+type CreateDeploymentPipelineControlResponseObject interface {
+	VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error
+}
+
+type CreateDeploymentPipelineControl202JSONResponse DeploymentPipelineControlReceipt
+
+func (response CreateDeploymentPipelineControl202JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl400JSONResponse struct{ N400BadRequestJSONResponse }
+
+func (response CreateDeploymentPipelineControl400JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response CreateDeploymentPipelineControl401JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response CreateDeploymentPipelineControl403JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response CreateDeploymentPipelineControl404JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response CreateDeploymentPipelineControl409JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentPipelineControl413Response struct {
+}
+
+func (response CreateDeploymentPipelineControl413Response) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+	w.WriteHeader(413)
+	return nil
+}
+
+type CreateDeploymentPipelineControl503JSONResponse struct{ N503UnavailableJSONResponse }
+
+func (response CreateDeploymentPipelineControl503JSONResponse) VisitCreateDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipelineControlRequestObject struct {
+	OrgId        OrgIdPathParam        `json:"orgId"`
+	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
+	ControlId    openapi_types.UUID    `json:"controlId"`
+}
+
+type GetDeploymentPipelineControlResponseObject interface {
+	VisitGetDeploymentPipelineControlResponse(w http.ResponseWriter) error
+}
+
+type GetDeploymentPipelineControl200JSONResponse DeploymentPipelineControlReceipt
+
+func (response GetDeploymentPipelineControl200JSONResponse) VisitGetDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipelineControl401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response GetDeploymentPipelineControl401JSONResponse) VisitGetDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipelineControl403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response GetDeploymentPipelineControl403JSONResponse) VisitGetDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDeploymentPipelineControl404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response GetDeploymentPipelineControl404JSONResponse) VisitGetDeploymentPipelineControlResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListDeploymentResourceNodesRequestObject struct {
 	OrgId        OrgIdPathParam        `json:"orgId"`
 	DeploymentId DeploymentIdPathParam `json:"deploymentId"`
@@ -4489,6 +6029,86 @@ func (response CreateModuleTestDeployment409JSONResponse) VisitCreateModuleTestD
 	return err
 }
 
+type ListDeploymentPipelinesRequestObject struct {
+	OrgId     OrgIdPathParam `json:"orgId"`
+	ProjectId string         `json:"projectId"`
+	EnvId     string         `json:"envId"`
+}
+
+type ListDeploymentPipelinesResponseObject interface {
+	VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error
+}
+
+type ListDeploymentPipelines200JSONResponse DeploymentPipelineCatalogue
+
+func (response ListDeploymentPipelines200JSONResponse) VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentPipelines401JSONResponse struct{ N401UnauthorizedJSONResponse }
+
+func (response ListDeploymentPipelines401JSONResponse) VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentPipelines403JSONResponse struct{ N403ForbiddenJSONResponse }
+
+func (response ListDeploymentPipelines403JSONResponse) VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentPipelines404JSONResponse struct{ N404NotFoundJSONResponse }
+
+func (response ListDeploymentPipelines404JSONResponse) VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentPipelines409JSONResponse struct{ N409ConflictJSONResponse }
+
+func (response ListDeploymentPipelines409JSONResponse) VisitListDeploymentPipelinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetJwks Show JSON Web Keys Set (JWKS).
@@ -4548,6 +6168,21 @@ type StrictServerInterface interface {
 	// GetDeploymentEncryptedOutputs Get the encrypted outputs produced by the deployment.
 	// (GET /orgs/{orgId}/deployments/{deploymentId}/encrypted-outputs)
 	GetDeploymentEncryptedOutputs(ctx context.Context, request GetDeploymentEncryptedOutputsRequestObject) (GetDeploymentEncryptedOutputsResponseObject, error)
+	// GetDeploymentPipeline Read the retained pipeline execution and manual Plan eligibility.
+	// (GET /orgs/{orgId}/deployments/{deploymentId}/pipeline)
+	GetDeploymentPipeline(ctx context.Context, request GetDeploymentPipelineRequestObject) (GetDeploymentPipelineResponseObject, error)
+	// ApplyDeploymentPipelinePlan Apply this exact saved Plan once through ordinary Deployment admission.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/actions/apply-plan)
+	ApplyDeploymentPipelinePlan(ctx context.Context, request ApplyDeploymentPipelinePlanRequestObject) (ApplyDeploymentPipelinePlanResponseObject, error)
+	// ReplanDeploymentPipelinePlan Create a new manual Plan without changing or applying this saved Plan.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/actions/replan)
+	ReplanDeploymentPipelinePlan(ctx context.Context, request ReplanDeploymentPipelinePlanRequestObject) (ReplanDeploymentPipelinePlanResponseObject, error)
+	// CreateDeploymentPipelineControl Queue an immutable signed control for the accepted Native execution.
+	// (POST /orgs/{orgId}/deployments/{deploymentId}/pipeline/controls)
+	CreateDeploymentPipelineControl(ctx context.Context, request CreateDeploymentPipelineControlRequestObject) (CreateDeploymentPipelineControlResponseObject, error)
+	// GetDeploymentPipelineControl Read retained control delivery or the immutable applied/refused result.
+	// (GET /orgs/{orgId}/deployments/{deploymentId}/pipeline/controls/{controlId})
+	GetDeploymentPipelineControl(ctx context.Context, request GetDeploymentPipelineControlRequestObject) (GetDeploymentPipelineControlResponseObject, error)
 	// ListDeploymentResourceNodes List resource nodes for a deployment
 	// (GET /orgs/{orgId}/deployments/{deploymentId}/resources)
 	ListDeploymentResourceNodes(ctx context.Context, request ListDeploymentResourceNodesRequestObject) (ListDeploymentResourceNodesResponseObject, error)
@@ -4578,6 +6213,9 @@ type StrictServerInterface interface {
 	// CreateModuleTestDeployment Create a new deployment in the target project and environment.
 	// (POST /orgs/{orgId}/module-test-deployments)
 	CreateModuleTestDeployment(ctx context.Context, request CreateModuleTestDeploymentRequestObject) (CreateModuleTestDeploymentResponseObject, error)
+	// ListDeploymentPipelines List project pipelines qualified for the Environment's selected Runner.
+	// (GET /orgs/{orgId}/projects/{projectId}/envs/{envId}/deployment-pipelines)
+	ListDeploymentPipelines(ctx context.Context, request ListDeploymentPipelinesRequestObject) (ListDeploymentPipelinesResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx echo.Context, request any) (any, error)
@@ -5151,6 +6789,188 @@ func (sh *strictHandler) GetDeploymentEncryptedOutputs(ctx echo.Context, orgId O
 	return nil
 }
 
+// GetDeploymentPipeline operation middleware
+func (sh *strictHandler) GetDeploymentPipeline(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error {
+	var request GetDeploymentPipelineRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDeploymentPipeline(ctx.Request().Context(), request.(GetDeploymentPipelineRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDeploymentPipeline")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetDeploymentPipelineResponseObject); ok {
+		return validResponse.VisitGetDeploymentPipelineResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ApplyDeploymentPipelinePlan operation middleware
+func (sh *strictHandler) ApplyDeploymentPipelinePlan(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params ApplyDeploymentPipelinePlanParams) error {
+	var request ApplyDeploymentPipelinePlanRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+	request.Params = params
+
+	var body ApplyDeploymentPipelinePlanJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyDeploymentPipelinePlan(ctx.Request().Context(), request.(ApplyDeploymentPipelinePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyDeploymentPipelinePlan")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ApplyDeploymentPipelinePlanResponseObject); ok {
+		return validResponse.VisitApplyDeploymentPipelinePlanResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ReplanDeploymentPipelinePlan operation middleware
+func (sh *strictHandler) ReplanDeploymentPipelinePlan(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params ReplanDeploymentPipelinePlanParams) error {
+	var request ReplanDeploymentPipelinePlanRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+	request.Params = params
+
+	var body ReplanDeploymentPipelinePlanJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ReplanDeploymentPipelinePlan(ctx.Request().Context(), request.(ReplanDeploymentPipelinePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReplanDeploymentPipelinePlan")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ReplanDeploymentPipelinePlanResponseObject); ok {
+		return validResponse.VisitReplanDeploymentPipelinePlanResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// CreateDeploymentPipelineControl operation middleware
+func (sh *strictHandler) CreateDeploymentPipelineControl(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, params CreateDeploymentPipelineControlParams) error {
+	var request CreateDeploymentPipelineControlRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+	request.Params = params
+
+	var body CreateDeploymentPipelineControlJSONRequestBody
+	var err error
+	if binder, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// Bind only the request body, so that path and query parameters
+		// are not also bound into the body struct.
+		err = binder.BindBody(ctx, &body)
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding.
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDeploymentPipelineControl(ctx.Request().Context(), request.(CreateDeploymentPipelineControlRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDeploymentPipelineControl")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(CreateDeploymentPipelineControlResponseObject); ok {
+		return validResponse.VisitCreateDeploymentPipelineControlResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetDeploymentPipelineControl operation middleware
+func (sh *strictHandler) GetDeploymentPipelineControl(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam, controlId openapi_types.UUID) error {
+	var request GetDeploymentPipelineControlRequestObject
+
+	request.OrgId = orgId
+	request.DeploymentId = deploymentId
+	request.ControlId = controlId
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDeploymentPipelineControl(ctx.Request().Context(), request.(GetDeploymentPipelineControlRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDeploymentPipelineControl")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetDeploymentPipelineControlResponseObject); ok {
+		return validResponse.VisitGetDeploymentPipelineControlResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // ListDeploymentResourceNodes operation middleware
 func (sh *strictHandler) ListDeploymentResourceNodes(ctx echo.Context, orgId OrgIdPathParam, deploymentId DeploymentIdPathParam) error {
 	var request ListDeploymentResourceNodesRequestObject
@@ -5475,241 +7295,328 @@ func (sh *strictHandler) CreateModuleTestDeployment(ctx echo.Context, orgId OrgI
 	return nil
 }
 
+// ListDeploymentPipelines operation middleware
+func (sh *strictHandler) ListDeploymentPipelines(ctx echo.Context, orgId OrgIdPathParam, projectId string, envId string) error {
+	var request ListDeploymentPipelinesRequestObject
+
+	request.OrgId = orgId
+	request.ProjectId = projectId
+	request.EnvId = envId
+
+	handler := func(ctx echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeploymentPipelines(ctx.Request().Context(), request.(ListDeploymentPipelinesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeploymentPipelines")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListDeploymentPipelinesResponseObject); ok {
+		return validResponse.VisitListDeploymentPipelinesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

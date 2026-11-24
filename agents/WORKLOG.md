@@ -249,3 +249,7 @@ workflow contracts and diff checks pass. Normal hosted checks still required.
 - Added `decrypt=true` with fixed409 when managed material is unavailable; preserved ciphertext and explicit-key compatibility, bounded material reads and added no-store/nosniff response headers.
 - Real local PostgreSQL/Vault and validated DP HTTP tests passed managed/manual/raw retrieval, denied reads, ambiguous inputs, missing/wrong organization, Vault connection failure, tampered recipients, response bounds, fresh queue/rollback keys, direct idempotency and legacy skip/explicit/dry-run behavior. Existing queue and migration reconciliation regressions also passed (`api`12.658s, `model`2.510s); full `make lint` reported0issues. See `DECISIONS.md` for custody/recovery and `LEARNINGS.md` for fixture/middleware details.
 - No public publication, push or cluster change. Root owns independent green/final review and private rollout; no commit was made at this checkpoint.
+
+## Native pipeline source export
+
+Prepared the Native pipeline application source export. Public artifact publication and hosted qualification are separate release steps.

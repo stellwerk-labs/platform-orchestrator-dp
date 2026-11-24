@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const CostEstimationDisabledMessage = "Cost estimation is disabled in platform settings. Enable it before using this pipeline."
+
 var ErrCostAPIKeyRequired = errors.New("an Infracost API key is required to enable cost estimation")
 
 type CostPolicy struct {
@@ -118,4 +120,26 @@ func FreezeDeploymentCostPolicy(ctx context.Context, db Databaser, dep *Deployme
 	}
 	dep.CostPolicy = &snapshot
 	return nil
+}
+
+// RequirePipelineCostPolicy checks the same activation revision captured by the
+// accepted recipe. It reads no credential and holds the policy row through admission.
+func RequirePipelineCostPolicy(ctx context.Context, tx Tx, definition *PipelineDefinition) (*DeploymentCostPolicy, error) {
+	if definition == nil || definition.Cost == nil || !definition.Cost.Enabled {
+		return nil, nil
+	}
+	if definition.Cost.PolicyRevision < 1 {
+		return nil, NewErrConflict("cost estimation requires a frozen installation activation policy")
+	}
+	var current DeploymentCostPolicy
+	if err := tx.QueryRowContext(ctx, `SELECT enabled,revision FROM installation_cost_policy WHERE singleton FOR SHARE`).Scan(&current.Enabled, &current.PolicyRevision); err != nil {
+		return nil, err
+	}
+	if !current.Enabled {
+		return nil, NewErrConflict(CostEstimationDisabledMessage)
+	}
+	if current.PolicyRevision != definition.Cost.PolicyRevision {
+		return nil, NewErrConflict("Cost estimation policy changed. Create a new plan or deployment before using this pipeline.")
+	}
+	return &current, nil
 }

@@ -9,9 +9,22 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 )
 
+type ExternalAdmissionDispatch struct {
+	PluginID      string    `json:"plugin_id"`
+	OperationID   uuid.UUID `json:"operation_id"`
+	DispatchID    string    `json:"dispatch_id"`
+	Fence         int64     `json:"fence"`
+	RequestDigest string    `json:"request_digest"`
+}
+
 type DeploymentAdmissionReceipt struct {
+	NativeAdmissionWatermark        *cp.NativeAdmissionWatermark
+	NativeTarget                    *cp.NativeExecutionTargetReference
+	ExternalDispatch                *ExternalAdmissionDispatch
+	Pipeline                        *PipelineDefinition
 	DraftTestSnapshots              map[string]uuid.UUID
 	OrgID                           string
 	AdmissionID                     uuid.UUID
@@ -61,21 +74,21 @@ func readDeploymentAdmissionReceipt(ctx context.Context, tx Tx, orgID string, ad
 		return nil, errors.New("transaction is required")
 	}
 	query := `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
+        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots,pipeline,external_dispatch,native_target,native_admission_watermark
         FROM deployment_admission_receipts WHERE org_id=$1 AND admission_id=$2`
 	args := []any{orgID, admissionID}
 	if deploymentID != uuid.Nil {
 		query = `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-            core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
+            core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots,pipeline,external_dispatch,native_target,native_admission_watermark
             FROM deployment_admission_receipts WHERE deployment_id=$1`
 		args = []any{deploymentID}
 	}
 	receipt := new(DeploymentAdmissionReceipt)
-	var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests json.RawMessage
+	var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests, pipeline, externalDispatch json.RawMessage
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&receipt.OrgID, &receipt.AdmissionID, &receipt.ProjectUUID, &receipt.EnvironmentUUID, &receipt.ActorID,
 		&receipt.RequestDigest, &receipt.Mode, &moduleVersions, &carryForwardVersions, &confirmedRestrictedVersions, &receipt.CoreEpoch, &receipt.Disposition,
-		&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests,
+		&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests, &pipeline, &externalDispatch, asJson(&receipt.NativeTarget), asJson(&receipt.NativeAdmissionWatermark),
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, NewErrNotFound("Deployment admission receipt not found")
@@ -94,6 +107,12 @@ func readDeploymentAdmissionReceipt(ctx context.Context, tx Tx, orgID string, ad
 	if err := json.Unmarshal(draftTests, &receipt.DraftTestSnapshots); err != nil {
 		return nil, errors.Wrap(err, "failed to decode immutable Draft test selection")
 	}
+	if err := json.Unmarshal(externalDispatch, &receipt.ExternalDispatch); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(pipeline, &receipt.Pipeline); err != nil {
+		return nil, err
+	}
 	return receipt, nil
 }
 
@@ -102,6 +121,9 @@ func PrepareDeploymentAdmissionReceipt(ctx context.Context, tx Tx, receipt Deplo
 		receipt.EnvironmentUUID == uuid.Nil || receipt.ActorID == uuid.Nil || receipt.RequestDigest == "" ||
 		receipt.CoreEpoch != 0 || receipt.Disposition != "pending" || receipt.DeploymentID.Valid || receipt.TerminalOutcome != "" {
 		return nil, NewErrBadRequest("complete Deployment admission receipt identity is required")
+	}
+	if err := validateAdmissionNativeIntent(&receipt); err != nil {
+		return nil, err
 	}
 	if err := lockDeploymentAdmission(ctx, tx, receipt.OrgID, receipt.AdmissionID); err != nil {
 		return nil, err
@@ -130,12 +152,14 @@ func PrepareDeploymentAdmissionReceipt(ctx context.Context, tx Tx, receipt Deplo
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to encode immutable Draft test selection")
 	}
+	pipeline, _ := json.Marshal(receipt.Pipeline)
+	externalDispatch, _ := json.Marshal(receipt.ExternalDispatch)
 	if err := tx.QueryRowContext(ctx, `INSERT INTO deployment_admission_receipts
-        (org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,core_epoch,disposition,deployment_id,terminal_outcome,draft_test_snapshots)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING created_at`,
+        (org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,core_epoch,disposition,deployment_id,terminal_outcome,draft_test_snapshots,pipeline,external_dispatch,native_target,native_admission_watermark)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING created_at`,
 		receipt.OrgID, receipt.AdmissionID, receipt.ProjectUUID, receipt.EnvironmentUUID, receipt.ActorID,
 		receipt.RequestDigest, receipt.Mode, moduleVersions, carryForwardVersions, confirmedRestrictedVersions,
-		receipt.CoreEpoch, receipt.Disposition, receipt.DeploymentID, nullableString(receipt.TerminalOutcome), draftTests,
+		receipt.CoreEpoch, receipt.Disposition, receipt.DeploymentID, nullableString(receipt.TerminalOutcome), draftTests, pipeline, externalDispatch, asJson(receipt.NativeTarget), asJson(receipt.NativeAdmissionWatermark),
 	).Scan(&receipt.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to create Deployment admission receipt")
 	}
@@ -151,9 +175,13 @@ func receiptIntentIdentity(receipt *DeploymentAdmissionReceipt) any {
 		ModuleVersions                                     map[string]uuid.UUID
 		CarryForwardModuleVersions                         map[string]uuid.UUID
 		ConfirmedRestrictedVersionUUIDs                    []uuid.UUID
+		NativeTarget                                       *cp.NativeExecutionTargetReference
+		NativeAdmissionWatermark                           *cp.NativeAdmissionWatermark
+		Pipeline                                           *PipelineDefinition
+		ExternalDispatch                                   *ExternalAdmissionDispatch
 		DraftTestSnapshots                                 map[string]uuid.UUID
 	}{receipt.OrgID, receipt.AdmissionID, receipt.ProjectUUID, receipt.EnvironmentUUID, receipt.ActorID, receipt.RequestDigest,
-		receipt.Mode, receipt.ModuleVersions, receipt.CarryForwardModuleVersions, receipt.ConfirmedRestrictedVersionUUIDs, canonicalDraftTestSelection(receipt.DraftTestSnapshots)}
+		receipt.Mode, receipt.ModuleVersions, receipt.CarryForwardModuleVersions, receipt.ConfirmedRestrictedVersionUUIDs, receipt.NativeTarget, receipt.NativeAdmissionWatermark, receipt.Pipeline, receipt.ExternalDispatch, canonicalDraftTestSelection(receipt.DraftTestSnapshots)}
 }
 
 func BindDeploymentAdmissionReceipt(ctx context.Context, tx Tx, intent DeploymentAdmissionReceipt, deploymentID uuid.UUID, coreEpoch int64) (*DeploymentAdmissionReceipt, error) {
@@ -211,7 +239,7 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 		return nil, NewErrBadRequest("transaction, bounded receipt limit and recovery cutoff are required")
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,carry_forward_module_versions,confirmed_restricted_version_uuids,
-        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots
+        core_epoch,disposition,deployment_id,COALESCE(terminal_outcome,''),core_settled_at,created_at,draft_test_snapshots,pipeline,external_dispatch,native_target,native_admission_watermark
         FROM deployment_admission_receipts
         WHERE core_settled_at IS NULL AND created_at <= $2
         ORDER BY created_at,org_id,admission_id LIMIT $1`, limit, createdBefore)
@@ -222,10 +250,10 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 	receipts := make([]DeploymentAdmissionReceipt, 0)
 	for rows.Next() {
 		var receipt DeploymentAdmissionReceipt
-		var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests json.RawMessage
+		var moduleVersions, carryForwardVersions, confirmedRestrictedVersions, draftTests, pipeline, externalDispatch json.RawMessage
 		if err := rows.Scan(&receipt.OrgID, &receipt.AdmissionID, &receipt.ProjectUUID, &receipt.EnvironmentUUID, &receipt.ActorID,
 			&receipt.RequestDigest, &receipt.Mode, &moduleVersions, &carryForwardVersions, &confirmedRestrictedVersions, &receipt.CoreEpoch, &receipt.Disposition,
-			&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests); err != nil {
+			&receipt.DeploymentID, &receipt.TerminalOutcome, &receipt.CoreSettledAt, &receipt.CreatedAt, &draftTests, &pipeline, &externalDispatch, asJson(&receipt.NativeTarget), asJson(&receipt.NativeAdmissionWatermark)); err != nil {
 			return nil, errors.Wrap(err, "failed to scan unsettled Deployment admission")
 		}
 		if err := json.Unmarshal(moduleVersions, &receipt.ModuleVersions); err != nil {
@@ -239,6 +267,12 @@ func ListUnsettledDeploymentAdmissionReceipts(ctx context.Context, tx Tx, limit 
 		}
 		if err := json.Unmarshal(draftTests, &receipt.DraftTestSnapshots); err != nil {
 			return nil, errors.Wrap(err, "failed to decode unsettled Draft test selection")
+		}
+		if err := json.Unmarshal(externalDispatch, &receipt.ExternalDispatch); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(pipeline, &receipt.Pipeline); err != nil {
+			return nil, err
 		}
 		receipts = append(receipts, receipt)
 	}

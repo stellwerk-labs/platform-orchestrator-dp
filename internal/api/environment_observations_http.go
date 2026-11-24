@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	observation "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/observationapi"
@@ -110,7 +111,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationStart(c echo.Context) e
 		return writeObservationError(c, replayErr)
 	}
 	if !a.now().Before(body.AdmissionDeadline) {
-		receipt, _, err := model.TryStartObservation(ctx, a.Admission.Database, claims.OrgID, claims.PluginID, actor, body, "", 0, false)
+		receipt, _, err := model.TryStartObservation(ctx, a.Admission.Database, claims.OrgID, claims.PluginID, actor, body, "", 0, false, nil)
 		if err != nil {
 			return writeObservationError(c, err)
 		}
@@ -130,6 +131,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationStart(c echo.Context) e
 		return echo.NewHTTPError(http.StatusConflict, "Environment identity changed")
 	}
 	limit, supported, runnerID := 0, false, ""
+	var currentTarget *cp.NativeExecutionTargetReference
 	if target.RunnerId != nil {
 		runnerID = *target.RunnerId
 		runner, err := a.ControlPlaneClient.GetInternalRunnerWithResponse(ctx, claims.OrgID, runnerID)
@@ -137,13 +139,33 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationStart(c echo.Context) e
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "Core Runner lookup unavailable")
 		}
 		if runner.StatusCode() == http.StatusOK && runner.JSON200 != nil {
+			if runner.JSON200.OrgId != claims.OrgID || runner.JSON200.Id != runnerID {
+				return echo.NewHTTPError(http.StatusConflict, "Runner identity changed")
+			}
 			limit, supported, err = model.RunnerAdmissionConfiguration(runner.JSON200.RunnerConfiguration)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "invalid Runner scheduling configuration")
 			}
+			native, nativeErr := model.RunnerSupportsPipeline(runner.JSON200.RunnerConfiguration)
+			if nativeErr != nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "invalid Runner execution configuration")
+			}
+			kind, _ := runner.JSON200.RunnerConfiguration.Discriminator()
+			if (native || kind == string(cp.RunnerTypeNativeAgent)) && validateNativeJobConfiguration(runner.JSON200.RunnerConfiguration) != nil {
+				supported = false
+			}
+			public := cp.Runner{OrgId: runner.JSON200.OrgId, Id: runner.JSON200.Id, Uuid: runner.JSON200.Uuid,
+				RunnerConfiguration: runner.JSON200.RunnerConfiguration, StateStorageConfiguration: runner.JSON200.StateStorageConfiguration}
+			currentTarget, err = nativeExecutionTarget(claims.OrgID, runnerID, public, model.DeploymentModeObservation, nil)
+			if err != nil {
+				supported = false
+			}
 		}
 	}
-	receipt, pending, err := model.TryStartObservation(ctx, a.Admission.Database, claims.OrgID, claims.PluginID, actor, body, runnerID, limit, supported)
+	if currentTarget != nil && requireNativeFirstEnvironment(*target) != nil {
+		supported = false
+	}
+	receipt, pending, err := model.TryStartObservation(ctx, a.Admission.Database, claims.OrgID, claims.PluginID, actor, body, runnerID, limit, supported, currentTarget)
 	if err != nil {
 		return writeObservationError(c, err)
 	}
@@ -228,6 +250,9 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationCapabilities(c echo.Con
 	protocols := []string{}
 	if a.OrdinaryAdmissions != nil && a.OrdinaryAdmissions.Core != nil && a.OrdinaryAdmissions.Database != nil && a.OrdinaryAdmissions.BearerToken != "" {
 		protocols = append(protocols, "environment-observation/v1", "environment-observation-recovery/v1")
+	}
+	if a.Server != nil && a.Server.PipelineClient != nil && a.Server.PipelineDispatcher != nil && a.OrdinaryAdmissions != nil && a.OrdinaryAdmissions.Core != nil && a.OrdinaryAdmissions.Database != nil && a.OrdinaryAdmissions.BearerToken != "" {
+		protocols = append(protocols, "plugin-pipelines/v1")
 	}
 	return c.JSON(http.StatusOK, observation.ObservationCapabilities{Protocols: protocols})
 }

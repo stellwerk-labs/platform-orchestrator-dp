@@ -38,13 +38,22 @@ func newObservationRecoveryFixture(t *testing.T) observationRecoveryFixture {
 	f.finish(ordinary.Id, model.DeploymentStatusSucceeded)
 	now := time.Now().UTC()
 	request := observation.ObservationRequest{GrantId: uuid.New(), GrantRevision: 1, ProjectId: queueProject, EnvId: queueEnv, ProjectUuid: f.core.projectUUID, EnvironmentUuid: f.core.envUUID, RequestId: uuid.New(), Occurrence: now, AdmissionDeadline: now.Add(time.Minute)}
-	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true)
+	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true, nil)
 	require.NoError(t, err)
 	result := ObservationResult{SchemaVersion: "1", Complete: true, Tool: "opentofu", ToolVersion: "1.10.0", ObservedChanges: []ObservationChange{}, ProposedChanges: []ObservationChange{{Id: "r1", ResourceType: "test_resource", Actions: []ObservationChangeActions{"update"}}}}
 	require.NoError(t, f.server.ApplyRunnerDeploymentResult(f.ctx, queueOrg, queueRunner, *receipt.RunId, receipt.RunId.String()+":deployment-result", DeploymentResultsUpdateBody{Status: Success, ObservationResult: &result}))
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-	adapter := &ExternalDeploymentHTTPAdapter{Issuer: "core", VerificationKey: public, Admission: ExternalDeploymentAdmissionService{Database: f.store}, OrdinaryAdmissions: f.server.DeploymentAdmissions, ControlPlaneClient: f.coreClient, EventPublisher: f.server.EventPublisher, Logger: zap.NewNop()}
+	adapter := &ExternalDeploymentHTTPAdapter{
+		Server:             f.server,
+		Issuer:             "core",
+		VerificationKey:    public,
+		Admission:          ExternalDeploymentAdmissionService{Database: f.store},
+		OrdinaryAdmissions: f.server.DeploymentAdmissions,
+		ControlPlaneClient: f.coreClient,
+		EventPublisher:     f.server.EventPublisher,
+		Logger:             zap.NewNop(),
+	}
 	router := echo.New()
 	router.POST(ObservationRedeployPath, adapter.HandleObservationRedeploy)
 	router.POST(ObservationRedeployResolvePath, adapter.HandleObservationRedeployResolve)
@@ -221,6 +230,10 @@ func TestObservationRedeployResolutionRacesRealHTTPAdmission(t *testing.T) {
 				require.Equal(t, http.StatusOK, accepted.Code, accepted.Body.String())
 				var receipt observation.ObservationRedeployReceipt
 				require.NoError(t, json.Unmarshal(accepted.Body.Bytes(), &receipt))
+				// Omitted and false both mean no authoritative closure; all other receipt fields must match.
+				require.False(t, receipt.AdmissionClosed != nil && *receipt.AdmissionClosed)
+				require.False(t, resolution.Receipt.AdmissionClosed != nil && *resolution.Receipt.AdmissionClosed)
+				receipt.AdmissionClosed = resolution.Receipt.AdmissionClosed
 				require.Equal(t, receipt, *resolution.Receipt)
 			} else {
 				require.Equal(t, http.StatusConflict, accepted.Code, accepted.Body.String())

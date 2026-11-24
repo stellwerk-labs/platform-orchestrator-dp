@@ -79,6 +79,9 @@ func CreateDeployment(
 }
 
 type DeploymentOptions struct {
+	Runner                      *platformorchestratorcp.Runner
+	ExpectedNativeTarget        opt.Opt[*platformorchestratorcp.NativeExecutionTargetReference]
+	Pipeline                    *model.PipelineDefinition
 	LogMaterial                 *DeploymentLogMaterialService
 	ManagedLogs                 bool
 	DraftTestSnapshots          map[string]uuid.UUID
@@ -105,11 +108,14 @@ type DeploymentOptions struct {
 // DeploymentPlanCapture keeps the exact DP-internal planning snapshot. HTTP
 // adapters must expose only a value-free projection of Manifest and Graph.
 type DeploymentPlanCapture struct {
-	BaseDeploymentID uuid.UUID
-	Manifest         json.RawMessage
-	Graph            json.RawMessage
-	Diff             json.RawMessage
-	ModuleArtifacts  []model.ModuleArtifactRequirement
+	NativeTarget                    *platformorchestratorcp.NativeExecutionTargetReference
+	BaseDeploymentID                uuid.UUID
+	Manifest                        json.RawMessage
+	Graph                           json.RawMessage
+	Diff                            json.RawMessage
+	ModuleArtifacts                 []model.ModuleArtifactRequirement
+	CarryForwardModuleVersions      map[string]uuid.UUID
+	ConfirmedRestrictedVersionUUIDs []uuid.UUID
 }
 
 func CreateDeploymentWithOptions(
@@ -119,28 +125,10 @@ func CreateDeploymentWithOptions(
 	cp platformorchestratorcp.ClientWithResponsesInterface,
 	db model.Databaser, tx model.Tx, options DeploymentOptions,
 ) (*model.DeploymentSummary, []*hstandardoutbox.PendingEventMessage, *DeploymentDiff, error) {
-	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
-		return nil, nil, nil, model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status))
-	}
 	isRollback := mode == model.DeploymentModeRollback || mode == model.DeploymentModeRollbackPlan
 	useLastGraph := mode == model.DeploymentModeDestroy || isRollback
 	if useLastGraph && (len(manifest.Workloads) > 0 || len(manifest.Shared) > 0) {
 		return nil, nil, nil, errors.Errorf("manifest should be empty on destroy or rollback deployments")
-	}
-
-	if env.RunnerId == nil && options.RequireExistingRunner {
-		return nil, nil, nil, model.NewErrConflict("environment has no assigned runner for planning")
-	}
-	if env.RunnerId == nil {
-		if r, err := cp.UpdateRunnerInAnEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.UpdateRunnerInAnEnvironmentParams{}); err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to update runner in environment")
-		} else if r.StatusCode() == http.StatusConflict {
-			return nil, nil, nil, model.NewErrConflict(r.JSON409.Message)
-		} else if r.StatusCode() != http.StatusOK {
-			return nil, nil, nil, errors.Errorf("unexpected status code when updating runner in environment: %s: %s", r.Status(), string(r.Body))
-		} else {
-			env.RunnerId = ref.Ref(r.JSON200.RunnerId)
-		}
 	}
 
 	idempotencyKeyDigest := options.IdempotencyKeyDigest
@@ -148,9 +136,20 @@ func CreateDeploymentWithOptions(
 		idempotencyKeyDigest = opt.Of(digestIdempotencyKey(*idempotencyKey))
 	}
 	requestDigest := moduleVersionRequestDigest(options.ExplicitModuleVersions, options.RestrictedConfirmations, options.DraftTestSnapshots)
+	implicitPipelineDigest := requestDigest
+	if options.Pipeline != nil {
+		pinned, _ := json.Marshal(options.Pipeline)
+		if options.Pipeline.RequestIdentityVersion > 0 {
+			pinned, _ = json.Marshal(options.Pipeline.RequestedSelection)
+		}
+		hash := sha256.Sum256(append([]byte(requestDigest), pinned...))
+		requestDigest = hex.EncodeToString(hash[:])
+	}
 	if options.ManagedLogs {
 		digest := sha256.Sum256([]byte("managed_logs:true:" + requestDigest))
 		requestDigest = hex.EncodeToString(digest[:])
+		implicitDigest := sha256.Sum256([]byte("managed_logs:true:" + implicitPipelineDigest))
+		implicitPipelineDigest = hex.EncodeToString(implicitDigest[:])
 	}
 	if idempotencyKeyDigest.IsSet() {
 		if d, m, err := db.GetDeploymentByIdempotencyKeyDigest(ctx, tx, orgId, projectId, envId, idempotencyKeyDigest.Must()); err != nil {
@@ -158,16 +157,215 @@ func CreateDeploymentWithOptions(
 				return nil, nil, nil, errors.Wrap(err, "failed to get deployment by idempotency key digest")
 			}
 		} else {
+			if d.DeploymentEnvUuid != env.Uuid {
+				return nil, nil, nil, model.NewErrConflict("accepted Deployment belongs to another Environment identity")
+			}
 			var otherManifest DeploymentManifest
 			if err := json.Unmarshal(m, &otherManifest); err != nil {
 				return nil, nil, nil, errors.Wrap(err, "failed to unmarshal deployment manifest")
 			} else if d.Mode != mode || (mode != model.DeploymentModeDestroy && !reflect.DeepEqual(otherManifest, manifest)) {
 				return nil, nil, nil, model.NewErrConflict("incorrect manifest or mode for this idempotency key")
 			}
-			if d.ModuleVersionRequestDigest != requestDigest || !reflect.DeepEqual(d.RollbackToId, rollbackTo) {
+			// Historical builtin runs did not record whether selection was explicit.
+			implicitBuiltin := options.Pipeline != nil && options.Pipeline.PipelineID == "" && options.Pipeline.RequestIdentityVersion == 0 && d.ModuleVersionRequestDigest == implicitPipelineDigest
+			if (d.ModuleVersionRequestDigest != requestDigest && !implicitBuiltin) || !reflect.DeepEqual(d.RollbackToId, rollbackTo) {
 				return nil, nil, nil, model.NewErrConflict("incorrect Module Version selection, restricted confirmation or rollback target for this idempotency key")
 			}
 			return d, nil, nil, nil
+		}
+	}
+
+	compiled, err := compileDeployment(ctx, logger, orgId, projectId, envId, env, manifest, dryRun, cp, db, tx, model.CreateDeploymentParams{
+		CreatedBy:                   createdBy,
+		DeploymentEnvUuid:           env.Uuid,
+		Mode:                        mode,
+		RollbackToId:                rollbackTo,
+		IdempotencyKeyDigest:        idempotencyKeyDigest,
+		EncryptedOutputsRecipient:   opt.OfRef(encryptedOutputsRecipient),
+		EncryptedLogsRecipient:      opt.OfRef(encryptedLogsRecipient),
+		RunnerLogLevel:              string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		ModuleVersionRequestDigest:  requestDigest,
+		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
+		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
+		ExpectedBaseDeploymentID:    options.ExpectedBaseDeploymentID,
+		QueueItemID:                 options.QueueItemID,
+	}, options)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	params := compiled.Params
+	if !dryRun && options.Admission != nil {
+		if err := options.Admission.Authorize(ctx, tx, params.ModuleArtifacts, ordinaryDeploymentCompiledIntent{
+			NativeTarget: params.NativeTarget, Pipeline: params.Pipeline, ProjectID: projectId, EnvironmentID: envId, RunnerID: params.RunnerId,
+			EffectiveBaseDeploymentID: compiled.ReferenceDeploymentID,
+			RollbackToDeploymentID:    uuid.NullUUID{UUID: rollbackTo.Or(uuid.Nil), Valid: rollbackTo.IsSet()},
+			Manifest:                  params.Manifest, Graph: params.Graph, Tofu: params.Tofu,
+			EncryptedOutputsRecipient:  ref.DerefOr(encryptedOutputsRecipient, ""),
+			EncryptedLogsRecipient:     ref.DerefOr(encryptedLogsRecipient, ""),
+			ManagedLogs:                options.ManagedLogs,
+			RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+			CarryForwardModuleVersions: compiled.Lifecycle.CarryForward, ConfirmedRestrictedVersionUUIDs: compiled.Lifecycle.Confirmed,
+		}); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if options.CapturePlan != nil || options.ValidatePlan != nil {
+		rawDiff, err := json.Marshal(compiled.Diff)
+		if err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to serialize deployment diff")
+		}
+		captured := DeploymentPlanCapture{
+			NativeTarget:                    params.NativeTarget,
+			BaseDeploymentID:                compiled.ReferenceDeploymentID,
+			Manifest:                        json.RawMessage(slices.Clone(params.Manifest)),
+			Graph:                           json.RawMessage(slices.Clone(params.Graph)),
+			Diff:                            rawDiff,
+			ModuleArtifacts:                 slices.Clone(params.ModuleArtifacts),
+			CarryForwardModuleVersions:      maps.Clone(compiled.Lifecycle.CarryForward),
+			ConfirmedRestrictedVersionUUIDs: slices.Clone(compiled.Lifecycle.Confirmed),
+		}
+		if options.CapturePlan != nil {
+			*options.CapturePlan = captured
+		}
+		if options.ValidatePlan != nil {
+			if err := options.ValidatePlan(captured); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
+
+	if dryRun {
+		return &model.DeploymentSummary{
+			NativeTarget:              params.NativeTarget,
+			OrgId:                     orgId,
+			ProjectId:                 projectId,
+			EnvId:                     envId,
+			DeploymentEnvUuid:         env.Uuid,
+			Mode:                      mode,
+			RollbackToId:              rollbackTo,
+			CreatedBy:                 createdBy,
+			Status:                    model.DeploymentStatusExecuting,
+			StatusMessage:             "dry run",
+			RunnerId:                  params.RunnerId,
+			Metrics:                   params.Metrics,
+			EncryptedOutputsRecipient: opt.OfRef(encryptedOutputsRecipient),
+			EncryptedLogsRecipient:    opt.OfRef(encryptedLogsRecipient),
+			RunnerLogLevel:            string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
+		}, nil, &compiled.Diff, nil
+	}
+
+	encryptedLogsRecipient, logMaterial, err := options.prepareLogMaterial(ctx, encryptedLogsRecipient)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	params.EncryptedOutputsRecipient = opt.OfRef(encryptedOutputsRecipient)
+	params.EncryptedLogsRecipient = opt.OfRef(encryptedLogsRecipient)
+	params.RunnerLogLevel = string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo))
+	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, params)
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
+	}
+	if logMaterial != nil {
+		if err := model.StoreDeploymentLogMaterial(ctx, tx, orgId, d.Id, *logMaterial); err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to retain deployment log identity")
+		}
+	}
+	if compiled.CapturePipelinePlan {
+		material, err := pipelineMaterialDigest(params.Manifest, params.Graph, params.Tofu, params.ModuleArtifacts, params.PipelineBackend)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		storage, err := json.Marshal(compiled.StateStorageConfiguration)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		capture := pipelinePlanCapture{NativeTarget: d.NativeTarget, BaseDeploymentID: compiled.ObservedStateDeploymentID, MaterialSHA256: material, StorageSHA256: hashRetained(storage),
+			Request: deploymentRequest{Pipeline: params.Pipeline, Manifest: &compiled.Manifest, ManagedLogs: options.ManagedLogs,
+				ModuleVersions: options.ExplicitModuleVersions, RestrictedConfirmations: options.RestrictedConfirmations,
+				DraftTestSnapshots: options.DraftTestSnapshots, EncryptedOutputsRecipient: encryptedOutputsRecipient,
+				RunnerLogLevel: runnerLogLevel},
+			Lifecycle: retainedLifecycle{CarryForward: compiled.Lifecycle.CarryForward, Confirmed: compiled.Lifecycle.Confirmed}}
+		if err = storePipelinePlanCapture(ctx, tx, d.Id, capture); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if err := options.Admission.Bind(ctx, tx, d.Id); err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to bind Deployment admission receipt")
+	}
+	compiled.Diff.ToDeploymentId = ref.Ref(d.Id)
+
+	if d.Mode != model.DeploymentModeDeployPlan {
+		arGraph := compiled.Graph
+		if d.Mode == model.DeploymentModeDestroy {
+			arGraph = new(platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig])
+		}
+		if err := db.InitActiveResourcesFromGraph(ctx, tx, d.DeploymentEnvUuid, d.Id, arGraph); err != nil {
+			return nil, nil, nil, errors.Wrap(err, "failed to init active resources from graph")
+		}
+	}
+
+	msg := &hstandardoutbox.PendingEventMessage{
+		Subject: string(genevents.IoPlatformOrchestratorDeploymentCreated),
+		Payload: model.ConvertDeploymentToEventPayload(d),
+	}
+	messages, err := db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{msg})
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to insert pending event messages")
+	}
+
+	logger = logger.With(logging.ZapDeploymentId(d.Id.String()), logging.ZapRunnerId(d.RunnerId))
+	logger.Info(
+		"deployment created",
+		zap.String("mode", string(d.Mode)),
+		zap.Int("rawManifestBytes", len(params.Manifest)),
+		zap.Int("rawGraphBytes", len(params.Graph)),
+		zap.Int("rawTofuBytes", len(params.Tofu)),
+		zap.Int("numDefinitions", compiled.ModuleDefinitionCount),
+		zap.Int("numProviders", compiled.ModuleProviderCount),
+	)
+
+	return d, messages, &compiled.Diff, nil
+}
+
+type compiledDeployment struct {
+	Params                    model.CreateDeploymentParams
+	Graph                     *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
+	Diff                      DeploymentDiff
+	Manifest                  DeploymentManifest
+	StateStorageConfiguration platformorchestratorcp.StateStorageConfiguration
+	ReferenceDeploymentID     uuid.UUID
+	ObservedStateDeploymentID uuid.UUID
+	Lifecycle                 retainedLifecycle
+	CapturePipelinePlan       bool
+	ModuleDefinitionCount     int
+	ModuleProviderCount       int
+}
+
+func compileDeployment(
+	ctx context.Context, logger *zap.Logger, orgId, projectId, envId string,
+	env platformorchestratorcp.Environment, manifest DeploymentManifest, dryRun bool,
+	cp platformorchestratorcp.ClientWithResponsesInterface, db model.Databaser, tx model.Tx,
+	params model.CreateDeploymentParams, options DeploymentOptions,
+) (compiledDeployment, error) {
+	mode, rollbackTo := params.Mode, params.RollbackToId
+	isRollback := mode == model.DeploymentModeRollback || mode == model.DeploymentModeRollbackPlan
+	useLastGraph := mode == model.DeploymentModeDestroy || isRollback
+	if env.Status == platformorchestratorcp.EnvironmentStatusDeleting && mode != model.DeploymentModeDestroy {
+		return compiledDeployment{}, model.NewErrCodedConflict(model.CodeEnvironmentDeleting, fmt.Sprintf("environment is in status '%s'", env.Status))
+	}
+	if env.RunnerId == nil && options.RequireExistingRunner {
+		return compiledDeployment{}, model.NewErrConflict("environment has no assigned runner for planning")
+	}
+	if env.RunnerId == nil {
+		if r, err := cp.UpdateRunnerInAnEnvironmentWithResponse(ctx, orgId, projectId, envId, &platformorchestratorcp.UpdateRunnerInAnEnvironmentParams{}); err != nil {
+			return compiledDeployment{}, errors.Wrap(err, "failed to update runner in environment")
+		} else if r.StatusCode() == http.StatusConflict {
+			return compiledDeployment{}, model.NewErrConflict(r.JSON409.Message)
+		} else if r.StatusCode() != http.StatusOK {
+			return compiledDeployment{}, errors.Errorf("unexpected status code when updating runner in environment: %s: %s", r.Status(), string(r.Body))
+		} else {
+			env.RunnerId = ref.Ref(r.JSON200.RunnerId)
 		}
 	}
 
@@ -197,15 +395,15 @@ func CreateDeploymentWithOptions(
 			// The first time we deploy an environment, there won't be a "last" deployment and we'll get a 404 here.
 			// so this is normal, expected, and we can blank out the error.
 			if _, ok := model.IsErrNotFound(err); !ok || rollbackTo.IsSet() {
-				return nil, nil, nil, errors.Wrap(err, "failed to find reference deployment")
+				return compiledDeployment{}, errors.Wrap(err, "failed to find reference deployment")
 			}
 			// or ignore
 		} else if d.DeploymentEnvUuid != env.Uuid {
-			return nil, nil, nil, model.NewErrConflict("cannot reference a deployment that is not part of this environment")
+			return compiledDeployment{}, model.NewErrConflict("cannot reference a deployment that is not part of this environment")
 		} else if lastGraph, err = graphs.FromJson(bytes.NewReader(g)); err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to parse reference deployment graph")
+			return compiledDeployment{}, errors.Wrap(err, "failed to parse reference deployment graph")
 		} else if err = json.Unmarshal(m, &lastManifest); err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to parse reference deployment manifest")
+			return compiledDeployment{}, errors.Wrap(err, "failed to parse reference deployment manifest")
 		} else if d != nil {
 			lastDeploymentId = d.Id
 			if !rollbackTo.IsSet() {
@@ -220,28 +418,90 @@ func CreateDeploymentWithOptions(
 	}
 	if options.ReuseLastSuccessfulManifest {
 		if lastGraph == nil || lastDeploymentId == uuid.Nil {
-			return nil, nil, nil, model.NewErrConflict("environment has no effective deployment base")
+			return compiledDeployment{}, model.NewErrConflict("environment has no effective deployment base")
 		}
 		if !lastDeploymentSucceeded {
-			return nil, nil, nil, model.NewErrConflict("latest mutating deployment is not a successful planning base")
+			return compiledDeployment{}, model.NewErrConflict("latest mutating deployment is not a successful planning base")
 		}
 		manifest = lastManifest
 	}
 	if mode == model.DeploymentModeDestroy && lastGraph == nil {
-		return nil, nil, nil, model.NewErrConflict("cannot destroy an environment that has never been deployed")
+		return compiledDeployment{}, model.NewErrConflict("cannot destroy an environment that has never been deployed")
 	}
 
-	var runner platformorchestratorcp.Runner
-	if r, err := cp.GetRunnerWithResponse(ctx, orgId, *env.RunnerId); err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to get runner")
-	} else if r.StatusCode() == http.StatusNotFound {
-		return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("no runner exists with id '%s', the runner must be recreated or the environment must be updated with a new runner", *env.RunnerId))
-	} else if r.StatusCode() != http.StatusOK {
-		return nil, nil, nil, errors.Errorf("unexpected status code when getting runner: %s: %s", r.Status(), string(r.Body))
-	} else {
-		runner = *r.JSON200
+	runner := options.Runner
+	if runner == nil {
+		response, err := cp.GetRunnerWithResponse(ctx, orgId, *env.RunnerId)
+		if err != nil {
+			return compiledDeployment{}, errors.Wrap(err, "failed to get runner")
+		}
+		switch {
+		case response.StatusCode() == http.StatusNotFound:
+			return compiledDeployment{}, model.NewErrConflict("assigned Runner unavailable")
+		case response.StatusCode() != http.StatusOK || response.JSON200 == nil:
+			return compiledDeployment{}, errors.New("unexpected response when getting runner")
+		}
+		runner = response.JSON200
+	}
+	if options.Runner != nil && (runner.OrgId != orgId || runner.Id != *env.RunnerId) {
+		return compiledDeployment{}, model.NewErrConflict("resolved Runner identity changed")
+	}
+	nativeTarget, err := nativeExecutionTarget(orgId, *env.RunnerId, *runner, mode, options.Pipeline)
+	if err != nil {
+		return compiledDeployment{}, err
+	}
+	if options.ExpectedNativeTarget.IsSet() && !reflect.DeepEqual(options.ExpectedNativeTarget.Must(), nativeTarget) {
+		return compiledDeployment{}, model.NewErrConflict("captured Runner execution target changed")
+	}
+	if err := model.RequireStateCustody(ctx, tx, orgId, projectId, envId, env.Uuid, runner.Id, nativeTarget); err != nil {
+		return compiledDeployment{}, err
+	}
+	if nativeTarget != nil {
+		if mode == model.DeploymentModeObservation {
+			return compiledDeployment{}, model.NewErrConflict(nativeExecutionUnavailableMessage)
+		}
+		if err := requireNativeFirstEnvironment(env); err != nil {
+			return compiledDeployment{}, err
+		}
+		if !dryRun && options.Admission == nil {
+			return compiledDeployment{}, model.NewErrConflict("native execution requires an authoritative Core admission attempt")
+		}
+		if !dryRun && (env.ProjectUuid == nil || options.Admission.OrgID != orgId || options.Admission.ProjectUUID != *env.ProjectUuid ||
+			options.Admission.EnvironmentUUID != env.Uuid || options.Admission.ActorID != params.CreatedBy || options.Admission.Mode != mode) {
+			return compiledDeployment{}, model.NewErrConflict("native execution admission scope changed")
+		}
 	}
 
+	pipelineBackend := ""
+	pipeline, err := pipelineForRunner(*runner, mode, options.Pipeline)
+	if err != nil {
+		return compiledDeployment{}, err
+	}
+	if _, err := model.RequirePipelineCostPolicy(ctx, tx, pipeline); err != nil {
+		return compiledDeployment{}, err
+	}
+	if pipeline != nil && pipeline.PipelineID != "" && model.RequiresEnvironmentLease(mode) && options.Admission == nil {
+		return compiledDeployment{}, model.NewErrConflict("published pipeline execution requires the authoritative Core admission guard")
+	}
+	if pipeline != nil {
+		pipelineBackend, err = runner.StateStorageConfiguration.Discriminator()
+		if err != nil {
+			return compiledDeployment{}, err
+		}
+	}
+	var captureNativePlan bool
+	if pipeline != nil && mode == model.DeploymentModeDeployPlan {
+		captureNativePlan = nativeTarget != nil
+		if !captureNativePlan {
+			captureNativePlan, err = model.RunnerSupportsPlanApply(runner.RunnerConfiguration)
+			if err != nil {
+				return compiledDeployment{}, err
+			}
+		}
+	}
+	if pipeline != nil && params.EncryptedLogsRecipient.IsSet() {
+		return compiledDeployment{}, model.NewErrBadRequest("pipeline Runner supports automatic log access only; caller-managed log recipients are unsupported")
+	}
 	// If the last graph was defined then the environment was deployed previously and may have pinned definitions that
 	// we need to request for the next deployment.
 	var pinnedDefinitions []string
@@ -258,52 +518,18 @@ func CreateDeploymentWithOptions(
 	var moduleDefinitions []platformorchestratorcp.InternalExecutionCatalogueModule
 	var moduleProviders []platformorchestratorcp.ModuleProvider
 	var moduleArtifacts map[string]catalogueArtifact
-	var catalogueEditors []platformorchestratorcp.RequestEditorFn
-	if isRollback {
-		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
-			request.Header.Set("X-Stellwerk-Rollback", "true")
-			return nil
-		})
-	}
-	if len(options.RestrictedConfirmations) > 0 {
-		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
-			confirmations := make([]string, len(options.RestrictedConfirmations))
-			for index, versionUUID := range options.RestrictedConfirmations {
-				confirmations[index] = versionUUID.String()
-			}
-			request.Header.Set("X-Stellwerk-Restricted-Version-Confirmations", strings.Join(confirmations, ","))
-			return nil
-		})
-	}
-	if len(activeDefinitions) > 0 {
-		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
-			request.Header.Set("X-Stellwerk-Active-Module-Versions", strings.Join(activeDefinitions, ","))
-			return nil
-		})
-	}
-	if options.IgnoreEnvironmentPins {
-		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
-			request.Header.Set("X-Stellwerk-Module-Operation-Planning", "true")
-			return nil
-		})
-	}
-	if options.ModuleOperationID.IsSet() {
-		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
-			request.Header.Set("X-Stellwerk-Module-Operation-Id", options.ModuleOperationID.Must().String())
-			return nil
-		})
-	}
+	catalogueEditors := deploymentCatalogueEditors(options, isRollback, activeDefinitions)
 	retainedTests, err := graphs.RetainedDraftTestCoordinates(lastGraph, env.Uuid)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 	catalogue, err := compilationCatalogue(ctx, cp, orgId, projectId, envId, platformorchestratorcp.InternalModuleCatalogueGenerateBody{PinnedModuleVersions: pinnedDefinitions, AreRulesIgnored: useLastGraph}, options, retainedTests, catalogueEditors)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 	testSelections, err := validateCatalogueDraftSelection(catalogue, options.DraftTestSnapshots, retainedTests, env.Uuid, options.ExplicitModuleVersions)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 	if len(testSelections) > 0 && selectedModuleVersions == nil {
 		selectedModuleVersions = make(map[string]string)
@@ -312,24 +538,24 @@ func CreateDeploymentWithOptions(
 	moduleDefinitions, moduleProviders = catalogue.Modules, catalogue.Providers
 	moduleArtifacts, err = decodeCatalogueArtifacts(nil, moduleDefinitions)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 
 	if options.AuthorizeModuleVersion != nil {
 		for _, definition := range moduleDefinitions {
 			artifact, found := moduleArtifacts[definition.Id+"@"+definition.VersionId]
 			if !found {
-				return nil, nil, nil, model.NewErrConflict(fmt.Sprintf("module %s@%s has no immutable version metadata", definition.Id, definition.VersionId))
+				return compiledDeployment{}, model.NewErrConflict(fmt.Sprintf("module %s@%s has no immutable version metadata", definition.Id, definition.VersionId))
 			}
 			explicitVersion, explicitlySelected := options.ExplicitModuleVersions[definition.Id]
 			explicitlySelected = explicitlySelected && explicitVersion == definition.VersionId
 			if err := options.AuthorizeModuleVersion(definition.Id, explicitlySelected, artifact); err != nil {
-				return nil, nil, nil, err
+				return compiledDeployment{}, err
 			}
 		}
 	}
 	if err := applySelectedModuleVersions(moduleDefinitions, selectedModuleVersions); err != nil {
-		return nil, nil, nil, model.NewErrConflict(err.Error())
+		return compiledDeployment{}, model.NewErrConflict(err.Error())
 	}
 
 	materialClient := options.ModuleMaterialCatalogue
@@ -346,7 +572,7 @@ func CreateDeploymentWithOptions(
 		manifest = lastManifest
 		newGraph = lastGraph
 		if _, err := graphs.AssignModuleDefinitionsToGraphNodes(lastGraph, moduleDefinitions); err != nil {
-			return nil, nil, nil, model.NewErrConflict(err.Error())
+			return compiledDeployment{}, model.NewErrConflict(err.Error())
 		}
 	} else {
 		var g *platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig]
@@ -357,19 +583,19 @@ func CreateDeploymentWithOptions(
 				// TODO: We can do a whole load more interesting things here to reprocess this message and make it more useful
 				//   to the developers. For example, stripping punctuation, differentiating between failures in the nodes
 				//   the developer requested vs failures inside the modules themselves. etc.
-				return nil, nil, nil, model.NewErrBadRequest(e.Error())
+				return compiledDeployment{}, model.NewErrBadRequest(e.Error())
 			} else if e := graphs.UserBadRequestError(""); errors.As(err, &e) {
 				logger.Warn("failed to build graph", zap.Error(err))
-				return nil, nil, nil, model.NewErrBadRequest(e.Error())
+				return compiledDeployment{}, model.NewErrBadRequest(e.Error())
 			}
-			return nil, nil, nil, err
+			return compiledDeployment{}, err
 		}
 		newGraph = g
 
 		graphs.AddDeletedNodes(newGraph, lastGraph, lastDeploymentMayHaveNotConverged)
 		deletedProviders, err := resolveDeletedModuleMaterial(ctx, materialClient, orgId, projectId, envId, newGraph, catalogueEditors)
 		if err != nil {
-			return nil, nil, nil, err
+			return compiledDeployment{}, err
 		}
 		moduleProviders = mergeModuleProviders(moduleProviders, deletedProviders)
 	}
@@ -380,16 +606,16 @@ func CreateDeploymentWithOptions(
 	if err = graphs.AddProviderMappingToNodes(newGraph, moduleProviders, distanceMatrix); err != nil {
 		if e := graphs.UserBadRequestError(""); errors.As(err, &e) {
 			logger.Warn("failed to add provider mappings to graph", zap.Error(err))
-			return nil, nil, nil, model.NewErrBadRequest(e.Error())
+			return compiledDeployment{}, model.NewErrBadRequest(e.Error())
 		}
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 
 	rawManifest, _ := json.Marshal(manifest)
 
 	rawNewGraph, err := graphs.ToJson(newGraph)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to serialize graph")
+		return compiledDeployment{}, errors.Wrap(err, "failed to serialize graph")
 	}
 
 	contextMap := map[string]interface{}{
@@ -400,13 +626,13 @@ func CreateDeploymentWithOptions(
 	}
 
 	lookup := graphs.ContextPlaceholderLookupMap(contextMap)
-	rawTofu, err := graphs.BuildTofuFromGraph(newGraph, moduleProviders, runner, env.Uuid, lookup, distanceMatrix)
+	rawTofu, err := graphs.BuildTofuFromGraph(newGraph, moduleProviders, *runner, env.Uuid, lookup, distanceMatrix)
 	if err != nil {
 		if e := graphs.UserBadRequestError(""); errors.As(err, &e) {
 			logger.Warn("failed to build tofu", zap.Error(err))
-			return nil, nil, nil, model.NewErrBadRequest(e.Error())
+			return compiledDeployment{}, model.NewErrBadRequest(e.Error())
 		}
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 
 	// A rollback target is the desired graph, not the deployment that last
@@ -414,18 +640,18 @@ func CreateDeploymentWithOptions(
 	if rollbackTo.IsSet() {
 		stateHead, stateSnapshot, err = currentProviderState(ctx, db, tx, orgId, projectId, envId, env.Uuid)
 		if err != nil {
-			return nil, nil, nil, err
+			return compiledDeployment{}, err
 		}
 	}
 	history, _, err := providerStateHistory(ctx, db, tx, stateHead, stateSnapshot)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 	rawTofu, _, err = graphs.RetainProviderBindings(rawTofu, newGraph, history, runner.Id, lookup, func(ids []string) ([]platformorchestratorcp.ModuleProvider, error) {
 		return loadCleanupProviders(ctx, materialClient, orgId, projectId, envId, ids, catalogueEditors)
 	})
 	if err != nil {
-		return nil, nil, nil, model.NewErrConflict("cannot retain provider cleanup context: " + err.Error())
+		return compiledDeployment{}, model.NewErrConflict("cannot retain provider cleanup context: " + err.Error())
 	}
 	// Even a decision that no provider needs retaining is specific to the
 	// observed state. Nil is an explicit expectation that no state head exists.
@@ -433,7 +659,7 @@ func CreateDeploymentWithOptions(
 	if stateHead != nil {
 		observedBase = stateHead.Id
 	}
-	expectedBase := options.ExpectedBaseDeploymentID
+	expectedBase := params.ExpectedBaseDeploymentID
 	if !expectedBase.IsSet() {
 		expectedBase = opt.Of(observedBase)
 	}
@@ -453,7 +679,7 @@ func CreateDeploymentWithOptions(
 	}
 	deploymentArtifacts, err := moduleArtifactRequirements(newGraph, moduleArtifacts, isRollback)
 	if err != nil {
-		return nil, nil, nil, err
+		return compiledDeployment{}, err
 	}
 	if options.AuthorizeModuleVersion != nil {
 		for index := range deploymentArtifacts {
@@ -464,132 +690,29 @@ func CreateDeploymentWithOptions(
 		}
 	}
 	carryForwardVersions, confirmedRestrictedVersions := deploymentAdmissionLifecycleEvidence(mode, activeDefinitions, deploymentArtifacts)
-	if options.Admission != nil {
-		if err := options.Admission.Authorize(ctx, tx, deploymentArtifacts, ordinaryDeploymentCompiledIntent{
-			ProjectID: projectId, EnvironmentID: envId, RunnerID: runner.Id,
-			EffectiveBaseDeploymentID: lastDeploymentId,
-			RollbackToDeploymentID:    uuid.NullUUID{UUID: rollbackTo.Or(uuid.Nil), Valid: rollbackTo.IsSet()},
-			Manifest:                  rawManifest, Graph: rawNewGraph, Tofu: rawTofu,
-			EncryptedOutputsRecipient:  ref.DerefOr(encryptedOutputsRecipient, ""),
-			EncryptedLogsRecipient:     ref.DerefOr(encryptedLogsRecipient, ""),
-			ManagedLogs:                options.ManagedLogs,
-			RunnerLogLevel:             string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
-			CarryForwardModuleVersions: carryForwardVersions, ConfirmedRestrictedVersionUUIDs: confirmedRestrictedVersions,
-		}); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	if options.CapturePlan != nil || options.ValidatePlan != nil {
-		rawDiff, err := json.Marshal(diff)
-		if err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to serialize deployment diff")
-		}
-		captured := DeploymentPlanCapture{
-			BaseDeploymentID: lastDeploymentId,
-			Manifest:         slices.Clone(rawManifest),
-			Graph:            slices.Clone(rawNewGraph),
-			Diff:             rawDiff,
-			ModuleArtifacts:  slices.Clone(deploymentArtifacts),
-		}
-		if options.CapturePlan != nil {
-			*options.CapturePlan = captured
-		}
-		if options.ValidatePlan != nil {
-			if err := options.ValidatePlan(captured); err != nil {
-				return nil, nil, nil, err
-			}
-		}
-	}
-
-	if dryRun {
-		return &model.DeploymentSummary{
-			OrgId:                     orgId,
-			ProjectId:                 projectId,
-			EnvId:                     envId,
-			DeploymentEnvUuid:         env.Uuid,
-			Mode:                      mode,
-			RollbackToId:              rollbackTo,
-			CreatedBy:                 createdBy,
-			Status:                    model.DeploymentStatusExecuting,
-			StatusMessage:             "dry run",
-			RunnerId:                  runner.Id,
-			Metrics:                   metrics,
-			EncryptedOutputsRecipient: opt.OfRef(encryptedOutputsRecipient),
-			EncryptedLogsRecipient:    opt.OfRef(encryptedLogsRecipient),
-			RunnerLogLevel:            string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
-		}, nil, &diff, nil
-	}
-
-	encryptedLogsRecipient, logMaterial, err := options.prepareLogMaterial(ctx, encryptedLogsRecipient)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	d, err := db.CreateDeployment(ctx, tx, orgId, projectId, envId, model.CreateDeploymentParams{
-		CreatedBy:                   createdBy,
-		DeploymentEnvUuid:           env.Uuid,
-		Mode:                        mode,
-		Manifest:                    rawManifest,
-		RollbackToId:                rollbackTo,
-		Graph:                       rawNewGraph,
-		Tofu:                        rawTofu,
-		IdempotencyKeyDigest:        idempotencyKeyDigest,
-		RunnerId:                    runner.Id,
-		EncryptedOutputsRecipient:   opt.OfRef(encryptedOutputsRecipient),
-		EncryptedLogsRecipient:      opt.OfRef(encryptedLogsRecipient),
-		Metrics:                     metrics,
-		RunnerLogLevel:              string(ref.DerefOr(runnerLogLevel, DeploymentCreateBodyRunnerLogLevelInfo)),
-		ModuleArtifacts:             deploymentArtifacts,
-		ModuleVersionRequestDigest:  requestDigest,
-		ExpectedCurrentDeploymentID: options.ExpectedCurrentDeploymentID,
-		RetryOfRollbackDeploymentID: options.RetryOfRollbackDeploymentID,
-		ExpectedBaseDeploymentID:    expectedBase,
-		QueueItemID:                 options.QueueItemID,
-	})
-	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to create deployment")
-	}
-	if logMaterial != nil {
-		if err := model.StoreDeploymentLogMaterial(ctx, tx, orgId, d.Id, *logMaterial); err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to retain deployment log identity")
-		}
-	}
-	if err := options.Admission.Bind(ctx, tx, d.Id); err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to bind Deployment admission receipt")
-	}
-	diff.ToDeploymentId = ref.Ref(d.Id)
-
-	if d.Mode != model.DeploymentModeDeployPlan {
-		arGraph := newGraph
-		if d.Mode == model.DeploymentModeDestroy {
-			arGraph = new(platformorchestratorgraph.Graph[*graphs.GraphNodeModuleConfig])
-		}
-		if err := db.InitActiveResourcesFromGraph(ctx, tx, d.DeploymentEnvUuid, d.Id, arGraph); err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to init active resources from graph")
-		}
-	}
-
-	msg := &hstandardoutbox.PendingEventMessage{
-		Subject: string(genevents.IoPlatformOrchestratorDeploymentCreated),
-		Payload: model.ConvertDeploymentToEventPayload(d),
-	}
-	messages, err := db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{msg})
-	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to insert pending event messages")
-	}
-
-	logger = logger.With(logging.ZapDeploymentId(d.Id.String()), logging.ZapRunnerId(d.RunnerId))
-	logger.Info(
-		"deployment created",
-		zap.String("mode", string(d.Mode)),
-		zap.Int("rawManifestBytes", len(rawManifest)),
-		zap.Int("rawGraphBytes", len(rawNewGraph)),
-		zap.Int("rawTofuBytes", len(rawTofu)),
-		zap.Int("numDefinitions", len(moduleDefinitions)),
-		zap.Int("numProviders", len(moduleProviders)),
-	)
-
-	return d, messages, &diff, nil
+	params.NativeTarget = nativeTarget
+	params.Pipeline = pipeline
+	params.PipelineBackend = pipelineBackend
+	params.Manifest = rawManifest
+	params.Graph = rawNewGraph
+	params.Tofu = rawTofu
+	params.RunnerId = runner.Id
+	params.Metrics = metrics
+	params.ModuleArtifacts = deploymentArtifacts
+	params.ExpectedBaseDeploymentID = expectedBase
+	return compiledDeployment{
+		Params:                    params,
+		Graph:                     newGraph,
+		Diff:                      diff,
+		Manifest:                  manifest,
+		StateStorageConfiguration: runner.StateStorageConfiguration,
+		ReferenceDeploymentID:     lastDeploymentId,
+		ObservedStateDeploymentID: observedBase,
+		Lifecycle:                 retainedLifecycle{CarryForward: carryForwardVersions, Confirmed: confirmedRestrictedVersions},
+		CapturePipelinePlan:       captureNativePlan,
+		ModuleDefinitionCount:     len(moduleDefinitions),
+		ModuleProviderCount:       len(moduleProviders),
+	}, nil
 }
 
 // digestIdempotencyKey is the only form in which an idempotency key is stored.
@@ -877,4 +1000,43 @@ func DiffGraphs(envUuid uuid.UUID, before, after *platformorchestratorgraph.Grap
 		}
 	}
 	return DeploymentDiff{Changes: changes, NumAdded: added, NumRemoved: removed, NumChanged: len(changes) - added - removed}
+}
+
+func deploymentCatalogueEditors(options DeploymentOptions, isRollback bool, activeDefinitions []string) []platformorchestratorcp.RequestEditorFn {
+	var catalogueEditors []platformorchestratorcp.RequestEditorFn
+	if isRollback {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Rollback", "true")
+			return nil
+		})
+	}
+	if len(options.RestrictedConfirmations) > 0 {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			confirmations := make([]string, len(options.RestrictedConfirmations))
+			for index, versionUUID := range options.RestrictedConfirmations {
+				confirmations[index] = versionUUID.String()
+			}
+			request.Header.Set("X-Stellwerk-Restricted-Version-Confirmations", strings.Join(confirmations, ","))
+			return nil
+		})
+	}
+	if len(activeDefinitions) > 0 {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Active-Module-Versions", strings.Join(activeDefinitions, ","))
+			return nil
+		})
+	}
+	if options.IgnoreEnvironmentPins {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Planning", "true")
+			return nil
+		})
+	}
+	if options.ModuleOperationID.IsSet() {
+		catalogueEditors = append(catalogueEditors, func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Stellwerk-Module-Operation-Id", options.ModuleOperationID.Must().String())
+			return nil
+		})
+	}
+	return catalogueEditors
 }

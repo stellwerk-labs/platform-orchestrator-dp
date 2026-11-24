@@ -28,6 +28,7 @@ const (
 	// offline runner never receives a command after its bundle has expired.
 	ObjectStoreTTL       = 31 * 24 * time.Hour
 	fileMode             = 0644
+	privateFileMode      = 0600
 	directoryMode        = 0755
 	ArtifactManifestName = ".stellwerk-artifacts.json"
 )
@@ -358,4 +359,27 @@ func validateRetainedArtifactIdentities(artifacts []model.ModuleArtifactRequirem
 		}
 	}
 	return nil
+}
+
+// BuildRetained carries only encrypted material, never the key or plaintext.
+func BuildRetained(ciphertext []byte) (*bytes.Buffer, error) {
+	if len(ciphertext) == 0 {
+		return nil, errors.New("retained plan ciphertext missing")
+	}
+	out := new(bytes.Buffer)
+	gz := gzip.NewWriter(out)
+	tarWriter := tar.NewWriter(gz)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: ".stellwerk-retained-plan-v1.age", Mode: privateFileMode, Size: int64(len(ciphertext))}); err != nil {
+		return nil, err
+	}
+	if _, err := tarWriter.Write(ciphertext); err != nil {
+		return nil, err
+	}
+	if err := tarWriter.Close(); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

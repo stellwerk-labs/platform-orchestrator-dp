@@ -75,10 +75,15 @@ func TestOrdinaryDeploymentHTTPAdmissionPreservesOptionalAndExplicitKeys(t *test
 			return
 		}
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+organization+"/projects/project/envs/environment/module-execution-catalogue":
+			assert.Equal(t, "Bearer scoped-dp-token", r.Header.Get("Authorization"))
+			assert.Empty(t, r.Header.Get("From"))
+			_, err := w.Write([]byte(`{"modules":[],"providers":[]}`))
+			assert.NoError(t, err)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/envs/environment"):
 			assert.NoError(t, json.NewEncoder(w).Encode(coreapi.Environment{Id: "environment", ProjectId: "project", ProjectUuid: &project, Uuid: environment, RunnerId: &runnerID, Status: coreapi.EnvironmentStatusActive}))
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/runners/runner"):
-			assert.NoError(t, json.NewEncoder(w).Encode(coreapi.Runner{Id: runnerID, StateStorageConfiguration: storage}))
+			assert.NoError(t, json.NewEncoder(w).Encode(coreapi.Runner{Id: runnerID, OrgId: organization, StateStorageConfiguration: storage}))
 		case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+organization+"/projects/project/envs/environment/module-catalogue":
 			assert.NoError(t, json.NewEncoder(w).Encode(coreapi.InternalModuleCatalogue{Modules: []coreapi.InternalModuleCatalogueModule{}, Providers: []coreapi.ModuleProvider{}}))
 		default:

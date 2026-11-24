@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -283,3 +284,72 @@ func backdateAdmissionReceipt(t *testing.T, ctx context.Context, store model.Dat
 }
 
 func refString(value string) *string { return &value }
+
+func TestCommonCompilerPreservesAdmissionCaptureValidationOrder(t *testing.T) {
+	for _, denyAdmission := range []bool{true, false} {
+		name := "validation refuses after capture"
+		if denyAdmission {
+			name = "admission refuses before capture"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newQueueFixture(t, DeploymentQueueConfig{})
+			sentinel := DeploymentPlanCapture{BaseDeploymentID: uuid.New()}
+			captured := sentinel
+			f.core.set(func(core *queueCore) {
+				if denyAdmission {
+					core.deny[f.actor] = "pin_protection"
+				}
+				core.onAuthorize = func(uuid.UUID) { assert.Equal(t, sentinel, captured) }
+			})
+			attempt := f.server.DeploymentAdmissions.NewAttempt(queueOrg, f.core.projectUUID, f.core.envUUID, f.actor, model.DeploymentModeDeploy, "capture-order")
+			validationError := errors.New("reviewed plan validation refused")
+			validated := false
+			tx, err := f.store.BeginTx(f.ctx, nil)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback() }()
+			deployment, messages, diff, err := CreateDeploymentWithOptions(
+				f.ctx, f.server.Logger, f.actor, queueOrg, queueProject, queueEnv,
+				platformorchestratorcp.Environment{Uuid: f.core.envUUID, RunnerId: refString(queueRunner)},
+				model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), DeploymentManifest{Workloads: map[string]DeploymentManifestWorkload{}},
+				nil, nil, nil, false, nil, f.coreClient, f.store, tx,
+				DeploymentOptions{
+					Admission: attempt, ManagedLogs: true, LogMaterial: &DeploymentLogMaterialService{}, CapturePlan: &captured,
+					ValidatePlan: func(plan DeploymentPlanCapture) error {
+						validated = true
+						require.Equal(t, plan, captured, "capture is assigned before validation")
+						require.Contains(t, f.core.unsettledGuards(), attempt.AdmissionID, "Core admission precedes validation")
+						return validationError
+					},
+				},
+			)
+			if denyAdmission {
+				require.ErrorIs(t, err, ErrDeploymentAdmissionDenied)
+				require.Equal(t, sentinel, captured)
+				require.False(t, validated)
+			} else {
+				require.ErrorIs(t, err, validationError, "validation precedes unconfigured log material generation")
+				require.True(t, validated)
+				require.Equal(t, uuid.Nil, captured.BaseDeploymentID)
+				require.JSONEq(t, `{"workloads":{}}`, string(captured.Manifest))
+				require.NotEmpty(t, captured.Graph)
+				require.NotEmpty(t, captured.Diff)
+			}
+			require.Nil(t, deployment)
+			require.Nil(t, messages)
+			require.Nil(t, diff)
+			for _, table := range []string{"deployments", "deployment_log_material", "environment_deployment_leases", "runner_job_reservations", "pending_event_messages"} {
+				var count int
+				require.NoError(t, tx.QueryRowContext(f.ctx, "SELECT count(*) FROM "+table).Scan(&count))
+				require.Zero(t, count, table)
+			}
+			receipt, err := model.GetDeploymentAdmissionReceipt(f.ctx, tx, queueOrg, attempt.AdmissionID)
+			require.NoError(t, err)
+			require.Equal(t, "pending", receipt.Disposition)
+			require.False(t, receipt.DeploymentID.Valid)
+			require.NoError(t, tx.Rollback())
+			require.NoError(t, attempt.SealAbsent(f.ctx))
+			require.Empty(t, f.core.unsettledGuards())
+			require.Equal(t, 1, f.count(`SELECT count(*) FROM deployment_admission_receipts WHERE admission_id=$1 AND disposition='absent' AND core_settled_at IS NOT NULL`, attempt.AdmissionID))
+		})
+	}
+}

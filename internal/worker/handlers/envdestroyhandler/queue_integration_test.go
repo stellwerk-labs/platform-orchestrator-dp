@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -174,4 +175,14 @@ func TestDeletionCancelsQueuedDeploymentsAndDestroyWaitsInsteadOfFailing(t *test
 	last, _, _, _, err := store.GetLastDeployment(ctx, nil, "org", "project", "environment", model.GetLastDeploymentParams{StateChangeOnly: true})
 	require.NoError(t, err)
 	require.Equal(t, model.DeploymentModeDestroy, last.Mode)
+	require.Equal(t, "runner", last.RunnerId)
+	request, body, found := strings.Cut(changes[0], " {")
+	require.True(t, found)
+	require.Equal(t, "PATCH /internal/orgs/org/projects/project/envs/environment", request)
+	var update platformorchestratorcp.EnvironmentInternalUpdateBody
+	require.NoError(t, json.Unmarshal([]byte("{"+body), &update))
+	require.NotNil(t, update.Status)
+	require.Equal(t, platformorchestratorcp.EnvironmentStatusDeleting, *update.Status)
+	require.NotNil(t, update.StatusMessage)
+	require.Equal(t, fmt.Sprintf("Waiting for destroy deployment '%s' to complete", last.Id), *update.StatusMessage)
 }

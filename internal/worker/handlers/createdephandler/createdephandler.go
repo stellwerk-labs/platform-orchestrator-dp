@@ -1,6 +1,7 @@
 package createdephandler
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,12 +36,15 @@ import (
 const magicNoOpRunnerId = "sunshine-weary-robin-runner"
 
 type CreateDepHandler struct {
-	db                 model.Databaser
-	publisher          hmessaging.Publisher
-	controlPlaneClient platformorchestratorcp.ClientWithResponsesInterface
-	runnerFactory      runners.RunnerFactory
-	bundleStore        RunnerBundleStore
-	executionClient    platformorchestratorcp.ClientWithResponsesInterface
+	PipelineDispatch          func(context.Context, *model.DeploymentSummary) error
+	ObservationDispatch       func(context.Context, *model.DeploymentSummary) error
+	db                        model.Databaser
+	publisher                 hmessaging.Publisher
+	controlPlaneClient        platformorchestratorcp.ClientWithResponsesInterface
+	runnerFactory             runners.RunnerFactory
+	bundleStore               RunnerBundleStore
+	executionClient           platformorchestratorcp.ClientWithResponsesInterface
+	retainedDispatchAuthorize func(context.Context, *model.DeploymentSummary) error
 }
 
 type RunnerBundleStore interface {
@@ -57,13 +61,19 @@ func Setup(
 	runnerGatewayConfiguration runners.RunnerGatewayConfiguration,
 	bundleStore RunnerBundleStore,
 	executionClient platformorchestratorcp.ClientWithResponsesInterface,
+	retainedAuthorize ...func(context.Context, *model.DeploymentSummary) error,
 ) (*CreateDepHandler, error) {
+	var authorize func(context.Context, *model.DeploymentSummary) error
+	if len(retainedAuthorize) > 0 {
+		authorize = retainedAuthorize[0]
+	}
 	return &CreateDepHandler{
-		db:                 db,
-		publisher:          pub,
-		controlPlaneClient: cp,
-		bundleStore:        bundleStore,
-		executionClient:    executionClient,
+		db:                        db,
+		publisher:                 pub,
+		controlPlaneClient:        cp,
+		bundleStore:               bundleStore,
+		executionClient:           executionClient,
+		retainedDispatchAuthorize: authorize,
 		runnerFactory: runners.NewDefaultRunnerFactory(
 			logger,
 			db,
@@ -182,6 +192,32 @@ func (h *CreateDepHandler) failDeployment(ctx context.Context, logger *zap.Logge
 }
 
 func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, d *model.DeploymentSummary) error {
+	if d.NativeTarget != nil && (!d.NativeTarget.PipelineVersion.Valid() ||
+		d.Mode == model.DeploymentModeObservation && d.HasPipeline ||
+		d.Mode != model.DeploymentModeObservation && (!d.HasPipeline || d.HasNativeObservation)) {
+		return hmessaging.NewRetryError(errors.New("native execution target requires v2 dispatch"))
+	}
+	if d.HasNativeObservation || d.NativeTarget != nil && d.Mode == model.DeploymentModeObservation {
+		if h.ObservationDispatch == nil {
+			return hmessaging.NewRetryError(errors.New("frozen observation dispatch is unavailable"))
+		}
+		if err := h.ObservationDispatch(ctx, d); err != nil {
+			return hmessaging.NewRetryError(err)
+		}
+		return nil
+	}
+	if d.HasPipeline {
+		if h.PipelineDispatch == nil {
+			return hmessaging.NewRetryError(errors.New("pipeline dispatch is unavailable"))
+		}
+		if err := h.PipelineDispatch(ctx, d); err != nil {
+			return hmessaging.NewRetryError(err)
+		}
+		return nil
+	}
+	if err := h.loadRetainedDispatch(ctx, d); err != nil {
+		return err
+	}
 	if d.Mode == model.DeploymentModeObservation && time.Since(d.CreatedAt) >= model.RunnerExecutionBudget {
 		budget, err := h.db.GetDeploymentDispatchBudget(ctx, nil, d.Id)
 		if err != nil {
@@ -201,6 +237,17 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		return errors.Errorf("unexpected status code when getting runner '%s': %s: %s", d.RunnerId, res.Status(), string(res.Body))
 	}
 	rn := *res.JSON200
+	if native, e := model.RunnerSupportsPipeline(rn.RunnerConfiguration); e != nil {
+		return e
+	} else if native {
+		if d.Mode == model.DeploymentModeObservation && h.ObservationDispatch != nil {
+			if err := h.ObservationDispatch(ctx, d); err != nil {
+				return hmessaging.NewRetryError(err)
+			}
+			return nil
+		}
+		return usererrors.NewUserError("pipeline Runner refuses an execution without a pinned supported recipe")
+	}
 	limit, observationSupported, err := model.RunnerAdmissionConfiguration(rn.RunnerConfiguration)
 	if err != nil {
 		return err
@@ -227,7 +274,13 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		return h.scheduleStatusCheck(ctx, d)
 	}
 	if h.bundleStore != nil {
-		archive, err := bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id, h.executionClient)
+		var archive *bytes.Buffer
+		var err error
+		if d.RetainedPlan != nil && !d.RetainedPlan.Export {
+			archive, err = bundles.BuildRetained(d.RetainedPlan.Ciphertext)
+		} else {
+			archive, err = bundles.Build(ctx, h.db, h.controlPlaneClient, d.OrgId, d.Id, h.executionClient)
+		}
 		if err != nil {
 			if d.Mode == model.DeploymentModeObservation {
 				return usererrors.NewUserError("observation baseline material is unavailable")
@@ -239,6 +292,14 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 		}
 	}
 
+	if d.RetainedPlan != nil && !d.RetainedPlan.Export {
+		if h.retainedDispatchAuthorize == nil {
+			return usererrors.NewUserError("retained apply authorization unavailable")
+		}
+		if err := h.retainedDispatchAuthorize(ctx, d); err != nil {
+			return usererrors.NewUserError("retained apply authorization unavailable or revoked")
+		}
+	}
 	deadline, err := h.db.BeginDeploymentDispatch(ctx, d)
 	if err != nil {
 		return err
@@ -259,6 +320,28 @@ func (h *CreateDepHandler) handleInner(ctx context.Context, logger *zap.Logger, 
 	}
 
 	return h.scheduleStatusCheck(ctx, d)
+}
+
+func (h *CreateDepHandler) loadRetainedDispatch(ctx context.Context, d *model.DeploymentSummary) error {
+	if !d.HasRetainedPlan {
+		return nil
+	}
+	if h.retainedDispatchAuthorize == nil {
+		return usererrors.NewUserError("retained plan execution is disabled")
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	d.RetainedPlan, err = model.LoadRetainedPlanDispatch(ctx, tx, d.OrgId, d.Id)
+	_ = tx.Rollback()
+	if err != nil {
+		return errors.Wrap(err, "failed to load retained plan dispatch")
+	}
+	if d.RetainedPlan == nil {
+		return usererrors.NewUserError("retained plan binding unavailable")
+	}
+	return nil
 }
 
 func (h *CreateDepHandler) scheduleStatusCheck(ctx context.Context, deployment *model.DeploymentSummary) error {

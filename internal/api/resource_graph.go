@@ -7,25 +7,29 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 )
 
 func (s *Server) ListDeploymentResourceNodes(ctx context.Context, request ListDeploymentResourceNodesRequestObject) (ListDeploymentResourceNodesResponseObject, error) {
-	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
-		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionResourceGraphRead); err != nil {
-		return nil, err
+	uid, authErr := GetAuthenticatedUserIdOr401(ctx)
+	if authErr != nil {
+		return nil, authErr
 	}
 
 	dep, _, _, rawGraph, err := s.Database.GetDeployment(ctx, nil, request.OrgId, request.DeploymentId, model.GetModeDefault)
 	if err != nil {
 		if e, ok := model.IsErrNotFound(err); ok {
+			middleware.SetAuthCheckedCtx(ctx)
 			return ListDeploymentResourceNodes404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 		}
 		return nil, errors.Wrap(err, "failed to get deployment")
 	}
 
+	if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, dep.DeploymentEnvUuid, PermissionResourceGraphRead); err != nil {
+		return nil, err
+	}
 	graph, err := graphs.FromJson(bytes.NewReader(rawGraph))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse deployment graph")

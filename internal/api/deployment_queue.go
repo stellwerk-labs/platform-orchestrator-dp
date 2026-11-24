@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -53,6 +54,9 @@ func (s *Server) deploymentQueueConfig() DeploymentQueueConfig {
 // sent it. A queued request stores this intent, never a resolved graph, and
 // is resolved like a new request when it reaches the head of its queue.
 type deploymentRequest struct {
+	runner                    *cp.Runner
+	NativeTarget              *cp.NativeExecutionTargetReference  `json:"native_target,omitempty"`
+	Pipeline                  *model.PipelineDefinition           `json:"pipeline,omitempty"`
 	ManagedLogs               bool                                `json:"managed_logs,omitempty"`
 	DraftTestSnapshots        map[string]uuid.UUID                `json:"draft_test_snapshots,omitempty"`
 	Manifest                  *DeploymentManifest                 `json:"manifest,omitempty"`
@@ -145,13 +149,8 @@ func (s *Server) enqueueDeployment(ctx context.Context, request model.NewDeploym
 }
 
 func (s *Server) ListDeploymentQueueItems(ctx context.Context, request ListDeploymentQueueItemsRequestObject) (ListDeploymentQueueItemsResponseObject, error) {
-	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
+	if err := s.authorizeDeploymentList(ctx, request.OrgId, request.Params.ProjectId, request.Params.EnvId); err != nil {
 		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
-		return nil, err
-	}
-	if request.Params.EnvId != nil && request.Params.ProjectId == nil {
-		return ListDeploymentQueueItems400JSONResponse{N400BadRequestJSONResponse: Generate400Response("project_id param required if env_id is specified")}, nil
 	}
 	params := model.ListDeploymentQueueParams{ProjectID: opt.OfRef(request.Params.ProjectId), EnvID: opt.OfRef(request.Params.EnvId)}
 	if request.Params.State != nil {
@@ -181,10 +180,9 @@ func (s *Server) ListDeploymentQueueItems(ctx context.Context, request ListDeplo
 }
 
 func (s *Server) GetDeploymentQueueItem(ctx context.Context, request GetDeploymentQueueItemRequestObject) (GetDeploymentQueueItemResponseObject, error) {
-	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
-		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionDeploymentRead); err != nil {
-		return nil, err
+	uid, authErr := GetAuthenticatedUserIdOr401(ctx)
+	if authErr != nil {
+		return nil, authErr
 	}
 	var item *model.DeploymentQueueItem
 	err := s.inTx(ctx, func(tx model.Tx) error {
@@ -193,8 +191,12 @@ func (s *Server) GetDeploymentQueueItem(ctx context.Context, request GetDeployme
 		return err
 	})
 	if e, ok := model.IsErrNotFound(err); ok {
+		middleware.SetAuthCheckedCtx(ctx)
 		return GetDeploymentQueueItem404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(e)}, nil
 	} else if err != nil {
+		return nil, err
+	}
+	if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, item.EnvironmentUUID, PermissionDeploymentRead); err != nil {
 		return nil, err
 	}
 	return GetDeploymentQueueItem200JSONResponse(apiQueueItemFromModel(*item, true)), nil

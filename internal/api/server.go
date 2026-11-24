@@ -17,6 +17,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	pipelineapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/pipelineapi"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"go.uber.org/zap"
 
@@ -39,6 +40,7 @@ type Server struct {
 	Logger                   *zap.Logger
 	EventPublisher           hmessaging.Publisher
 	ControlPlaneClient       platformorchestratorcp.ClientWithResponsesInterface
+	PipelineClient           pipelineapi.ClientWithResponsesInterface
 	RunnerTokenSalt          string
 	DeploymentCompletedHooks *completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]
 	Vault                    vault.VaultClientInterface
@@ -48,6 +50,9 @@ type Server struct {
 	ExternalDeployments      *ExternalDeploymentHTTPAdapter
 	DeploymentAdmissions     *OrdinaryDeploymentAdmissionService
 	DeploymentQueue          DeploymentQueueConfig
+	RetainedPlans            *RetainedPlanService
+	RunnerRollouts           *RunnerRolloutService
+	PipelineDispatcher       *PipelineDispatcher
 
 	queueKicks deploymentQueueKicks
 }
@@ -68,6 +73,9 @@ func SkipGeneratedOpenAPIValidation(c echo.Context) bool {
 		ExternalDeploymentLogsPath,
 		ExternalDeploymentOutputsPath:
 		return true
+	case LegacyDeploymentAccessPath, RunnerRolloutsPath, RunnerRolloutCatalogPath, RunnerRolloutReadPath, RunnerRolloutActionPath, RunnerRolloutPlanLogsPath, RunnerRolloutExecutionLogsPath,
+		"/v1/orgs/:orgId/runners/:runnerId/deployments/:deploymentId/retained-plan-key":
+		return true
 	default:
 		return false
 	}
@@ -81,7 +89,15 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 		adaptStrictMiddleware(hecho.AuthMiddleware(string(UserIdHeaderScopes))),
 		adaptStrictMiddleware(token.StrictEncryptionMiddleware()),
 	})
+	e.Pre(pipelinePlanBodyLimit)
 	RegisterHandlers(e, apiHandler)
+	e.GET(LegacyDeploymentAccessPath, s.getLegacyDeploymentAccess, echomiddleware.ContextTimeout(RequestHandlerTimeout))
+	if s.RetainedPlans != nil {
+		e.GET("/v1/orgs/:orgId/runners/:runnerId/deployments/:deploymentId/retained-plan-key", s.RetainedPlans.HandleKey)
+	}
+	if s.RunnerRollouts != nil {
+		s.RunnerRollouts.MapRoutes(e)
+	}
 	e.GET("/platform-settings/cost-estimation", s.getCostPolicy, echomiddleware.ContextTimeout(RequestHandlerTimeout))
 	e.PUT("/platform-settings/cost-estimation", s.putCostPolicy, echomiddleware.ContextTimeout(RequestHandlerTimeout))
 	e.GET("/internal/installation-maintenance", s.getInternalInstallationMaintenance, echomiddleware.ContextTimeout(RequestHandlerTimeout))
@@ -89,6 +105,7 @@ func (s *Server) MapRoutes(e *echo.Echo) {
 	e.PUT("/platform-settings/deployments", s.putInstallationMaintenance, echomiddleware.ContextTimeout(RequestHandlerTimeout))
 	if s.ExternalDeployments != nil {
 		s.ExternalDeployments.OrdinaryAdmissions = s.DeploymentAdmissions
+		s.ExternalDeployments.Server = s
 		e.POST(ObservationRedeployPath, s.ExternalDeployments.HandleObservationRedeploy)
 		e.POST(ObservationRequestResolvePath, s.ExternalDeployments.HandleObservationRequestResolve)
 		e.POST(ObservationRedeployResolvePath, s.ExternalDeployments.HandleObservationRedeployResolve)

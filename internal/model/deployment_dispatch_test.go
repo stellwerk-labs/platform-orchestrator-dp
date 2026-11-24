@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOnlyPluginDispatchedUnknownFailureBlocksReplacement(t *testing.T) {
+func TestUnknownPluginOrRetainedApplyFailureBlocksReplacement(t *testing.T) {
 	unknownPluginFailure := DeploymentStopEvidence{Failed: true, PluginDispatched: true, Dispatched: true}
 	for name, test := range map[string]struct {
 		evidence     DeploymentStopEvidence
@@ -16,6 +16,8 @@ func TestOnlyPluginDispatchedUnknownFailureBlocksReplacement(t *testing.T) {
 		blocks       bool
 	}{
 		"plugin-dispatched failure without stop proof": {evidence: unknownPluginFailure, unreconciled: true, blocks: true},
+		"retained apply failure without stop proof":    {evidence: DeploymentStopEvidence{Failed: true, RetainedApply: true, Dispatched: true}, unreconciled: true, blocks: true},
+		"retained apply with stop proof":               {evidence: DeploymentStopEvidence{Failed: true, RetainedApply: true, Dispatched: true, StopProven: true}},
 		"ordinary failure without stop proof":          {evidence: DeploymentStopEvidence{Failed: true, Dispatched: true}, unreconciled: true},
 		"plugin-dispatched failure with stop proof":    {evidence: DeploymentStopEvidence{Failed: true, PluginDispatched: true, Dispatched: true, StopProven: true}},
 		"plugin-dispatched failure acknowledged":       {evidence: DeploymentStopEvidence{Failed: true, PluginDispatched: true, Dispatched: true, Acknowledged: true}},

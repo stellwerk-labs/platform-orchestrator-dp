@@ -44,14 +44,17 @@ const (
 )
 
 type Worker struct {
-	NATSConnection *nats.Conn
-	JetStream      jetstream.JetStream
-	DLQPublisher   hmessaging.Publisher
-	EventPublisher hmessaging.Publisher
-	Logger         *zap.Logger
-	DB             model.Databaser
-	OidcProvider   oidc.Provider
-	HTTPClient     *http.Client
+	PipelineDispatcher    *api.PipelineDispatcher
+	PipelineProgress      func(context.Context, hmessaging.EventEnvelope) error
+	PipelineControlResult func(context.Context, []byte) error
+	NATSConnection        *nats.Conn
+	JetStream             jetstream.JetStream
+	DLQPublisher          hmessaging.Publisher
+	EventPublisher        hmessaging.Publisher
+	Logger                *zap.Logger
+	DB                    model.Databaser
+	OidcProvider          oidc.Provider
+	HTTPClient            *http.Client
 
 	ControlPlaneClient                 platformorchestratorcp.ClientWithResponsesInterface
 	VaultClient                        vault.VaultClientInterface
@@ -65,6 +68,7 @@ type Worker struct {
 	MetadataOutputKey                  string
 	DeploymentAdmissions               *api.OrdinaryDeploymentAdmissionService
 	DeploymentQueue                    deploymentadmissionhandler.DeploymentQueue
+	RetainedDispatchAuthorize          func(context.Context, *model.DeploymentSummary) error
 }
 
 func (w *Worker) BuildRunnerStatusConsumer(ctx context.Context) (*hnats.Consumer, error) {
@@ -123,12 +127,24 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 		w.RunnerGatewayConfiguration,
 		w.RunnerBundleStore,
 		w.DeploymentAdmissions.ExecutionCatalogueClient(),
+		w.RetainedDispatchAuthorize,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to setup handler for deployment creation")
 	}
 
+	if w.PipelineDispatcher != nil {
+		createDepHandler.PipelineDispatch = w.PipelineDispatcher.Dispatch
+		createDepHandler.ObservationDispatch = w.PipelineDispatcher.DispatchObservation
+	}
+	controlHandler := handlers.HandlerFunc(func(ctx context.Context, logger *zap.Logger, d hmessaging.Delivery) error {
+		if w.PipelineDispatcher == nil {
+			return hmessaging.NewRetryError(errors.New("signed control dispatch is unavailable"))
+		}
+		return w.PipelineDispatcher.DispatchControl(ctx, logger, d)
+	})
 	branches := handlers.Handler(&branchhandler.Handler{
+		{PrefixPattern: regexp.MustCompile("^" + regexp.QuoteMeta(model.PipelineControlOutboxSubject) + "$"), Handler: controlHandler},
 		{PrefixPattern: envdestroyhandler.BranchPattern, Handler: envdestroyhandler.New(w.ControlPlaneClient, w.DB, w.EventPublisher, w.RunnerLogsDeleter, w.DeploymentAdmissions)},
 		{PrefixPattern: regexp.MustCompile(string(genevents.IoPlatformOrchestratorDeploymentCreated)), Handler: createDepHandler},
 		{PrefixPattern: regexp.MustCompile(""), Handler: handlers.HandlerFunc(func(_ context.Context, logger *zap.Logger, _ hmessaging.Delivery) error {
@@ -143,6 +159,7 @@ func (w *Worker) BuildMainConsumer(ctx context.Context) (*hnats.Consumer, error)
 		Durable: mainConsumerDurable,
 		FilterSubjects: []string{
 			string(genevents.IoPlatformOrchestratorDeploymentCreated),
+			model.PipelineControlOutboxSubject,
 			string(genevents.IoPlatformOrchestratorDeploymentUpdated),
 			string(cpevents.IoPlatformOrchestratorEnvironmentUpdated),
 		},
@@ -166,11 +183,11 @@ func (w *Worker) BuildRunnerResultsConsumer(
 	ctx context.Context,
 	applier runnerresulthandler.RunnerEventApplier,
 ) (*hnats.Consumer, error) {
-	handler := &runnerresulthandler.Handler{Applier: applier}
+	handler := &runnerresulthandler.Handler{Applier: applier, PipelineProgress: w.PipelineProgress, ControlResult: w.PipelineControlResult}
 	consumer, err := hnats.EnsureDurableConsumer(ctx, w.JetStream, hnats.DurableConsumerConfig{
 		Stream:         hmessaging.RunnerEventsStreamName,
 		Durable:        runnerResultsConsumerDurable,
-		FilterSubjects: []string{runnerresulthandler.DeploymentResultSubjects, runnerresulthandler.RunnerErrorSubjects},
+		FilterSubjects: []string{runnerresulthandler.DeploymentResultSubjects, runnerresulthandler.RunnerErrorSubjects, runnerresulthandler.PipelineProgressSubjects, runnerresulthandler.ControlResultSubjects, runnerresulthandler.NativeLogReadySubjects},
 		MaxDeliver:     MainConsumerMaxDeliveries,
 		AckWait:        MainConsumerAckWait,
 		MaxAckPending:  MainConsumerConcurrency,

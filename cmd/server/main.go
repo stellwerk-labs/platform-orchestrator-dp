@@ -28,6 +28,7 @@ import (
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
 	"github.com/stellwerk-labs/golib/hvaultapi"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	pipelineapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/pipelineapi"
 	platformorchestratoriam "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
 	"go.uber.org/zap"
@@ -80,6 +81,9 @@ func main() {
 	if err := hconfig.LoadConfigWithoutRetag(cfg); err != nil {
 		zap.L().Fatal("failed to load config", zap.Error(err))
 	}
+	if cfg.RestoreQuarantine {
+		zap.L().Fatal("restore quarantine prevents startup; reconcile retained history before restarting without RESTORE_QUARANTINE")
+	}
 
 	if err := logw.ChangeLevel(cfg.LogLevel); err != nil {
 		zap.L().Fatal("error setting log level", zap.Error(err))
@@ -124,6 +128,13 @@ func main() {
 		zap.L().Fatal("Failed to initialize control plane client", zap.Error(err))
 	}
 
+	pipelineClient, err := pipelineapi.NewClientWithResponses(cfg.ControlPlaneUrl, pipelineapi.WithHTTPClient(http.DefaultClient), pipelineapi.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
+		req.Header.Set("From", userid.InternalSystemUuid.String())
+		return nil
+	}))
+	if err != nil {
+		zap.L().Fatal("Failed to initialize pipeline catalogue client", zap.Error(err))
+	}
 	iamClient, err := platformorchestratoriam.NewClientWithResponses(
 		cfg.IamUrl,
 		platformorchestratoriam.WithHTTPClient(http.DefaultClient),
@@ -179,23 +190,9 @@ func main() {
 			zap.L().Fatal("failed to bootstrap JetStream topology", zap.Error(err))
 		}
 	}
-	runnerLogsStore, err := js.ObjectStore(ctx, runnerLogsObjectStore)
-	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
-		runnerLogsStore, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{
-			Bucket: runnerLogsObjectStore, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas,
-		})
-	}
+	runnerLogsStore, runnerBundlesStore, err := runnerObjectStores(ctx, js, cfg)
 	if err != nil {
-		zap.L().Fatal("failed to bind runner logs NATS Object Store", zap.Error(err))
-	}
-	runnerBundlesStore, err := js.ObjectStore(ctx, bundles.ObjectStoreName)
-	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
-		runnerBundlesStore, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{
-			Bucket: bundles.ObjectStoreName, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas, TTL: bundles.ObjectStoreTTL,
-		})
-	}
-	if err != nil {
-		zap.L().Fatal("failed to bind runner bundles NATS Object Store", zap.Error(err))
+		zap.L().Fatal("failed to bind runner object stores", zap.Error(err))
 	}
 	eventPublisher := hnats.NewPublisher(js, hmessaging.EventsStreamName, zap.L())
 	runnerCommandPublisher := hnats.NewPublisher(js, hmessaging.RunnerCommandsStreamName, zap.L())
@@ -221,6 +218,7 @@ func main() {
 		Database:                 db,
 		Logger:                   zap.L(),
 		ControlPlaneClient:       cpClient,
+		PipelineClient:           pipelineClient,
 		RunnerTokenSalt:          cfg.RunnerTokenSalt,
 		DeploymentCompletedHooks: &completionhooks.CompletionHooks[completionhooks.DeploymentOrgAndId, struct{}]{MaximumWaitersPerHandle: completionhooks.MaximumWaitersPerDeploymentHandler},
 		Vault:                    vlt,
@@ -265,7 +263,7 @@ func main() {
 			return http.ErrUseLastResponse
 		}
 		grantClient := api.CoreExternalDeploymentGrantClient{
-			BaseURL: coreGatewayURL, HTTPClient: &grantHTTPClient, BearerToken: bearerToken,
+			BaseURL: coreGatewayURL, HTTPClient: &grantHTTPClient, BearerToken: bearerToken, BearerTokenFile: cfg.PluginCoreTokenFile,
 		}
 		server.ExternalDeployments = &api.ExternalDeploymentHTTPAdapter{
 			Issuer:             cfg.PluginIssuer,
@@ -275,6 +273,18 @@ func main() {
 			ControlPlaneClient: cpClient,
 			EventPublisher:     eventPublisher,
 			Logger:             zap.L(),
+		}
+	}
+	if cfg.RunnerRolloutsURL != "" {
+		server.RunnerRollouts, err = api.NewRunnerRolloutService(&server, cfg.RunnerRolloutsURL, cfg.RunnerRolloutsTokenFile, cfg.RunnerRolloutsOrgID, cfg.RunnerRolloutsRunnerID)
+		if err != nil {
+			zap.L().Fatal("failed to configure experimental Runner rollouts", zap.Error(err))
+		}
+	}
+	if cfg.PipelineSigningKeyFile != "" {
+		server.PipelineDispatcher, err = api.NewPipelineDispatcher(&server, runnerCommandPublisher, cfg.PipelineSigningKeyFile, cfg.PipelineToolsDigest, cfg.MetadataOutputKey)
+		if err != nil {
+			zap.L().Fatal("invalid canonical pipeline configuration", zap.Error(err))
 		}
 	}
 	echo, err := hecho.DefaultEchoServerWithValidation(&hecho.ValidatedServerConfig{
@@ -294,26 +304,7 @@ func main() {
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	defer bgCancel()
 	if server.DeploymentAdmissions != nil {
-		go func() {
-			reconcile := func() {
-				reconcileCtx, cancel := context.WithTimeout(bgCtx, deploymentAdmissionReconciliationTimeout)
-				defer cancel()
-				if err := server.DeploymentAdmissions.ReconcileUnsettled(reconcileCtx, deploymentAdmissionReconciliationBatch); err != nil && !errors.Is(err, context.Canceled) {
-					zap.L().Error("failed to reconcile unsettled Deployment admissions", zap.Error(err))
-				}
-			}
-			reconcile()
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-bgCtx.Done():
-					return
-				case <-ticker.C:
-					reconcile()
-				}
-			}
-		}()
+		go reconcileDeploymentAdmissions(bgCtx, server.DeploymentAdmissions)
 	}
 	go sweepDeploymentQueue(bgCtx, &server)
 	go func() {
@@ -376,26 +367,15 @@ func main() {
 			PublicURL: cfg.RunnerGatewayURL, InternalURL: cfg.RunnerGatewayInternalURL,
 			RunnerTokenSalt: cfg.RunnerTokenSalt,
 		},
-		RunnerBundleStore: runnerBundlesStore,
-		RunnerLogsDeleter: func(ctx context.Context, envUuid string) error {
-			g, gctx := errgroup.WithContext(ctx)
-			g.SetLimit(concurrentLogDeletes)
-			objects, err := runnerLogsStore.List(gctx)
-			if err != nil && !errors.Is(err, jetstream.ErrNoObjectsFound) {
-				return errors.Wrap(err, "failed to list NATS runner log objects for deletion")
-			}
-			for _, object := range objects {
-				if strings.HasPrefix(object.Name, envUuid+"/") {
-					objectName := object.Name
-					g.Go(func() error { return runnerLogsStore.Delete(gctx, objectName) })
-				}
-			}
-			return g.Wait()
-		},
+		RunnerBundleStore:                  runnerBundlesStore,
+		RunnerLogsDeleter:                  runnerLogsDeleter(runnerLogsStore),
 		KubernetesRunnerPodSchedulingDelay: cfg.KubernetesRunnerPodSchedulingDelay,
 		MetadataOutputKey:                  cfg.MetadataOutputKey,
 		DeploymentAdmissions:               server.DeploymentAdmissions,
 		DeploymentQueue:                    &server,
+		PipelineDispatcher:                 server.PipelineDispatcher,
+		PipelineProgress:                   server.ApplyPipelineProgressEnvelope,
+		PipelineControlResult:              server.ApplyPipelineControlResult,
 	}
 	wrkc, err := wrk.BuildMainConsumer(bgCtx)
 	if err != nil {
@@ -403,11 +383,7 @@ func main() {
 	}
 	defer func() {
 		zap.L().Info("Shutting down main consumer")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		if err := wrkc.Close(ctx); err != nil {
-			zap.L().Error("failed to close main consumer", zap.Error(err))
-		}
+		closeRunnerConsumer(wrkc, "main consumer")
 		zap.L().Info("Main consumer shutdown")
 	}()
 
@@ -415,25 +391,18 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("failed to setup runner results consumer", zap.Error(err))
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		if err := resultsConsumer.Close(ctx); err != nil {
-			zap.L().Error("failed to close runner results consumer", zap.Error(err))
-		}
-	}()
+	defer closeRunnerConsumer(resultsConsumer, "runner results consumer")
 
 	statusConsumer, err := wrk.BuildRunnerStatusConsumer(bgCtx)
 	if err != nil {
 		zap.L().Fatal("failed to setup runner status consumer", zap.Error(err))
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		if err := statusConsumer.Close(ctx); err != nil {
-			zap.L().Error("failed to close runner status consumer", zap.Error(err))
-		}
-	}()
+	defer closeRunnerConsumer(statusConsumer, "runner status consumer")
+	refusalsConsumer, err := wrk.BuildRunnerRefusalsConsumer(bgCtx, server.ApplyNativeCommandRefusal)
+	if err != nil {
+		zap.L().Fatal("failed to setup runner refusals consumer", zap.Error(err))
+	}
+	defer closeRunnerConsumer(refusalsConsumer, "runner refusals consumer")
 
 	completionSubscription, err := wrk.BuildCompletionsSubscription(server.DeploymentCompletedHooks)
 	if err != nil {
@@ -478,6 +447,11 @@ func main() {
 			errChan <- errors.Wrap(err, "failed to run runner status consumer")
 		}
 	}()
+	go func() {
+		if err := refusalsConsumer.Run(bgCtx); err != nil && !errors.Is(err, context.Canceled) {
+			errChan <- errors.Wrap(err, "failed to run runner refusals consumer")
+		}
+	}()
 
 	scheduleResultMaintenance(bgCtx, cfg, zap.L(), db)
 
@@ -501,6 +475,35 @@ func main() {
 	}()
 }
 
+func closeRunnerConsumer(consumer *hnats.Consumer, name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := consumer.Close(ctx); err != nil {
+		zap.L().Error("failed to close "+name, zap.Error(err))
+	}
+}
+
+func reconcileDeploymentAdmissions(ctx context.Context, service *api.OrdinaryDeploymentAdmissionService) {
+	reconcile := func() {
+		reconcileCtx, cancel := context.WithTimeout(ctx, deploymentAdmissionReconciliationTimeout)
+		defer cancel()
+		if err := service.ReconcileUnsettled(reconcileCtx, deploymentAdmissionReconciliationBatch); err != nil && !errors.Is(err, context.Canceled) {
+			zap.L().Error("failed to reconcile unsettled Deployment admissions", zap.Error(err))
+		}
+	}
+	reconcile()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reconcile()
+		}
+	}
+}
+
 // sweepDeploymentQueue expires waiting Deployments and retries queue heads
 // that no event promoted, on every replica.
 func scheduleResultMaintenance(ctx context.Context, cfg *config.Configuration, logger *zap.Logger, db model.Databaser) {
@@ -521,4 +524,40 @@ func sweepDeploymentQueue(ctx context.Context, server *api.Server) {
 			}
 		}
 	}
+}
+
+func runnerLogsDeleter(store jetstream.ObjectStore) runners.RunnerLogsDeleter {
+	return func(ctx context.Context, envUUID string) error {
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(concurrentLogDeletes)
+		objects, err := store.List(gctx)
+		if err != nil && !errors.Is(err, jetstream.ErrNoObjectsFound) {
+			return errors.Wrap(err, "failed to list NATS runner log objects for deletion")
+		}
+		for _, object := range objects {
+			if strings.HasPrefix(object.Name, envUUID+"/") {
+				objectName := object.Name
+				g.Go(func() error { return store.Delete(gctx, objectName) })
+			}
+		}
+		return g.Wait()
+	}
+}
+
+func runnerObjectStores(ctx context.Context, js jetstream.JetStream, cfg *config.Configuration) (jetstream.ObjectStore, jetstream.ObjectStore, error) {
+	logs, err := js.ObjectStore(ctx, runnerLogsObjectStore)
+	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
+		logs, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: runnerLogsObjectStore, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas})
+	}
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "runner logs")
+	}
+	bundlesStore, err := js.ObjectStore(ctx, bundles.ObjectStoreName)
+	if errors.Is(err, jetstream.ErrBucketNotFound) && cfg.NATSBootstrap {
+		bundlesStore, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: bundles.ObjectStoreName, Storage: jetstream.FileStorage, Replicas: cfg.NATSStreamReplicas, TTL: bundles.ObjectStoreTTL})
+	}
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "runner bundles")
+	}
+	return logs, bundlesStore, nil
 }

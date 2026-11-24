@@ -14,6 +14,7 @@ import (
 	coreapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	iamapi "github.com/stellwerk-labs/platform-orchestrator-iam/shared/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-iam/shared/userid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -23,16 +24,20 @@ import (
 
 func TestLastDeploymentsShowTheEnvironmentFenceUntilTheOutcomeIsAcknowledged(t *testing.T) {
 	f := newLateResultFixture(t)
-	// Core knows the organization and IAM grants everything: this test is about
+	// Core resolves the exact Environment and IAM grants everything: this test is about
 	// what the read model reports, not about who may read it.
 	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/internal/orgs/late-org" {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/internal/orgs/late-org":
+			_, err := w.Write([]byte(`{"id":"late-org"}`))
+			assert.NoError(t, err)
+		case r.Method == http.MethodGet && r.URL.Path == "/orgs/late-org/projects/p/envs/e":
+			assert.NoError(t, json.NewEncoder(w).Encode(coreapi.Environment{Id: "e", ProjectId: "p", Uuid: f.forward.DeploymentEnvUuid}))
+		default:
 			t.Errorf("unexpected Core request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"late-org"}`))
 	}))
 	t.Cleanup(core.Close)
 	iam := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))

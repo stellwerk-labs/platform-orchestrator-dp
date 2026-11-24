@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/events"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
@@ -49,6 +49,7 @@ const idempotencyDigestTimeLimit = time.Hour * 24
 const DefaultEnvironmentLeaseTTL = 65 * time.Minute
 
 type DeploymentSummary struct {
+	NativeTarget      *cp.NativeExecutionTargetReference
 	OrgId             string
 	ProjectId         string
 	EnvId             string
@@ -72,8 +73,12 @@ type DeploymentSummary struct {
 	ModuleArtifacts            []ModuleArtifactRequirement
 	ModuleVersionRequestDigest string
 	// Internal only: caps buffered Runner commands at the immutable first attempt budget.
-	DispatchDeadline time.Time
-	CostPolicy       *DeploymentCostPolicy
+	DispatchDeadline     time.Time
+	CostPolicy           *DeploymentCostPolicy
+	RetainedPlan         *RetainedPlanDispatch
+	HasRetainedPlan      bool
+	HasPipeline          bool
+	HasNativeObservation bool
 	// EnvironmentFence is set by ListLastDeployments only, while the item's
 	// Environment refuses new Deployments behind an unreconciled plugin dispatch.
 	EnvironmentFence opt.Opt[EnvironmentFence]
@@ -97,6 +102,7 @@ type EncodedDeploymentGraph json.RawMessage
 type RawTofu []byte
 
 type CreateDeploymentParams struct {
+	NativeTarget               *cp.NativeExecutionTargetReference
 	CreatedBy                  uuid.UUID
 	DeploymentEnvUuid          uuid.UUID
 	Mode                       DeploymentMode
@@ -118,7 +124,9 @@ type CreateDeploymentParams struct {
 	// Optional client CAS on the current state head, for manifests derived from it.
 	ExpectedBaseDeploymentID opt.Opt[uuid.UUID]
 	// The queue head being promoted. Every other mutating creation yields to queued work.
-	QueueItemID opt.Opt[uuid.UUID]
+	QueueItemID     opt.Opt[uuid.UUID]
+	Pipeline        *PipelineDefinition
+	PipelineBackend string
 }
 
 type ModuleArtifactRequirement struct {
@@ -167,6 +175,10 @@ type ListDeploymentsParams struct {
 	CreatedBefore opt.Opt[time.Time]
 	ByMode        []DeploymentMode
 	ByStatus      []DeploymentStatus
+	Query         string
+	QuickFilter   string
+	// Provider cleanup excludes only attempts with authoritative no-effect proof.
+	ExcludeProvenNoEffect bool
 }
 
 type ListLastDeploymentsParams struct {
@@ -222,6 +234,7 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	}
 
 	out := &DeploymentSummary{
+		NativeTarget:               params.NativeTarget,
 		OrgId:                      orgId,
 		ProjectId:                  projectId,
 		EnvId:                      envId,
@@ -231,6 +244,7 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		RollbackToId:               params.RollbackToId,
 		CreatedAt:                  time.Now().UTC(),
 		CreatedBy:                  params.CreatedBy,
+		HasPipeline:                params.Pipeline != nil,
 		Status:                     DeploymentStatusExecuting,
 		StatusMessage:              "Deploying...",
 		RunnerId:                   params.RunnerId,
@@ -245,8 +259,16 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 	if err := LockEnvironmentMutation(ctx, tx, out.DeploymentEnvUuid); err != nil {
 		return nil, err
 	}
+	if err := RequireStateCustody(ctx, tx, orgId, projectId, envId, params.DeploymentEnvUuid, params.RunnerId, params.NativeTarget); err != nil {
+		return nil, err
+	}
 	if err := requireDeploymentAcceptance(ctx, tx, params.QueueItemID.Or(uuid.Nil), orgId, projectId, envId, params.DeploymentEnvUuid, params.CreatedBy, params.Mode); err != nil {
 		return nil, err
+	}
+	if RequiresEnvironmentLease(params.Mode) {
+		if err := RequirePipelineStopped(ctx, tx, out.DeploymentEnvUuid); err != nil {
+			return nil, err
+		}
 	}
 	if err := RequireObservationStopped(ctx, tx, out.DeploymentEnvUuid); err != nil {
 		return nil, err
@@ -269,6 +291,10 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		}
 	}
 
+	effectiveBase, err := EffectiveStateDeploymentID(ctx, tx, out.DeploymentEnvUuid)
+	if err != nil {
+		return nil, err
+	}
 	{
 		var lastDeploymentId uuid.UUID
 		var lastDeploymentStatus string
@@ -295,15 +321,15 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 				return nil, err
 			}
 		}
-		if params.ExpectedBaseDeploymentID.IsSet() && params.ExpectedBaseDeploymentID.Must() != lastStateDeploymentID {
+		if params.ExpectedBaseDeploymentID.IsSet() && params.ExpectedBaseDeploymentID.Must() != effectiveBase {
 			return nil, NewErrCodedConflict(CodeDeploymentBaseChanged, "the Environment's current Deployment is no longer the expected base").
-				AboutDeployment(lastStateDeploymentID)
+				AboutDeployment(effectiveBase)
 		}
 		if params.ExpectedCurrentDeploymentID.IsSet() {
-			if lastStateDeploymentID != params.ExpectedCurrentDeploymentID.Must() {
+			if effectiveBase != params.ExpectedCurrentDeploymentID.Must() {
 				return nil, NewErrConflict("captured-base recovery forward Deployment is no longer the current head")
 			}
-			forward, _, _, _, err := d.GetDeployment(ctx, tx, orgId, lastStateDeploymentID, GetModeForUpdate)
+			forward, _, _, _, err := d.GetDeployment(ctx, tx, orgId, effectiveBase, GetModeForUpdate)
 			modeMatches := err == nil && forward.Mode == DeploymentModeDeploy
 			if err == nil && params.RetryOfRollbackDeploymentID.IsSet() {
 				modeMatches = forward.Mode == DeploymentModeRollback && forward.Status == DeploymentStatusFailed &&
@@ -351,8 +377,8 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 
 	if err := tx.QueryRowContext(
 		ctx,
-		`INSERT INTO deployments (de_id, id, created_at, created_by, mode, status, status_message, manifest, graph, tofu, runner_id, idempotency_key_digest, encrypted_outputs_recipient, encrypted_logs_recipient, metrics, runner_log_level, rollback_to_id, module_artifacts, module_version_request_digest)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING created_at`,
+		`INSERT INTO deployments (de_id, id, created_at, created_by, mode, status, status_message, manifest, graph, tofu, runner_id, idempotency_key_digest, encrypted_outputs_recipient, encrypted_logs_recipient, metrics, runner_log_level, rollback_to_id, module_artifacts, module_version_request_digest, native_target)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING created_at`,
 		out.DeploymentEnvUuid,
 		out.Id,
 		out.CreatedAt,
@@ -372,12 +398,16 @@ func (d *databaser) CreateDeployment(ctx context.Context, tx Tx, orgId, projectI
 		params.RollbackToId.Ref(),
 		asJson(&params.ModuleArtifacts),
 		params.ModuleVersionRequestDigest,
+		asJson(params.NativeTarget),
 	).Scan(&out.CreatedAt); err != nil {
 		return nil, errors.Wrap(err, "failed to insert deployment")
 	}
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_dispatch_budgets (deployment_id,deployment_revision) VALUES ($1,$2)`, out.Id, out.Revision); err != nil {
 		return nil, errors.Wrap(err, "failed to create Runner dispatch budget")
+	}
+	if err := InsertDeploymentPipeline(ctx, tx, out, params.Pipeline, params.PipelineBackend, effectiveBase); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -386,14 +416,19 @@ func (d *databaser) ListDeployments(ctx context.Context, optionalTx Tx, orgId st
 	logger := hlogger.TraceScopedLoggerFromCtx(d.logger, ctx)
 
 	beforeCreatedAt := time.Now().UTC().Add(time.Hour)
+	var beforeID uuid.NullUUID
 	if pageToken != "" {
-		i, err := strconv.ParseInt(pageToken, 10, 64)
+		var err error
+		beforeCreatedAt, beforeID, err = parseDeploymentPageToken(pageToken)
 		if err != nil {
-			return nil, "", NewErrBadRequest(errors.Wrapf(err, "failed to parse page token %q", pageToken).Error())
+			return nil, "", err
 		}
-		beforeCreatedAt = time.Unix(0, i)
 	} else if params.CreatedBefore.IsSet() {
 		beforeCreatedAt = params.CreatedBefore.Must()
+	}
+	query, err := deploymentListSearch(params.Query, params.QuickFilter)
+	if err != nil {
+		return nil, "", err
 	}
 
 	limitPlusOne := max(1, perPage) + 1
@@ -415,10 +450,26 @@ func (d *databaser) ListDeployments(ctx context.Context, optionalTx Tx, orgId st
 
 	rs, err := d.txOrDb(optionalTx).QueryContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id
-		 WHERE e.org_id = $1 AND d.created_at < $2 AND ($4::text IS NULL OR e.project_id = $4) AND ($5::text IS NULL OR e.env_id = $5) AND ($6::text[] IS NULL OR d.mode = ANY($6)) AND ($7::text[] IS NULL OR d.status = ANY($7))
-		 ORDER BY d.created_at DESC LIMIT $3`,
-		orgId, beforeCreatedAt, limitPlusOne, params.ProjectId, params.EnvId, byMode, byStatus,
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target
+         FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id
+         LEFT JOIN deployment_pipeline_runs p ON p.deployment_id = d.id
+		 WHERE e.org_id = $1
+           AND (d.created_at < $2 OR ($8::uuid IS NOT NULL AND d.created_at = $2 AND d.id < $8))
+           AND ($4::text IS NULL OR e.project_id = $4) AND ($5::text IS NULL OR e.env_id = $5)
+           AND ($6::text[] IS NULL OR d.mode = ANY($6)) AND ($7::text[] IS NULL OR d.status = ANY($7))
+           AND (NOT $11 OR NOT EXISTS (SELECT 1 FROM pipeline_no_effect_receipts receipt WHERE receipt.deployment_id=d.id))
+           AND ($9 = '' OR concat_ws(' ', d.id::text, e.project_id, e.env_id, d.created_by::text, p.definition->>'name', p.definition->>'id') ILIKE $9 ESCAPE '\')
+           AND CASE $10
+             WHEN 'plans' THEN d.mode IN ('plan_only', 'rollback_plan')
+             WHEN 'unused_plans' THEN d.mode IN ('plan_only', 'rollback_plan')
+               AND NOT EXISTS (SELECT 1 FROM deployment_pipeline_runs child WHERE child.source_plan_id = d.id)
+               AND NOT EXISTS (SELECT 1 FROM retained_plans rp WHERE rp.source_deployment_id = d.id AND rp.apply_deployment_id IS NOT NULL)
+             WHEN 'deployments' THEN d.mode NOT IN ('plan_only', 'rollback_plan', 'observation')
+             WHEN 'needs_approval' THEN p.progress->>'phase' = 'awaiting_approval'
+             WHEN 'needs_attention' THEN d.status = 'failed' OR p.progress->>'phase' IN ('post_failed', 'outcome_unknown', 'refused', 'denied', 'failed')
+             ELSE TRUE END
+		 ORDER BY d.created_at DESC, d.id DESC LIMIT $3`,
+		orgId, beforeCreatedAt, limitPlusOne, params.ProjectId, params.EnvId, byMode, byStatus, beforeID, query, params.QuickFilter, params.ExcludeProvenNoEffect,
 	)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to query rows")
@@ -432,12 +483,28 @@ func (d *databaser) ListDeployments(ctx context.Context, optionalTx Tx, orgId st
 	out := make([]DeploymentSummary, 0, limitPlusOne-1)
 	for rs.Next() {
 		next := DeploymentSummary{OrgId: orgId}
-		if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics), &next.Revision, opt.Scan(&next.RollbackToId)); err != nil {
+		if err := rs.Scan(
+			&next.ProjectId,
+			&next.EnvId,
+			&next.DeploymentEnvUuid,
+			&next.Id,
+			&next.Mode,
+			&next.CreatedAt,
+			&next.CreatedBy,
+			opt.Scan(&next.CompletedAt),
+			&next.Status,
+			&next.StatusMessage,
+			&next.RunnerId,
+			asJson(&next.Metrics),
+			&next.Revision,
+			opt.Scan(&next.RollbackToId),
+			asJson(&next.NativeTarget),
+		); err != nil {
 			return nil, "", errors.Wrap(err, "failed to scan row")
 		}
 		if len(out) >= limitPlusOne-1 {
 			last := out[len(out)-1]
-			return out, strconv.Itoa(int(last.CreatedAt.UnixNano())), nil
+			return out, fmt.Sprintf("%d,%s", last.CreatedAt.UnixNano(), last.Id), nil
 		}
 		out = append(out, next)
 	}
@@ -483,9 +550,9 @@ func (d *databaser) ListLastDeployments(ctx context.Context, optionalTx Tx, orgI
 func (d *databaser) queryLastDeployments(ctx context.Context, tx Tx, orgId, afterProjectId, afterEnvId string, limit int, params ListLastDeploymentsParams) ([]DeploymentSummary, []uuid.NullUUID, error) {
 	rs, err := tx.QueryContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, head.id
-		 FROM deployment_environments e INNER JOIN deployments d ON d.de_id = e.id AND
-		(CASE WHEN $7 THEN d.id = e.last_state_deployment_id ELSE d.id = e.last_executing_deployment_id END)
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target, head.id
+		 FROM deployment_environments e JOIN deployment_effective_state effective ON effective.environment_id=e.id INNER JOIN deployments d ON d.de_id = e.id AND
+		(CASE WHEN $7 THEN d.id = effective.deployment_id ELSE d.id = e.last_executing_deployment_id END)
 		 LEFT JOIN deployments head ON head.id = e.last_state_deployment_id AND head.status = 'failed'
 		 WHERE e.org_id = $1 AND (e.project_id, e.env_id) > ($2, $3) AND ($5::text IS NULL OR e.project_id = $5) AND ($6::text IS NULL OR e.env_id = $6)
 		 ORDER BY e.org_id, e.project_id, e.env_id LIMIT $4`,
@@ -505,7 +572,7 @@ func (d *databaser) queryLastDeployments(ctx context.Context, tx Tx, orgId, afte
 		next := DeploymentSummary{OrgId: orgId}
 		var failedStateHead uuid.NullUUID
 		if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId, asJson(&next.Metrics),
-			&next.Revision, opt.Scan(&next.RollbackToId), &failedStateHead); err != nil {
+			&next.Revision, opt.Scan(&next.RollbackToId), asJson(&next.NativeTarget), &failedStateHead); err != nil {
 			return nil, nil, errors.Wrap(err, "failed to scan row")
 		}
 		out = append(out, next)
@@ -535,11 +602,11 @@ func (d *databaser) GetDeploymentByIdempotencyKeyDigest(ctx context.Context, opt
 	var rawManifest json.RawMessage
 	if err := d.txOrDb(optionalTx).QueryRowContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.module_version_request_digest FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target, d.module_version_request_digest FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id
 		WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3 AND d.idempotency_key_digest = $4 AND d.created_at > $5 FOR UPDATE`,
 		orgId, projectId, envId, idempotencyKeyDigest, time.Now().UTC().Add(-idempotencyDigestTimeLimit),
 	).
-		Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Id, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId), &out.ModuleVersionRequestDigest); err != nil {
+		Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Id, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId), asJson(&out.NativeTarget), &out.ModuleVersionRequestDigest); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, NewErrNotFound("no deployment found with the given idempotency key digest")
 		}
@@ -556,7 +623,10 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 	var rawManifest json.RawMessage
 	var tofu []byte
 	var graph json.RawMessage
-	query := `SELECT e.project_id, e.env_id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.tofu, d.runner_id, d.graph, d.metrics, d.encrypted_outputs_recipient, d.encrypted_logs_recipient, d.revision, d.runner_log_level, d.rollback_to_id, d.module_artifacts, d.module_version_request_digest
+	query := `SELECT e.project_id, e.env_id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.tofu, d.runner_id, d.graph, d.metrics, d.encrypted_outputs_recipient, d.encrypted_logs_recipient, d.revision, d.runner_log_level, d.rollback_to_id, d.native_target, d.module_artifacts, d.module_version_request_digest,
+	EXISTS (SELECT 1 FROM retained_plans p WHERE p.org_id=e.org_id AND (p.source_deployment_id=d.id OR p.apply_deployment_id=d.id)),
+ EXISTS (SELECT 1 FROM deployment_pipeline_runs pipeline WHERE pipeline.deployment_id=d.id),
+ EXISTS (SELECT 1 FROM deployment_dispatch_budgets observation WHERE observation.deployment_id=d.id AND observation.observation_command IS NOT NULL)
 	FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id WHERE e.org_id = $1 AND d.id = $2`
 	query += GetModeSuffix(mode)
 	if err := d.txOrDb(optionalTx).QueryRowContext(
@@ -564,7 +634,8 @@ func (d *databaser) GetDeployment(ctx context.Context, optionalTx Tx, orgId stri
 		query,
 		orgId, deploymentId,
 	).Scan(&out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &tofu, &out.RunnerId, &graph, asJson(&out.Metrics),
-		opt.Scan(&out.EncryptedOutputsRecipient), opt.Scan(&out.EncryptedLogsRecipient), &out.Revision, &out.RunnerLogLevel, opt.Scan(&out.RollbackToId), asJson(&out.ModuleArtifacts), &out.ModuleVersionRequestDigest); err != nil {
+		opt.Scan(&out.EncryptedOutputsRecipient),
+		opt.Scan(&out.EncryptedLogsRecipient), &out.Revision, &out.RunnerLogLevel, opt.Scan(&out.RollbackToId), asJson(&out.NativeTarget), asJson(&out.ModuleArtifacts), &out.ModuleVersionRequestDigest, &out.HasRetainedPlan, &out.HasPipeline, &out.HasNativeObservation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, nil, nil, NewErrNotFound(fmt.Sprintf("deployment '%s' not found", deploymentId))
 		}
@@ -664,11 +735,11 @@ func (d *databaser) GetLastDeployment(ctx context.Context, optionalTx Tx, orgId 
 	var rawTofu []byte
 	if err := d.txOrDb(optionalTx).QueryRowContext(
 		ctx,
-		`SELECT d.id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.graph, d.tofu, d.runner_id, d.metrics, d.revision, d.rollback_to_id
-			FROM deployments d INNER JOIN deployment_environments e ON d.de_id = e.id AND (CASE WHEN $4 THEN d.id = e.last_state_deployment_id ELSE d.id = e.last_executing_deployment_id END)
+		`SELECT d.id, e.id, d.created_at, d.created_by, d.completed_at, d.mode, d.status, d.status_message, d.manifest, d.graph, d.tofu, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target
+			FROM deployments d INNER JOIN deployment_environments e ON d.de_id=e.id JOIN deployment_effective_state effective ON effective.environment_id=e.id AND (CASE WHEN $4 THEN d.id=effective.deployment_id ELSE d.id=e.last_executing_deployment_id END)
         	WHERE e.org_id = $1 AND e.project_id = $2 AND e.env_id = $3`,
 		orgId, projectId, envId, params.StateChangeOnly,
-	).Scan(&out.Id, &out.DeploymentEnvUuid, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &rawGraph, &rawTofu, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId)); err != nil {
+	).Scan(&out.Id, &out.DeploymentEnvUuid, &out.CreatedAt, &out.CreatedBy, opt.Scan(&out.CompletedAt), &out.Mode, &out.Status, &out.StatusMessage, &rawManifest, &rawGraph, &rawTofu, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId), asJson(&out.NativeTarget)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, nil, nil, NewErrNotFound(fmt.Sprintf("no deployments found in env '%s' of project '%s'", envId, projectId))
 		}
@@ -702,7 +773,8 @@ func (d *databaser) GetEnvironmentDeploymentReadiness(ctx context.Context, optio
 		FROM requested request
 		LEFT JOIN deployment_environments environment
 		  ON environment.org_id=$1 AND environment.project_id=request.project_id AND environment.env_id=request.env_id
-		LEFT JOIN deployments latest ON latest.id=environment.last_state_deployment_id
+		LEFT JOIN deployment_effective_state effective ON effective.environment_id=environment.id
+		LEFT JOIN deployments latest ON latest.id=effective.deployment_id
 		LEFT JOIN environment_deployment_leases lease
 		  ON lease.environment_id=environment.id AND lease.deployment_id=latest.id AND lease.expires_at > now()
 		LEFT JOIN LATERAL (
@@ -762,10 +834,10 @@ func (d *databaser) UpdateDeploymentStatusAndOutputs(ctx context.Context, option
 			SET status = $2, status_message = $3, completed_at = $4, outputs = $5, metrics = $6, revision = revision + 1
 			FROM deployment_environments e
 			WHERE d.de_id = e.id AND d.id = $1 AND ($7::integer IS NULL OR d.revision = $7)
-			RETURNING e.org_id, e.project_id, e.env_id, e.id, d.mode, d.created_at, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id
+			RETURNING e.org_id, e.project_id, e.env_id, e.id, d.mode, d.created_at, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target
 			`,
 		deploymentId, params.Status, params.StatusMessage, time.Now().UTC(), params.Outputs, asJson(&params.Metrics), params.ExpectedRevision,
-	).Scan(&out.OrgId, &out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Mode, &out.CreatedAt, opt.Scan(&out.CompletedAt), &out.Status, &out.StatusMessage, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId)); err != nil {
+	).Scan(&out.OrgId, &out.ProjectId, &out.EnvId, &out.DeploymentEnvUuid, &out.Mode, &out.CreatedAt, opt.Scan(&out.CompletedAt), &out.Status, &out.StatusMessage, &out.RunnerId, asJson(&out.Metrics), &out.Revision, opt.Scan(&out.RollbackToId), asJson(&out.NativeTarget)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if params.ExpectedRevision.IsSet() {
 				return nil, NewErrConflict("deployment not found at revision")
@@ -940,8 +1012,9 @@ func (d *databaser) ListLastDeploymentsByNodeProperties(ctx context.Context, opt
 
 	if rs, err := d.txOrDb(optionalTx).QueryContext(
 		ctx,
-		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id FROM deployment_environments e
-    	 INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_state_deployment_id
+		`SELECT e.project_id, e.env_id, e.id, d.id, d.mode, d.created_at, d.created_by, d.completed_at, d.status, d.status_message, d.runner_id, d.metrics, d.revision, d.rollback_to_id, d.native_target FROM deployment_environments e
+		 JOIN deployment_effective_state effective ON effective.environment_id=e.id
+		 INNER JOIN deployments d ON d.de_id = e.id AND d.id = effective.deployment_id
 		 WHERE e.org_id = $1 AND (e.project_id, e.env_id) > ($2, $3) AND EXISTS (
 		 	SELECT 1 FROM resource_nodes n WHERE n.env_uuid = e.id AND ($5::text IS NULL OR n.last_module_definition_id = $5) AND ($6::text IS NULL OR n.last_module_definition_version = $6)
 	   	 )
@@ -959,7 +1032,7 @@ func (d *databaser) ListLastDeploymentsByNodeProperties(ctx context.Context, opt
 		for rs.Next() {
 			next := DeploymentSummary{OrgId: orgId}
 			if err := rs.Scan(&next.ProjectId, &next.EnvId, &next.DeploymentEnvUuid, &next.Id, &next.Mode, &next.CreatedAt, &next.CreatedBy, opt.Scan(&next.CompletedAt), &next.Status, &next.StatusMessage, &next.RunnerId,
-				asJson(&next.Metrics), &next.Revision, opt.Scan(&next.RollbackToId)); err != nil {
+				asJson(&next.Metrics), &next.Revision, opt.Scan(&next.RollbackToId), asJson(&next.NativeTarget)); err != nil {
 				return nil, "", errors.Wrap(err, "failed to scan row")
 			}
 			if len(out) >= limitPlusOne-1 {

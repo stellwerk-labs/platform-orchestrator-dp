@@ -17,6 +17,7 @@ import (
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/ref"
 )
 
 const notFoundErrorCode = "HTTP-404"
@@ -116,9 +117,11 @@ func (s *Server) innerCheck(ctx context.Context, userId uuid.UUID, orgId string,
 	}); err != nil {
 		return errors.Wrap(err, "failed to check authorization")
 	} else if r.StatusCode() == http.StatusForbidden {
+		refusal := ref.DerefOr(r.JSON403, platformorchestratoriam.N403Forbidden{})
 		return &herrors.PlatformOrchestratorError{
 			StatusCode: http.StatusForbidden,
-			Details:    *r.JSON403.Details,
+			Message:    "Forbidden",
+			Details:    ref.DerefOr(refusal.Details, nil),
 		}
 	} else if r.StatusCode() != http.StatusNoContent {
 		return errors.Errorf("unexpected status code when checking authorization: %s: %s", r.Status(), string(r.Body))

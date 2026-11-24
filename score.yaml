@@ -71,6 +71,12 @@ resources:
       host: ${resources.dns.host}
       port: 8080
       path: /orgs/[^/]+/(deployments|deployment-queue|module-test-deployments|last-deployments|active-resources|metadata-keys)($|/.*)
+  runner-rollouts-route:
+    type: route
+    params:
+      host: ${resources.dns.host}
+      port: 8080
+      path: /orgs/[^/]+/projects/[^/]+/envs/[^/]+/runner-rollouts($|/.*)
   well-known-route:
     type: route
     params:

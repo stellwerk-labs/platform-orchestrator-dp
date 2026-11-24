@@ -34,7 +34,8 @@ func providerStateHistory(ctx context.Context, db model.Databaser, tx model.Tx, 
 	}
 	prior, more, err := db.ListDeployments(ctx, tx, head.OrgId, "", maxProviderHistoryAttempts+1, model.ListDeploymentsParams{
 		ProjectId: opt.Of(head.ProjectId), EnvId: opt.Of(head.EnvId),
-		ByMode: []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeRollback, model.DeploymentModeDestroy},
+		ByMode:                []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeRollback, model.DeploymentModeDestroy},
+		ExcludeProvenNoEffect: true,
 	})
 	if err != nil {
 		return nil, false, err

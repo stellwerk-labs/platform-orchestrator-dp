@@ -18,7 +18,6 @@ import (
 
 func MockServer(t *testing.T) (*echo.Echo, *Server, func()) {
 	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 	e, _ := hecho.DefaultEchoServerWithValidation(&hecho.ValidatedServerConfig{
 		AppName:          "test",
 		Logger:           zaptest.NewLogger(t),

@@ -8,12 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 )
 
 // ExternalDeploymentPlanSnapshot is a complete immutable planning result kept
 // inside DP. External callers receive only its identity, fingerprint and a
 // value-free projection.
 type ExternalDeploymentPlanSnapshot struct {
+	NativeTarget      *cp.NativeExecutionTargetReference
 	ID                uuid.UUID
 	OrgID             string
 	PluginID          string
@@ -55,12 +57,12 @@ func CreateOrGetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, candi
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO external_deployment_plan_snapshots
 		(id, org_id, plugin_id, request_id, actor_id, request_body_sha256, project_id, project_uuid, env_id, environment_uuid,
-		 base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		 base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets, native_target)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		ON CONFLICT (org_id, plugin_id, request_id) DO NOTHING`,
 		candidate.ID, candidate.OrgID, candidate.PluginID, candidate.RequestID, candidate.ActorID, candidate.RequestBodySHA256,
 		candidate.ProjectID, candidate.ProjectUUID, candidate.EnvID, candidate.EnvironmentUUID, candidate.BaseDeploymentID, candidate.Fingerprint,
-		candidate.Manifest, candidate.Graph, candidate.Diff, asJson(&candidate.ModuleArtifacts), asJson(&candidate.ExplicitTargets))
+		candidate.Manifest, candidate.Graph, candidate.Diff, asJson(&candidate.ModuleArtifacts), asJson(&candidate.ExplicitTargets), asJson(candidate.NativeTarget))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to store external deployment plan snapshot")
 	}
@@ -83,11 +85,11 @@ func GetExternalDeploymentPlanSnapshot(ctx context.Context, tx Tx, orgID, plugin
 	stored := &ExternalDeploymentPlanSnapshot{OrgID: orgID, PluginID: pluginID, RequestID: requestID}
 	var artifacts, targets json.RawMessage
 	err := tx.QueryRowContext(ctx, `SELECT id, actor_id, request_body_sha256, project_id, project_uuid, env_id, environment_uuid,
-		base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets, created_at
+		base_deployment_id, fingerprint, manifest, graph, diff, module_artifacts, explicit_targets, created_at, native_target
 		FROM external_deployment_plan_snapshots WHERE org_id=$1 AND plugin_id=$2 AND request_id=$3`,
 		orgID, pluginID, requestID,
 	).Scan(&stored.ID, &stored.ActorID, &stored.RequestBodySHA256, &stored.ProjectID, &stored.ProjectUUID, &stored.EnvID, &stored.EnvironmentUUID,
-		&stored.BaseDeploymentID, &stored.Fingerprint, &stored.Manifest, &stored.Graph, &stored.Diff, &artifacts, &targets, &stored.CreatedAt)
+		&stored.BaseDeploymentID, &stored.Fingerprint, &stored.Manifest, &stored.Graph, &stored.Diff, &artifacts, &targets, &stored.CreatedAt, asJson(&stored.NativeTarget))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NewErrNotFound("external deployment plan snapshot not found")
 	}

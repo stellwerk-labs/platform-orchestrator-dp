@@ -53,7 +53,17 @@ test-integration: build
 ## Run golang tests
 .PHONY: test-unit
 test-unit:
-	go tool gotestsum --format testname -- -coverprofile=cover.out ./internal/... ./scripts/gosecurity
+	go tool gotestsum --format testname -- -coverprofile=cover.out ./cmd/server ./internal/... ./scripts/gosecurity
+	GOWORK=off go test -mod=readonly -count=1 github.com/stellwerk-labs/golib/htelemetry -run '^TestStartOTel_DefaultConfig$$'
+
+## Run the complete API storage/authority suite against explicit isolated PostgreSQL, NATS and Vault fixtures
+.PHONY: test-pipeline-storage
+test-pipeline-storage:
+	@test -n "$$MODEL_TEST_DB_CONNECTION_STRING" || { echo "MODEL_TEST_DB_CONNECTION_STRING must name an isolated test database" >&2; exit 1; }
+	@test -n "$$OUTCOME_ACK_TEST_NATS_URL" || { echo "OUTCOME_ACK_TEST_NATS_URL must name an isolated test NATS" >&2; exit 1; }
+	@test -n "$$COST_POLICY_TEST_VAULT_ADDR" || { echo "COST_POLICY_TEST_VAULT_ADDR must name an isolated test Vault" >&2; exit 1; }
+	@test -n "$$COST_POLICY_TEST_VAULT_TOKEN" || { echo "COST_POLICY_TEST_VAULT_TOKEN is required" >&2; exit 1; }
+	go test -race -tags=integration ./internal/api ./internal/worker/handlers/envdestroyhandler -count=1 -timeout=230s
 
 ## Lint the code
 .PHONY: lint

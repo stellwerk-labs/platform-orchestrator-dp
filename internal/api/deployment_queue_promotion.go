@@ -194,6 +194,7 @@ func (s *Server) createQueuedDeployment(ctx context.Context, logger *zap.Logger,
 	}
 	options := s.deploymentOptions(ctx, item.CreatedBy, item.OrgID, env, item.Mode, request, "", false)
 	options.ExpectedBaseDeploymentID = item.ExpectedBaseDeploymentID
+	options.ExpectedNativeTarget = opt.Of(request.NativeTarget)
 	options.IdempotencyKeyDigest = item.IdempotencyKeyDigest
 	options.QueueItemID = opt.Of(item.ID)
 	dep, messages, _, err := CreateDeploymentWithOptions(

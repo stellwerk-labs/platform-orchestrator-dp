@@ -75,6 +75,9 @@ func (h *RunnerStatusHandler) Handle(ctx context.Context, logger *zap.Logger, de
 		logger.Info("deployment no longer executing, stopping status checks", zap.String("status", string(deployment.Status)))
 		return nil
 	}
+	if deployment.HasPipeline || deployment.HasNativeObservation {
+		return nil
+	}
 	budget, budgetErr := h.db.GetDeploymentDispatchBudget(ctx, nil, deployment.Id)
 	if budgetErr != nil {
 		return hmessaging.NewRetryErrorWithDelay(budgetErr, RetryInterval)

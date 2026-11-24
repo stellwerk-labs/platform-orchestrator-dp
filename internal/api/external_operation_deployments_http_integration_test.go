@@ -25,6 +25,7 @@ import (
 	"github.com/stellwerk-labs/golib/hmessaging"
 	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	platformorchestratorcpv3 "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	pipelineapi "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/pipelineapi"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	platformorchestratorgraph "github.com/stellwerk-labs/platform-orchestrator-graph"
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,8 @@ const (
 	externalRollbackForwardRetry
 	externalRollbackFailedRetry
 	externalRollbackLegacy
+	externalPipelineOneResponse
+	externalTargetContinuity
 )
 
 func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model.DeploymentStatus, scenario externalRollbackScenario) {
@@ -99,8 +102,8 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 		dispatchID = "dispatch-1"
 		runnerID   = "runner-1"
 	)
-	var checks atomic.Int64
-	var grantActive atomic.Bool
+	var checks, runnerReads, metadataReads, ordinaryCalls atomic.Int64
+	var metadataUnavailable, grantActive atomic.Bool
 	var targetDigest atomic.Value
 	grantActive.Store(true)
 	targetDigest.Store("")
@@ -144,14 +147,38 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 
 	coreServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
+		grantPath := "/orgs/acme/plugins/dev.example.rollouts/operations/" + operationID.String() + "/check"
+		if metadataUnavailable.Load() && request.URL.Path != grantPath {
+			metadataReads.Add(1)
+			response.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		switch {
+		case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/orgs/acme/deployment-admissions/"):
+			ordinaryCalls.Add(1)
+			var intent platformorchestratorcpv3.DeploymentAdmissionRequest
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&intent))
+			require.NotNil(t, intent.ExternalDispatch)
+			require.Equal(t, operationID, intent.ExternalDispatch.OperationId)
+			segments := strings.Split(request.URL.Path, "/")
+			admission, err := uuid.Parse(segments[4])
+			require.NoError(t, err)
+			state := platformorchestratorcpv3.AdmissionStateActive
+			var outcome *string
+			if strings.HasSuffix(request.URL.Path, "/seal-absence") {
+				state = platformorchestratorcpv3.AdmissionStateSettled
+				value := "absent"
+				outcome = &value
+			}
+			_ = json.NewEncoder(response).
+				Encode(platformorchestratorcpv3.DeploymentAdmissionReceipt{AdmissionId: admission, ProjectUuid: intent.ProjectUuid, EnvironmentUuid: intent.EnvironmentUuid, RequestDigest: intent.RequestDigest, Epoch: 1, State: state, Mode: string(intent.Mode), Outcome: outcome})
 		case request.Method == http.MethodGet && request.URL.Path == "/orgs/acme/projects/checkout/envs/production":
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"created_at": now, "updated_at": now, "display_name": "Production", "env_type_id": "production",
 				"id": envID, "project_id": projectID, "project_uuid": projectUUID, "runner_id": runnerID,
 				"status": "active", "uuid": environmentUUID,
 			})
-		case request.Method == http.MethodPost && request.URL.Path == "/internal/orgs/acme/projects/checkout/envs/production/module-catalogue":
+		case request.Method == http.MethodPost && (request.URL.Path == "/internal/orgs/acme/projects/checkout/envs/production/module-catalogue" || request.URL.Path == "/internal/orgs/acme/projects/checkout/envs/production/module-execution-catalogue"):
 			version, versionUUID, semanticVersion, digest, source := "v2", targetVersionUUID, "2.0.0", targetDigest.Load().(string), ""
 			inlineCode := `variable "in" {}`
 			if request.Header.Get("X-Stellwerk-Rollback") == "true" {
@@ -185,15 +212,10 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 				module["module_source_code"] = inlineCode
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{"modules": []map[string]any{module}, "providers": []any{}})
+		case request.Method == http.MethodGet && request.URL.Path == "/orgs/acme/projects/checkout/envs/production/pipeline-choices":
+			assert.NoError(t, json.NewEncoder(response).Encode(pipelineapi.PipelineChoices{Policy: pipelineapi.PipelinePolicy{Enabled: false}, Versions: []pipelineapi.PublishedPipelineVersion{}}))
 		case request.Method == http.MethodGet && request.URL.Path == "/orgs/acme/runners/runner-1":
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"created_at": now, "updated_at": now, "id": runnerID, "org_id": orgID,
-				"runner_configuration": map[string]any{
-					"type": "kubernetes", "cluster": map[string]any{"auth": map[string]any{}, "cluster_data": map[string]any{"certificate_authority_data": "", "server": ""}},
-					"job": map[string]any{"namespace": "runner", "service_account": "runner"},
-				},
-				"state_storage_configuration": map[string]any{"type": "kubernetes", "namespace": "state"},
-			})
+			assert.NoError(t, json.NewEncoder(response).Encode(externalRollbackRunnerResponse(now, scenario, runnerReads.Add(1))))
 		case request.Method == http.MethodPost && request.URL.Path == "/orgs/acme/plugins/dev.example.rollouts/operations/"+operationID.String()+"/check":
 			checks.Add(1)
 			if !assert.Equal(t, "Bearer dp-service-token", request.Header.Get("Authorization")) {
@@ -269,9 +291,14 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	publisher := &hmessaging.RecordingPublisher{}
 	adapter := &ExternalDeploymentHTTPAdapter{
 		Issuer: "platform-orchestrator-cp", VerificationKey: publicKey,
+		OrdinaryAdmissions: &OrdinaryDeploymentAdmissionService{Database: store, Core: cpClient, BearerToken: "dp-service-token", ExecutionCatalogue: cpClient},
 		Admission:          ExternalDeploymentAdmissionService{Database: store, Authorizer: grantClient, Logger: zap.NewNop()},
 		Materials:          ExternalOperationMaterialService{Vault: materialVault},
 		ControlPlaneClient: cpClient, EventPublisher: publisher, Logger: zap.NewNop(), Now: func() time.Time { return now },
+	}
+	adapter.Server = &Server{Database: store, Logger: zap.NewNop(), ControlPlaneClient: cpClient, DeploymentAdmissions: adapter.OrdinaryAdmissions}
+	if scenario == externalPipelineOneResponse {
+		adapter.Materials.Vault = managedLogVault(t)
 	}
 	server := echo.New()
 	server.POST(ExternalDeploymentAdmissionPath, adapter.Handle)
@@ -304,8 +331,13 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	require.Equal(t, http.StatusOK, planResponse.Code, planResponse.Body.String())
 	var plan externalDeploymentPlanResponse
 	require.NoError(t, json.Unmarshal(planResponse.Body.Bytes(), &plan))
+	verifyExternalPlanCaptureReplay(t, externalRollbackFixture{
+		runnerReads: &runnerReads, metadataUnavailable: &metadataUnavailable, metadataReads: &metadataReads,
+		server: server, planClaims: planClaims, planPath: planPath, planBodyBytes: planBodyBytes, plan: plan, privateKey: privateKey, now: now,
+	})
 
 	bodyBytes, err := json.Marshal(ExternalDeploymentAdmissionBody{
+		Pipeline:     prepareExternalPipelineScenario(t, adapter.Server, coreServer.URL, scenario),
 		OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
 		ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeDeploy,
 		Plan: &ExternalDeploymentAdmissionPlan{
@@ -337,6 +369,7 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	changedPlan := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusConflict, changedPlan.Code, changedPlan.Body.String())
 	targetDigest.Store("")
+	runnerReads.Store(0)
 	created := do(bodyBytes, assertion, dispatchID)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var createdBody ExternalDeploymentAdmissionResponse
@@ -347,6 +380,71 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	require.Equal(t, actorID, deployment.CreatedBy)
 	require.Equal(t, model.DeploymentModeDeploy, deployment.Mode)
 	require.Equal(t, targetVersionUUID, deployment.ModuleArtifacts[0].VersionUUID)
+	verifyExternalMutationRunnerResponse(t, externalRollbackFixture{ctx: ctx, store: store, orgID: orgID, deployment: deployment, runnerReads: &runnerReads}, scenario)
+	if scenario == externalPipelineOneResponse {
+		require.NotEmpty(t, deployment.EncryptedLogsRecipient.Or(""))
+		terminalTx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		_, err = store.UpdateDeploymentStatusAndOutputs(ctx, terminalTx, deployment.Id, model.UpdateDeploymentStatusAndOutputsParams{Status: forwardStatus, RunnerCompletionProven: true})
+		require.NoError(t, err)
+		require.NoError(t, model.SettleDeploymentPipeline(ctx, terminalTx, deployment.Id, forwardStatus))
+		require.NoError(t, terminalTx.Commit())
+		rollbackBody, err := json.Marshal(ExternalDeploymentAdmissionBody{
+			OperationRef: operationID, Fence: 7, ProjectId: projectID, EnvId: envID,
+			ProjectUuid: projectUUID, EnvironmentUuid: environmentUUID, Mode: ExternalDeploymentAdmissionBodyModeRollback,
+			Pipeline: prepareExternalPipelineScenario(t, adapter.Server, coreServer.URL, scenario),
+			Rollback: &ExternalDeploymentAdmissionRollback{ForwardDeploymentId: deployment.Id},
+		})
+		require.NoError(t, err)
+		rollbackClaims := claims
+		rollbackClaims.RequestID, rollbackClaims.BodySHA256 = "dispatch-rollback", plugincontext.Digest(rollbackBody)
+		rollbackAssertion, err := plugincontext.Sign(privateKey, rollbackClaims, now)
+		require.NoError(t, err)
+		runnerReads.Store(0)
+		rollbackResponse := do(rollbackBody, rollbackAssertion, rollbackClaims.RequestID)
+		require.Equal(t, http.StatusCreated, rollbackResponse.Code, rollbackResponse.Body.String())
+		var rollback ExternalDeploymentAdmissionResponse
+		require.NoError(t, json.Unmarshal(rollbackResponse.Body.Bytes(), &rollback))
+		rollbackDeployment, _, _, _, err := store.GetDeployment(ctx, nil, orgID, rollback.DeploymentId, model.GetModeDefault)
+		require.NoError(t, err)
+		require.Equal(t, base.Id, rollbackDeployment.RollbackToId.Must())
+		require.NotEmpty(t, rollbackDeployment.EncryptedLogsRecipient.Or(""))
+		require.NotEqual(t, deployment.EncryptedLogsRecipient, rollbackDeployment.EncryptedLogsRecipient)
+		realVault := adapter.Materials.Vault
+		vaultServer.Close()
+		for _, entry := range []struct {
+			deployment *model.DeploymentSummary
+			body       []byte
+			assertion  string
+			requestID  string
+		}{{deployment, bodyBytes, assertion, dispatchID}, {rollbackDeployment, rollbackBody, rollbackAssertion, rollbackClaims.RequestID}} {
+			materialTx, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			logs, err := model.GetDeploymentLogMaterial(ctx, materialTx, orgID, entry.deployment.Id)
+			require.NoError(t, err)
+			require.Equal(t, logs.Recipient, entry.deployment.EncryptedLogsRecipient.Must())
+			require.NotEqual(t, entry.deployment.EncryptedOutputsRecipient.Must(), logs.Recipient)
+			require.Contains(t, logs.EncryptedIdentity, "vault:v")
+			require.NotContains(t, logs.EncryptedIdentity, "AGE-SECRET-KEY")
+			adapter.Materials.Vault = materialVault
+			replayed := do(entry.body, entry.assertion, entry.requestID)
+			require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
+			sameLogs, err := model.GetDeploymentLogMaterial(ctx, materialTx, orgID, entry.deployment.Id)
+			require.NoError(t, err)
+			require.Equal(t, logs, sameLogs)
+			require.NoError(t, materialTx.Rollback())
+			adapter.Materials.Vault = realVault
+		}
+		countTx, err := store.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		var logRows int
+		require.NoError(t, countTx.QueryRowContext(ctx, `SELECT count(*) FROM deployment_log_material`).Scan(&logRows))
+		require.NoError(t, countTx.Rollback())
+		require.Equal(t, 2, logRows)
+		require.EqualValues(t, 1, runnerReads.Load())
+		return
+	}
+
 	require.True(t, deployment.EncryptedOutputsRecipient.IsSet())
 	require.Equal(t, deployment.EncryptedOutputsRecipient.Must(), deployment.EncryptedLogsRecipient.Must())
 	materialTx, err := store.BeginTx(ctx, nil)
@@ -357,9 +455,11 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	require.Equal(t, "vault:v1:wrapped-operation-identity", material.EncryptedIdentity)
 	require.NoError(t, materialTx.Rollback())
 
-	replayed := do(bodyBytes, assertion, dispatchID)
-	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
-	require.EqualValues(t, 3, checks.Load(), "replay must reauthorize before loading its receipt")
+	verifyExternalAcceptedMetadataOutageReplay(t, externalRollbackFixture{
+		adapter: adapter, ordinaryCalls: &ordinaryCalls, checks: &checks, metadataUnavailable: &metadataUnavailable, metadataReads: &metadataReads,
+		do: do, bodyBytes: bodyBytes, assertion: assertion, claims: claims,
+	})
+
 	if forwardStatus == model.DeploymentStatusFailed {
 		resultServer := Server{Database: store, Logger: zap.NewNop(), EventPublisher: publisher}
 		require.NoError(t, resultServer.ApplyRunnerDeploymentResult(ctx, orgID, runnerID, deployment.Id, uuid.NewString(), DeploymentResultsUpdateBody{
@@ -463,6 +563,7 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 	require.Equal(t, rollbackResult.DeploymentId, replayedRollback.DeploymentId)
 	require.EqualValues(t, 5, checks.Load(), "rollback replay must reauthorize and retain one normal Deployment even after its head changes")
 	fixture := externalRollbackFixture{
+		ordinaryCalls: &ordinaryCalls, metadataUnavailable: &metadataUnavailable, metadataReads: &metadataReads,
 		grantActive:        &grantActive,
 		checks:             &checks,
 		bodyBytes:          bodyBytes,
@@ -509,6 +610,8 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 			verifyExternalFailedRollbackRetry(t, fixture)
 		case externalRollbackForwardRetry:
 			verifyExternalForwardRetryBase(t, fixture)
+		case externalTargetContinuity:
+			verifyExternalTargetContinuity(t, fixture)
 		default:
 			t.Fatal("unknown rollback fixture scenario")
 		}
@@ -568,43 +671,47 @@ func testExternalDeploymentHTTPAdapterRollback(t *testing.T, forwardStatus model
 }
 
 type externalRollbackFixture struct {
-	grantActive        *atomic.Bool
-	checks             *atomic.Int64
-	bodyBytes          []byte
-	assertion          string
-	server             *echo.Echo
-	ctx                context.Context
-	store              model.Databaser
-	adapter            *ExternalDeploymentHTTPAdapter
-	publisher          *hmessaging.RecordingPublisher
-	orgID              string
-	pluginID           string
-	runnerID           string
-	projectID          string
-	envID              string
-	actorID            uuid.UUID
-	operationID        uuid.UUID
-	deployment         *model.DeploymentSummary
-	rollbackDeployment *model.DeploymentSummary
-	base               *model.DeploymentSummary
-	projectUUID        uuid.UUID
-	environmentUUID    uuid.UUID
-	rollbackRequest    ExternalDeploymentAdmissionBody
-	rollbackBody       []byte
-	rollbackAssertion  string
-	rollbackClaims     plugincontext.Claims
-	claims             plugincontext.Claims
-	privateKey         ed25519.PrivateKey
-	now                time.Time
-	material           *model.ExternalOperationMaterial
-	planClaims         plugincontext.Claims
-	planPath           string
-	planBodyBytes      []byte
-	plan               externalDeploymentPlanResponse
-	moduleUUID         uuid.UUID
-	targetVersionUUID  uuid.UUID
-	baseVersionUUID    uuid.UUID
-	do                 func([]byte, string, string) *httptest.ResponseRecorder
+	runnerReads         *atomic.Int64
+	ordinaryCalls       *atomic.Int64
+	metadataUnavailable *atomic.Bool
+	metadataReads       *atomic.Int64
+	grantActive         *atomic.Bool
+	checks              *atomic.Int64
+	bodyBytes           []byte
+	assertion           string
+	server              *echo.Echo
+	ctx                 context.Context
+	store               model.Databaser
+	adapter             *ExternalDeploymentHTTPAdapter
+	publisher           *hmessaging.RecordingPublisher
+	orgID               string
+	pluginID            string
+	runnerID            string
+	projectID           string
+	envID               string
+	actorID             uuid.UUID
+	operationID         uuid.UUID
+	deployment          *model.DeploymentSummary
+	rollbackDeployment  *model.DeploymentSummary
+	base                *model.DeploymentSummary
+	projectUUID         uuid.UUID
+	environmentUUID     uuid.UUID
+	rollbackRequest     ExternalDeploymentAdmissionBody
+	rollbackBody        []byte
+	rollbackAssertion   string
+	rollbackClaims      plugincontext.Claims
+	claims              plugincontext.Claims
+	privateKey          ed25519.PrivateKey
+	now                 time.Time
+	material            *model.ExternalOperationMaterial
+	planClaims          plugincontext.Claims
+	planPath            string
+	planBodyBytes       []byte
+	plan                externalDeploymentPlanResponse
+	moduleUUID          uuid.UUID
+	targetVersionUUID   uuid.UUID
+	baseVersionUUID     uuid.UUID
+	do                  func([]byte, string, string) *httptest.ResponseRecorder
 }
 
 func verifyExternalRollbackLegacy(t *testing.T, fixture externalRollbackFixture) {
@@ -638,7 +745,7 @@ func verifyExternalRollbackLegacy(t *testing.T, fixture externalRollbackFixture)
 	require.Equal(t, rollbackDeployment.Id, replay.DeploymentId)
 	tx, err = store.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	anchor, err := adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
+	anchor, _, err := adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
 	require.NoError(t, err)
 	require.Equal(t, deployment.Id, anchor.FirstForwardDeploymentID)
 	require.Equal(t, base.Id, anchor.RollbackBaseDeploymentID)
@@ -967,7 +1074,7 @@ func verifyExternalForwardRetryBase(t *testing.T, fixture externalRollbackFixtur
 		defer func() { require.NoError(t, tx.Rollback()) }()
 		_, err = tx.ExecContext(ctx, "DELETE FROM external_operation_rollback_anchors")
 		require.NoError(t, err)
-		_, err = adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
+		_, _, err = adapter.operationRollbackAnchor(ctx, tx, externalRollbackScope(orgID, pluginID, rollbackRequest), true)
 		require.ErrorContains(t, err, "ambiguous")
 	})
 

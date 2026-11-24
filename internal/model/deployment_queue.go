@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -106,7 +107,7 @@ func (n NewDeploymentQueueItem) IntentSHA256() string {
 		Intent        json.RawMessage    `json:"intent"`
 		ExpectedBase  opt.Opt[uuid.UUID] `json:"expected_base_deployment_id"`
 		HaltOnFailure bool               `json:"halt_on_failure,omitempty"`
-	}{n.ProjectID, n.EnvID, n.Mode, n.Intent, n.ExpectedBaseDeploymentID, n.HaltOnFailure})
+	}{n.ProjectID, n.EnvID, n.Mode, queueRequestedIntent(n.Intent), n.ExpectedBaseDeploymentID, n.HaltOnFailure})
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }
@@ -546,4 +547,46 @@ func scanEnvironmentUUIDs(rows *sql.Rows) ([]uuid.UUID, error) {
 		}
 	}
 	return out, errors.Wrap(rows.Err(), "failed to iterate environments")
+}
+
+// Queue identity follows the caller selector. The stored intent still carries
+// the complete accepted recipe, even when the project default changes mid-retry.
+func queueRequestedIntent(intent json.RawMessage) json.RawMessage {
+	var request map[string]json.RawMessage
+	if json.Unmarshal(intent, &request) != nil {
+		return intent
+	}
+	_, hasTarget := request["native_target"]
+	delete(request, "native_target")
+	var definition PipelineDefinition
+	if json.Unmarshal(request["pipeline"], &definition) != nil || definition.RequestIdentityVersion != 1 {
+		if !hasTarget {
+			return intent
+		}
+		// Legacy caller hashes retain field order. Re-encoding the map would
+		// change their identity when the server adds its resolved target.
+		decoder := json.NewDecoder(bytes.NewReader(intent))
+		_, _ = decoder.Token()
+		var fields [][]byte
+		for decoder.More() {
+			start := decoder.InputOffset()
+			key, _ := decoder.Token()
+			var value json.RawMessage
+			_ = decoder.Decode(&value)
+			if key == "native_target" {
+				continue
+			}
+			field := bytes.TrimSpace(intent[start:decoder.InputOffset()])
+			fields = append(fields, bytes.TrimPrefix(field, []byte(",")))
+		}
+		return append(append([]byte("{"), bytes.Join(fields, []byte(","))...), '}')
+	} else {
+		selection, _ := json.Marshal(definition.RequestedSelection)
+		request["pipeline"] = selection
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return intent
+	}
+	return raw
 }

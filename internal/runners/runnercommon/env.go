@@ -1,6 +1,7 @@
 package runnercommon
 
 import (
+	"encoding/json"
 	"iter"
 	"strconv"
 
@@ -31,7 +32,21 @@ func GenerateEnvVarsForRun(metadataOutputKey string, d *model.DeploymentSummary,
 		if d.DeploymentEnvUuid != uuid.Nil {
 			yield("DEPLOYMENT_ENV_UUID", d.DeploymentEnvUuid.String())
 		}
-		yield("MODE", RunnerModeForDeployment(d.Mode))
+		mode := RunnerModeForDeployment(d.Mode)
+		if d.RetainedPlan != nil && !d.RetainedPlan.Export {
+			mode = "apply_retained"
+		}
+		yield("MODE", mode)
+		if d.RetainedPlan != nil {
+			binding, _ := json.Marshal(d.RetainedPlan.Binding)
+			yield("STELLWERK_RETAINED_PLANS_ENABLED", "true")
+			yield("STELLWERK_RETAINED_PLAN_BINDING", string(binding))
+			if d.RetainedPlan.Export {
+				yield("STELLWERK_RETAIN_PLAN_V1", "true")
+			} else {
+				yield("STELLWERK_RETAINED_PLAN_SHA256", d.RetainedPlan.CiphertextSHA256)
+			}
+		}
 		for k, v := range CostPolicyEnv(d, gatewayConfigurations...) {
 			yield(k, v)
 		}

@@ -66,3 +66,16 @@ func TestQueueIntentDigestOfARequestWithoutHaltIsUnchanged(t *testing.T) {
 	legacy := sha256.Sum256([]byte(`{"project_id":"p","env_id":"e","mode":"rollback","intent":{"rollback_to_deployment_id":"76543210-89ab-cdef-0123-456789abcdef"},"expected_base_deployment_id":"01234567-89ab-cdef-0123-456789abcdef"}`))
 	require.Equal(t, hex.EncodeToString(legacy[:]), request.IntentSHA256())
 }
+
+func TestQueueRecipeIdentitySurvivesProjectDefaultChange(t *testing.T) {
+	request := NewDeploymentQueueItem{ProjectID: "project", EnvID: "env", Mode: DeploymentModeDeploy}
+	first, _ := json.Marshal(map[string]any{"manifest": map[string]any{}, "pipeline": PipelineDefinition{ID: uuid.NewString(), Version: 1, RequestIdentityVersion: 1}})
+	second, _ := json.Marshal(map[string]any{"manifest": map[string]any{}, "pipeline": PipelineDefinition{ID: uuid.NewString(), Version: 2, RequestIdentityVersion: 1}})
+	request.Intent = first
+	original := request.IntentSHA256()
+	request.Intent = second
+	require.Equal(t, original, request.IntentSHA256(), "omitted selector identifies original request, not today's default")
+	explicit, _ := json.Marshal(map[string]any{"manifest": map[string]any{}, "pipeline": PipelineDefinition{ID: uuid.NewString(), Version: 2, RequestIdentityVersion: 1, RequestedSelection: &PipelineSelection{ID: "explicit-version", Version: 2}}})
+	request.Intent = explicit
+	require.NotEqual(t, original, request.IntentSHA256())
+}

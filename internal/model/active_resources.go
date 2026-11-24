@@ -31,7 +31,8 @@ func (d *databaser) ListModuleVersionUsage(ctx context.Context, optionalTx Tx, o
 	rows, err := d.txOrDb(optionalTx).QueryContext(ctx, `SELECT DISTINCT e.project_id, e.env_id, e.id,
 		n.last_module_definition_version, d.id, COALESCE(d.completed_at, d.created_at)
 		FROM deployment_environments e
-		INNER JOIN deployments d ON d.de_id = e.id AND d.id = e.last_state_deployment_id
+		JOIN deployment_effective_state effective ON effective.environment_id=e.id
+		INNER JOIN deployments d ON d.de_id = e.id AND d.id = effective.deployment_id
 		INNER JOIN resource_nodes n ON n.env_uuid = e.id AND n.last_deployment_id = d.id
 		WHERE e.org_id = $1 AND n.last_module_definition_id = $2
 		AND ($3::text IS NULL OR n.last_module_definition_version = $3)

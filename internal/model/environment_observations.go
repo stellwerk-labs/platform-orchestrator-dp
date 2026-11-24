@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/genevents"
 	observation "github.com/stellwerk-labs/platform-orchestrator-dp/shared/v3/observationapi"
@@ -54,7 +56,20 @@ func ReadObservationReceipt(ctx context.Context, tx Tx, orgID, pluginID string, 
 	return &receipt, nil
 }
 
-func TryStartObservation(ctx context.Context, db Databaser, orgID, pluginID string, actorID uuid.UUID, request observation.ObservationRequest, runnerID string, limit int, supported bool) (*observation.ObservationReceipt, []*hstandardoutbox.PendingEventMessage, error) {
+func TryStartObservation(
+	ctx context.Context,
+	db Databaser,
+	orgID, pluginID string,
+	actorID uuid.UUID,
+	request observation.ObservationRequest,
+	runnerID string,
+	limit int,
+	supported bool,
+	currentTarget *cp.NativeExecutionTargetReference,
+) (*observation.ObservationReceipt, []*hstandardoutbox.PendingEventMessage, error) {
+	if (request.ExpectedBaselineId == nil) != (request.ExpectedBaselineFingerprint == nil) {
+		return nil, nil, NewErrBadRequest("verification requires exact baseline identity and fingerprint together")
+	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return nil, nil, err
@@ -107,6 +122,8 @@ func TryStartObservation(ctx context.Context, db Databaser, orgID, pluginID stri
 		if reason == observation.ObservationReceiptReasonAccepted {
 			if !supported || limit <= 0 {
 				receipt.Reason = observation.ObservationReceiptReasonUnsupported
+			} else if !reflect.DeepEqual(baseline.NativeTarget, currentTarget) || baseline.NativeTarget != nil && baseline.NativeTarget.RunnerId != baseline.RunnerId {
+				receipt.Reason = observation.ObservationReceiptReasonBaselineChanged
 			} else {
 				// A savepoint makes a full Runner a sealed skip without retaining a new
 				// executing head, lease, deployment, budget, or outbox event.
@@ -115,7 +132,7 @@ func TryStartObservation(ctx context.Context, db Databaser, orgID, pluginID stri
 				}
 				// Runner discards private observation diagnostics. INFO retains aggregate costs and safe lifecycle metadata.
 				dep, err := db.CreateDeployment(ctx, tx, orgID, request.ProjectId, request.EnvId, CreateDeploymentParams{
-					CreatedBy: actorID, DeploymentEnvUuid: request.EnvironmentUuid, Mode: DeploymentModeObservation,
+					NativeTarget: baseline.NativeTarget, CreatedBy: actorID, DeploymentEnvUuid: request.EnvironmentUuid, Mode: DeploymentModeObservation,
 					Manifest: manifest, Tofu: tofu, Graph: graph, RunnerId: runnerID, RunnerLogLevel: "info",
 					ModuleArtifacts: baseline.ModuleArtifacts, ModuleVersionRequestDigest: baseline.ModuleVersionRequestDigest, Metrics: baseline.Metrics,
 				})
@@ -138,7 +155,7 @@ func TryStartObservation(ctx context.Context, db Databaser, orgID, pluginID stri
 					receipt.Reason = observation.ObservationReceiptReasonAccepted
 					receipt.RunId = &dep.Id
 					receipt.BaselineId = &baseline.Id
-					value := ObservationBaselineFingerprint(manifest, tofu, graph, baseline.ModuleArtifacts)
+					value := ObservationBaselineFingerprint(manifest, tofu, graph, baseline.ModuleArtifacts, baseline.NativeTarget)
 					receipt.BaselineFingerprint = &value
 					pending, err = db.InsertPendingEventMessages(ctx, tx, []*hstandardoutbox.PendingEventMessage{{Subject: string(genevents.IoPlatformOrchestratorDeploymentCreated), Payload: ConvertDeploymentToEventPayload(dep)}})
 					if err != nil {
@@ -216,6 +233,9 @@ func observationBaseline(ctx context.Context, db Databaser, tx Tx, orgID string,
 	if err != nil {
 		return "", nil, nil, nil, nil, err
 	}
+	if request.ExpectedBaselineId != nil && (base.Id != *request.ExpectedBaselineId || ObservationBaselineFingerprint(manifest, tofu, graph, base.ModuleArtifacts, base.NativeTarget) != *request.ExpectedBaselineFingerprint) {
+		return none(observation.ObservationReceiptReason("baseline_changed"))
+	}
 	if base.DeploymentEnvUuid != request.EnvironmentUuid {
 		return none(observation.ObservationReceiptReasonNoBaseline)
 	}
@@ -269,7 +289,7 @@ func ReadObservationRun(ctx context.Context, tx Tx, orgID, pluginID string, runI
 	var completed, expires, currentCompleted sql.NullTime
 	var currentID uuid.NullUUID
 	var currentStatus, currentMode sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT o.receipt,COALESCE(d.status,'expired'),COALESCE(d.status_message,''),d.completed_at,o.result,o.result_expires_at,current.id,current.status,current.mode,current.completed_at FROM environment_observation_receipts o LEFT JOIN deployments d ON d.id=o.deployment_id LEFT JOIN deployment_environments e ON e.id=o.environment_uuid AND e.org_id=o.org_id LEFT JOIN deployments current ON current.id=e.last_state_deployment_id WHERE o.org_id=$1 AND o.plugin_id=$2 AND o.receipt ? 'run_id' AND o.receipt->>'run_id'=$3::text`, orgID, pluginID, runID).
+	err := tx.QueryRowContext(ctx, `SELECT o.receipt,COALESCE(d.status,'expired'),COALESCE(d.status_message,''),d.completed_at,o.result,o.result_expires_at,current.id,current.status,current.mode,current.completed_at FROM environment_observation_receipts o LEFT JOIN deployments d ON d.id=o.deployment_id LEFT JOIN deployment_environments e ON e.id=o.environment_uuid AND e.org_id=o.org_id LEFT JOIN deployment_effective_state effective ON effective.environment_id=e.id LEFT JOIN deployments current ON current.id=effective.deployment_id WHERE o.org_id=$1 AND o.plugin_id=$2 AND o.receipt ? 'run_id' AND o.receipt->>'run_id'=$3::text`, orgID, pluginID, runID).
 		Scan(&receiptRaw, &status, &statusMessage, &completed, &resultRaw, &expires, &currentID, &currentStatus, &currentMode, &currentCompleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NewErrNotFound("observation run not found")
@@ -414,12 +434,19 @@ func ReplayObservationRequest(ctx context.Context, tx Tx, orgID, pluginID string
 	return ReadObservationReceipt(ctx, tx, orgID, pluginID, request.RequestId)
 }
 
-func ObservationBaselineFingerprint(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph, artifacts []ModuleArtifactRequirement) string {
+func ObservationBaselineFingerprint(manifest EncodedDeploymentManifest, tofu RawTofu, graph EncodedDeploymentGraph, artifacts []ModuleArtifactRequirement, target *cp.NativeExecutionTargetReference) string {
 	raw, _ := json.Marshal(artifacts)
 	fingerprint := sha256.New()
 	for _, part := range [][]byte{manifest, tofu, graph, raw} {
 		_, _ = fmt.Fprintf(fingerprint, "%d:", len(part))
 		_, _ = fingerprint.Write(part)
+	}
+	if target != nil {
+		rawTarget, _ := json.Marshal(target)
+		for _, part := range [][]byte{[]byte("native-target/v1"), rawTarget} {
+			_, _ = fmt.Fprintf(fingerprint, "%d:", len(part))
+			_, _ = fingerprint.Write(part)
+		}
 	}
 	return "sha256:" + hex.EncodeToString(fingerprint.Sum(nil))
 }

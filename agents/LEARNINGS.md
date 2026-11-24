@@ -135,3 +135,7 @@ in DP and provides a safe, nonmutating identity probe.
 - Existing database fixtures append keyword `search_path=...`; use a keyword PostgreSQL DSN rather than a URL DSN for these fixtures or connection initialization retries until timeout.
 - The strict API authorization middleware requires the authorization marker even for an authenticated absent-resource404. Follow existing scoped Deployment handlers for absent lookups; perform plaintext authorization before Vault/blob access and before mixed-decryption400 validation.
 - Reusing the ordinary deployment options seam covers direct requests, queue promotion, Draft selection and rollback without persisting generated recipients into queued caller intent.
+
+## Native pipeline source export
+
+Keep the released application source and its public SDK contracts aligned; preserve existing compatibility exports.

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"testing"
 
 	"github.com/google/uuid"
@@ -29,4 +31,13 @@ func TestDeploymentAdmissionOptionalKeyHasIndependentStableAttemptIdentity(t *te
 	require.Equal(t, keyed.AdmissionID, replay.AdmissionID)
 	var disabled *OrdinaryDeploymentAdmissionService
 	require.Nil(t, disabled.NewAttempt("org", project, environment, actor, model.DeploymentModeDeploy, ""))
+}
+
+func TestNativeAdmissionCannotUseNilAttemptOrService(t *testing.T) {
+	var attempt *OrdinaryDeploymentAdmissionAttempt
+	require.NoError(t, attempt.Authorize(context.Background(), nil, nil, ordinaryDeploymentCompiledIntent{}))
+	compiled := ordinaryDeploymentCompiledIntent{NativeTarget: &cp.NativeExecutionTargetReference{}}
+	require.ErrorIs(t, attempt.Authorize(context.Background(), nil, nil, compiled), ErrDeploymentAdmissionUnavailable)
+	attempt = &OrdinaryDeploymentAdmissionAttempt{}
+	require.ErrorIs(t, attempt.Authorize(context.Background(), nil, nil, compiled), ErrDeploymentAdmissionUnavailable)
 }

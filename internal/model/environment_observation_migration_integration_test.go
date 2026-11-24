@@ -78,6 +78,9 @@ func TestObservationMigrationPreservesUnknownOwnershipAcrossRestart(t *testing.T
 	_, err = provider.DownTo(ctx, 37)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot discard observation receipts or live Runner ownership")
+	// Earlier downgrade steps committed before the ownership guard refused; modern APIs require the current schema.
+	_, err = provider.Up(ctx)
+	require.NoError(t, err)
 	// A stopped legacy attempt can be released only by the authenticated operator
 	// attestation above it, never because migration/restart saw an old deadline.
 	tx, err = legacy.BeginTx(ctx, nil)

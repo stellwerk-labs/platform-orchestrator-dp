@@ -140,30 +140,32 @@ type externalDeploymentPlanResponse struct {
 }
 
 type externalDeploymentStatusResponse struct {
-	RollbackRetryProvenanceRecorded *bool                     `json:"rollback_retry_provenance_recorded,omitempty"`
-	FirstForwardDeploymentID        *uuid.UUID                `json:"first_forward_deployment_id,omitempty"`
-	RollbackBaseDeploymentID        *uuid.UUID                `json:"rollback_base_deployment_id,omitempty"`
-	AdmissionBaseDeploymentID       *uuid.UUID                `json:"admission_base_deployment_id,omitempty"`
-	ForwardDeploymentID             *uuid.UUID                `json:"forward_deployment_id,omitempty"`
-	RetryOfRollbackDeploymentID     *uuid.UUID                `json:"retry_of_rollback_deployment_id,omitempty"`
-	DeploymentID                    uuid.UUID                 `json:"deployment_id"`
-	DispatchID                      string                    `json:"dispatch_id"`
-	OperationRef                    string                    `json:"operation_ref"`
-	Fence                           int64                     `json:"fence"`
-	RequestDigest                   string                    `json:"request_digest"`
-	ProjectID                       string                    `json:"project_id"`
-	EnvID                           string                    `json:"env_id"`
-	ProjectUUID                     uuid.UUID                 `json:"project_uuid"`
-	EnvironmentUUID                 uuid.UUID                 `json:"environment_uuid"`
-	Mode                            string                    `json:"mode"`
-	Status                          string                    `json:"status"`
-	StatusMessage                   string                    `json:"status_message"`
-	ModuleVersions                  map[string]uuid.UUID      `json:"module_versions"`
-	RollbackModuleVersions          map[string]uuid.UUID      `json:"rollback_module_versions"`
-	RollbackModules                 []externalModuleInventory `json:"rollback_modules,omitempty"`
-	CreatedAt                       time.Time                 `json:"created_at"`
-	CompletedAt                     *time.Time                `json:"completed_at,omitempty"`
-	ReceiptCreatedAt                time.Time                 `json:"receipt_created_at"`
+	Pipeline                        *DeploymentPipelineLifecycle `json:"pipeline,omitempty"`
+	AdmissionClosed                 bool                         `json:"admission_closed"`
+	RollbackRetryProvenanceRecorded *bool                        `json:"rollback_retry_provenance_recorded,omitempty"`
+	FirstForwardDeploymentID        *uuid.UUID                   `json:"first_forward_deployment_id,omitempty"`
+	RollbackBaseDeploymentID        *uuid.UUID                   `json:"rollback_base_deployment_id,omitempty"`
+	AdmissionBaseDeploymentID       *uuid.UUID                   `json:"admission_base_deployment_id,omitempty"`
+	ForwardDeploymentID             *uuid.UUID                   `json:"forward_deployment_id,omitempty"`
+	RetryOfRollbackDeploymentID     *uuid.UUID                   `json:"retry_of_rollback_deployment_id,omitempty"`
+	DeploymentID                    uuid.UUID                    `json:"deployment_id"`
+	DispatchID                      string                       `json:"dispatch_id"`
+	OperationRef                    string                       `json:"operation_ref"`
+	Fence                           int64                        `json:"fence"`
+	RequestDigest                   string                       `json:"request_digest"`
+	ProjectID                       string                       `json:"project_id"`
+	EnvID                           string                       `json:"env_id"`
+	ProjectUUID                     uuid.UUID                    `json:"project_uuid"`
+	EnvironmentUUID                 uuid.UUID                    `json:"environment_uuid"`
+	Mode                            string                       `json:"mode"`
+	Status                          string                       `json:"status"`
+	StatusMessage                   string                       `json:"status_message"`
+	ModuleVersions                  map[string]uuid.UUID         `json:"module_versions"`
+	RollbackModuleVersions          map[string]uuid.UUID         `json:"rollback_module_versions"`
+	RollbackModules                 []externalModuleInventory    `json:"rollback_modules,omitempty"`
+	CreatedAt                       time.Time                    `json:"created_at"`
+	CompletedAt                     *time.Time                   `json:"completed_at,omitempty"`
+	ReceiptCreatedAt                time.Time                    `json:"receipt_created_at"`
 }
 
 func (a *ExternalDeploymentHTTPAdapter) HandleRead(c echo.Context) error {
@@ -338,7 +340,7 @@ func (a *ExternalDeploymentHTTPAdapter) writeStatusProjectionError(c echo.Contex
 }
 
 func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx context.Context, tx model.Tx, deployment model.DeploymentSummary, receipt model.ExternalOperationDeploymentReceipt, projectUUID, environmentUUID uuid.UUID) (externalDeploymentStatusResponse, error) {
-	if deployment.Status == model.DeploymentStatusFailed {
+	if deployment.Status == model.DeploymentStatusFailed && !deployment.HasPipeline {
 		unknown, err := model.DeploymentOutcomeUnreconciled(ctx, tx, deployment.Id)
 		if err != nil {
 			return externalDeploymentStatusResponse{}, err
@@ -357,7 +359,7 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 	if !receipt.BaseDeploymentID.IsSet() {
 		return externalDeploymentStatusResponse{}, errors.New("external deployment receipt lacks a captured effective base")
 	}
-	anchor, err := a.operationRollbackAnchor(ctx, tx, model.ExternalOperationRollbackAnchor{
+	anchor, _, err := a.operationRollbackAnchor(ctx, tx, model.ExternalOperationRollbackAnchor{
 		OrgID: receipt.OrgID, PluginID: receipt.PluginID, OperationRef: receipt.OperationRef,
 		ProjectID: deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
 	}, false)
@@ -407,14 +409,19 @@ func (a *ExternalDeploymentHTTPAdapter) projectExternalDeploymentStatus(ctx cont
 	if err != nil {
 		return externalDeploymentStatusResponse{}, err
 	}
+	pipeline, closed, status, err := pluginPipelineLifecycle(ctx, tx, &deployment)
+	if err != nil {
+		return externalDeploymentStatusResponse{}, err
+	}
 	return externalDeploymentStatusResponse{
+		Pipeline: pipeline, AdmissionClosed: closed,
 		RollbackRetryProvenanceRecorded: retryProvenance,
 		FirstForwardDeploymentID:        firstForwardID, RollbackBaseDeploymentID: rollbackBaseID, AdmissionBaseDeploymentID: admissionBaseID,
 		ForwardDeploymentID: forwardID, RetryOfRollbackDeploymentID: receipt.RetryOfRollbackDeploymentID.Ref(),
 		DeploymentID: deployment.Id, DispatchID: receipt.RequestID, OperationRef: receipt.OperationRef, Fence: receipt.Fence,
 		RequestDigest: receipt.RequestBodySHA256,
 		ProjectID:     deployment.ProjectId, EnvID: deployment.EnvId, ProjectUUID: projectUUID, EnvironmentUUID: environmentUUID,
-		Mode: string(deployment.Mode), Status: string(deployment.Status), StatusMessage: deployment.StatusMessage,
+		Mode: string(deployment.Mode), Status: status, StatusMessage: deployment.StatusMessage,
 		ModuleVersions: versions, RollbackModuleVersions: rollbackVersions, RollbackModules: projectModuleInventory(base.ModuleArtifacts),
 		CreatedAt: deployment.CreatedAt, CompletedAt: deployment.CompletedAt.Ref(), ReceiptCreatedAt: receipt.CreatedAt,
 	}, nil
@@ -585,7 +592,7 @@ func (a *ExternalDeploymentHTTPAdapter) HandlePlan(c echo.Context) error {
 	stored, err := model.CreateOrGetExternalDeploymentPlanSnapshot(c.Request().Context(), tx, model.ExternalDeploymentPlanSnapshot{
 		OrgID: c.Param("orgId"), PluginID: c.Param("pluginId"), RequestID: claims.RequestID, ActorID: actorID,
 		RequestBodySHA256: claims.BodySHA256, ProjectID: body.ProjectID, ProjectUUID: body.ProjectUUID, EnvID: body.EnvID, EnvironmentUUID: environment.Uuid,
-		BaseDeploymentID: capture.BaseDeploymentID, Fingerprint: fingerprint, Manifest: capture.Manifest, Graph: capture.Graph,
+		NativeTarget: capture.NativeTarget, BaseDeploymentID: capture.BaseDeploymentID, Fingerprint: fingerprint, Manifest: capture.Manifest, Graph: capture.Graph,
 		Diff: capture.Diff, ModuleArtifacts: capture.ModuleArtifacts, ExplicitTargets: explicitTargets,
 	})
 	if err != nil {
@@ -615,7 +622,7 @@ func (a *ExternalDeploymentHTTPAdapter) resolveExactEnvironment(ctx context.Cont
 
 func externalPlanResponse(snapshot model.ExternalDeploymentPlanSnapshot) (externalDeploymentPlanResponse, error) {
 	manifest, graph, diff, err := projectPlanCapture(DeploymentPlanCapture{
-		BaseDeploymentID: snapshot.BaseDeploymentID, Manifest: snapshot.Manifest, Graph: snapshot.Graph,
+		NativeTarget: snapshot.NativeTarget, BaseDeploymentID: snapshot.BaseDeploymentID, Manifest: snapshot.Manifest, Graph: snapshot.Graph,
 		Diff: snapshot.Diff, ModuleArtifacts: snapshot.ModuleArtifacts,
 	})
 	if err != nil {
@@ -834,6 +841,11 @@ func deploymentPlanFingerprint(capture DeploymentPlanCapture) string {
 	writeFingerprintChunk(canonicalFingerprintJSON(capture.Diff))
 	artifacts, _ := json.Marshal(capture.ModuleArtifacts)
 	writeFingerprintChunk(artifacts)
+	if capture.NativeTarget != nil {
+		writeFingerprintChunk([]byte("native-target/v1"))
+		target, _ := json.Marshal(capture.NativeTarget)
+		writeFingerprintChunk(target)
+	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
 }
 

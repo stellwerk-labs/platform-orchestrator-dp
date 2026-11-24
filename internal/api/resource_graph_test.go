@@ -33,12 +33,12 @@ func makeNode(defId, versionId string) platform_orchestrator_graph.ResourceNode[
 	}
 }
 
-func mockOrgReadAuth(t *testing.T, s *Server, userId uuid.UUID, orgId string) {
+func mockEnvReadAuth(t *testing.T, s *Server, userId, environmentID uuid.UUID) {
 	t.Helper()
 	s.IamClient.(*mockplatformorchestratoriam.MockClientWithResponsesInterface).
 		EXPECT().InternalAuthorizeWithResponse(gomock.Any(), platformorchestratoriam.InternalAuthorizeBody{
 		UserId: userId,
-		Checks: []platformorchestratoriam.ResourcePermissionCheck{orgCheck(orgId, PermissionResourceGraphRead)},
+		Checks: []platformorchestratoriam.ResourcePermissionCheck{environmentCheck(environmentID, PermissionResourceGraphRead)},
 	}).Return(&platformorchestratoriam.InternalAuthorizeResponse{
 		HTTPResponse: &http.Response{StatusCode: http.StatusNoContent},
 	}, nil)
@@ -68,7 +68,6 @@ func TestListDeploymentResourceNodes_not_found(t *testing.T) {
 	defer fin()
 
 	userId := userid.NewHumanUserId()
-	mockOrgReadAuth(t, s, userId, "my-org")
 	ctx := context.WithValue(t.Context(), hecho.ContextKeyUserID, userId.String())
 
 	deploymentId := uuid.New()
@@ -109,7 +108,7 @@ func TestListDeploymentResourceNodes_success(t *testing.T) {
 	})
 
 	userId := userid.NewHumanUserId()
-	mockOrgReadAuth(t, s, userId, "my-org")
+	mockEnvReadAuth(t, s, userId, dep.DeploymentEnvUuid)
 	ctx := context.WithValue(t.Context(), hecho.ContextKeyUserID, userId.String())
 
 	s.Database.(*mockmodel.MockDatabaser).EXPECT().
@@ -172,7 +171,7 @@ func TestListDeploymentResourceNodes_all_modes_return_200(t *testing.T) {
 			}
 
 			userId := userid.NewHumanUserId()
-			mockOrgReadAuth(t, s, userId, "my-org")
+			mockEnvReadAuth(t, s, userId, dep.DeploymentEnvUuid)
 			ctx := context.WithValue(t.Context(), hecho.ContextKeyUserID, userId.String())
 
 			s.Database.(*mockmodel.MockDatabaser).EXPECT().

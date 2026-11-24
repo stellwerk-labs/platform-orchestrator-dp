@@ -47,13 +47,17 @@ type queueCore struct {
 	projectUUID uuid.UUID
 	envUUID     uuid.UUID
 
-	mu          sync.Mutex
-	status      coreapi.EnvironmentStatus
-	gone        bool
-	guards      map[uuid.UUID]*queueCoreGuard
-	deny        map[uuid.UUID]string
-	onAuthorize func(admissionID uuid.UUID)
-	epoch       int64
+	mu                  sync.Mutex
+	status              coreapi.EnvironmentStatus
+	gone                bool
+	nativeFirstEligible *bool
+	native              bool
+	planApply           bool
+	storageNamespace    string
+	guards              map[uuid.UUID]*queueCoreGuard
+	deny                map[uuid.UUID]string
+	onAuthorize         func(admissionID uuid.UUID)
+	epoch               int64
 }
 
 type queueCoreGuard struct {
@@ -70,21 +74,38 @@ func (c *queueCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Lock()
-	status, gone := c.status, c.gone
+	status, gone, native, planApply, storageNamespace, nativeFirstEligible := c.status, c.gone, c.native, c.planApply, c.storageNamespace, c.nativeFirstEligible
+	if storageNamespace == "" {
+		storageNamespace = "test"
+	}
 	c.mu.Unlock()
 	runner := queueRunner
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/internal/orgs/"+queueOrg:
+		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Organization{Id: queueOrg}))
+	case r.Method == http.MethodGet && r.URL.Path == "/orgs/"+queueOrg+"/projects/"+queueProject:
+		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Project{Id: queueProject, Uuid: c.projectUUID}))
 	case r.Method == http.MethodGet && r.URL.Path == "/orgs/"+queueOrg+"/projects/"+queueProject+"/envs/"+queueEnv:
 		if gone {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"HTTP-404","message":"environment not found"}`))
 			return
 		}
-		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Environment{Id: queueEnv, ProjectId: queueProject, ProjectUuid: &c.projectUUID, Uuid: c.envUUID, RunnerId: &runner, Status: status}))
+		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Environment{Id: queueEnv, ProjectId: queueProject, ProjectUuid: &c.projectUUID, Uuid: c.envUUID, RunnerId: &runner, Status: status, NativeFirstEligible: nativeFirstEligible}))
 	case r.Method == http.MethodGet && r.URL.Path == "/orgs/"+queueOrg+"/runners/"+queueRunner:
 		var storage coreapi.StateStorageConfiguration
-		assert.NoError(c.t, storage.FromK8sStorageConfiguration(coreapi.K8sStorageConfiguration{Namespace: "test"}))
-		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Runner{Id: queueRunner, StateStorageConfiguration: storage}))
+		assert.NoError(c.t, storage.FromK8sStorageConfiguration(coreapi.K8sStorageConfiguration{Namespace: storageNamespace}))
+		var config coreapi.RunnerConfiguration
+		if native {
+			protocols := []string{model.PipelineProtocol}
+			if planApply {
+				protocols = append(protocols, model.PipelinePlanApplyProtocol)
+			}
+			raw, err := json.Marshal(map[string]any{"type": "kubernetes-agent", "supported_protocols": protocols})
+			assert.NoError(c.t, err)
+			assert.NoError(c.t, json.Unmarshal(raw, &config))
+		}
+		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.Runner{Id: queueRunner, OrgId: queueOrg, RunnerConfiguration: config, StateStorageConfiguration: storage}))
 	case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+queueOrg+"/projects/"+queueProject+"/envs/"+queueEnv+"/module-execution-catalogue":
 		assert.NoError(c.t, json.NewEncoder(w).Encode(coreapi.InternalExecutionCatalogue{Modules: []coreapi.InternalExecutionCatalogueModule{}, Providers: []coreapi.ModuleProvider{}}))
 	case r.Method == http.MethodPost && r.URL.Path == "/internal/orgs/"+queueOrg+"/projects/"+queueProject+"/envs/"+queueEnv+"/module-catalogue":
@@ -209,16 +230,24 @@ func (c *queueCore) hookAuthorize(t *testing.T, hook func(admissionID uuid.UUID)
 
 // queueIAM grants every check except to denied users.
 type queueIAM struct {
-	t      *testing.T
-	mu     sync.Mutex
-	denied map[uuid.UUID]bool
+	t        *testing.T
+	mu       sync.Mutex
+	denied   map[uuid.UUID]bool
+	readOnly map[uuid.UUID]bool
+	calls    int
 }
 
 func (i *queueIAM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body iamapi.InternalAuthorizeBody
 	assert.NoError(i.t, json.NewDecoder(r.Body).Decode(&body))
 	i.mu.Lock()
+	i.calls++
 	denied := i.denied[body.UserId]
+	for _, check := range body.Checks {
+		if i.readOnly[body.UserId] && check.Permission != PermissionDeploymentRead {
+			denied = true
+		}
+	}
 	i.mu.Unlock()
 	if denied {
 		w.Header().Set("Content-Type", "application/json")
@@ -227,6 +256,15 @@ func (i *queueIAM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (i *queueIAM) onlyDeploymentRead(user uuid.UUID) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.readOnly == nil {
+		i.readOnly = map[uuid.UUID]bool{}
+	}
+	i.readOnly[user] = true
 }
 
 func (i *queueIAM) deny(user uuid.UUID, denied bool) {

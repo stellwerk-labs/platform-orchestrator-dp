@@ -63,7 +63,8 @@ test: compose.yaml
 	timeout 60s sh -c 'until curl --fail --silent --output /dev/null http://127.0.0.1:$(CP_PORT)/health && curl --fail --silent --output /dev/null http://127.0.0.1:$(DP_PORT)/health; do sleep 1; done'
 	docker network connect $(COMPOSE_PROJECT_NAME)_default $(NAME)-control-plane || true
 	$(MAKE) test-model-integration
-	$(MAKE) test-outcome-ack-integration
+	$(MAKE) test-pipeline-api-integration
+	$(MAKE) test-refusal-diagnostics-integration
 	@$(RUN_TESTS) go tool gotestsum --format testname ./ -test.timeout $(TEST_TIMEOUT) -test.parallel=$(TEST_PARALLEL) -test.v $(TESTARGS)
 
 # Run last: this phase enables real admission authorization instead of the
@@ -89,13 +90,32 @@ test-provider-retirement:
 test-environment:
 	@$(RUN_TESTS) python3 check-test-env.py
 
+# The package budget includes all test roots and their database migration setup.
 .PHONY: test-model-integration
 test-model-integration:
-	@MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" go test -tags=integration ../internal/model -count=1 -timeout=60s
+	@MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" go test -tags=integration ../internal/model -count=1 -timeout=120s
 
 .PHONY: test-outcome-ack-integration
 test-outcome-ack-integration:
 	@MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" OUTCOME_ACK_TEST_NATS_URL="nats://localhost:$(NATS_PORT)" go test -tags=integration ../internal/api -run '^TestOutcomeAcknowledgement' -count=1 -timeout=60s
+
+# Each policy/recovery case owns an empty, volume-free broker. Never reuse the
+# application stream for retention mutation or force-stop its durable consumer.
+.PHONY: test-refusal-diagnostics-integration
+test-refusal-diagnostics-integration:
+	@set -eu; container=""; trap 'if [ -n "$$container" ]; then docker rm -f "$$container" >/dev/null; fi' EXIT INT TERM; \
+	for case in RecoversAfterTenDatabaseFailures RefusesDestructiveRetention; do \
+		container=$$(docker compose run --rm -d --no-deps --service-ports refusal-nats); \
+		docker exec "$$container" sh -c 'timeout 15 sh -c "until wget --spider -q http://localhost:8222/healthz; do sleep 1; done"'; \
+		address=$$(docker port "$$container" 4222/tcp); \
+		MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" \
+		OUTCOME_ACK_TEST_NATS_URL="nats://$$address" go test -race -tags=integration ../internal/worker -run "^TestRunnerRefusalsConsumer$${case}$$" -count=1 -timeout=60s; \
+		docker rm -f "$$container" >/dev/null; container=""; \
+	done
+
+.PHONY: test-pipeline-api-integration
+test-pipeline-api-integration:
+	@$(RUN_TESTS) $(MAKE) -C .. test-pipeline-storage
 
 .PHONY: clean
 clean:

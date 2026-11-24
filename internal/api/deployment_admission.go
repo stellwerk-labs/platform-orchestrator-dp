@@ -48,10 +48,14 @@ type OrdinaryDeploymentAdmissionService struct {
 	Database           model.Databaser
 	Core               deploymentAdmissionCore
 	BearerToken        string
+	bearerTokenFile    string
 	ExecutionCatalogue platformorchestratorcp.ClientWithResponsesInterface
 }
 
 type OrdinaryDeploymentAdmissionAttempt struct {
+	nativeAdmissionWatermark        *platformorchestratorcp.NativeAdmissionWatermark
+	nativeTarget                    *platformorchestratorcp.NativeExecutionTargetReference
+	ExternalDispatch                *model.ExternalAdmissionDispatch
 	service                         *OrdinaryDeploymentAdmissionService
 	AdmissionID                     uuid.UUID
 	OrgID                           string
@@ -64,12 +68,16 @@ type OrdinaryDeploymentAdmissionAttempt struct {
 	draftTestSnapshots              map[string]uuid.UUID
 	carryForwardModuleVersions      map[string]uuid.UUID
 	confirmedRestrictedVersionUUIDs []uuid.UUID
+	pipeline                        *model.PipelineDefinition
 	coreEpoch                       int64
 	prepared                        bool
 	authorized                      bool
 }
 
 type ordinaryDeploymentCompiledIntent struct {
+	NativeTarget                    *platformorchestratorcp.NativeExecutionTargetReference
+	Pipeline                        *model.PipelineDefinition
+	RetainedSubject                 string
 	ProjectID                       string
 	EnvironmentID                   string
 	RunnerID                        string
@@ -108,6 +116,9 @@ func (s *OrdinaryDeploymentAdmissionService) NewAttempt(orgID string, projectUUI
 
 func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx model.Tx, artifacts []model.ModuleArtifactRequirement, compiled ordinaryDeploymentCompiledIntent) error {
 	if a == nil {
+		if compiled.NativeTarget != nil {
+			return ErrDeploymentAdmissionUnavailable
+		}
 		return nil
 	}
 	if a.service == nil || a.service.Core == nil || a.service.Database == nil || a.service.BearerToken == "" {
@@ -120,6 +131,13 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 	if err := a.collectModuleTargets(artifacts); err != nil {
 		return err
 	}
+	if compiled.NativeTarget != nil {
+		if err := a.resolveNativeAdmissionWatermark(ctx, tx); err != nil {
+			return err
+		}
+	}
+	a.nativeTarget = compiled.NativeTarget
+	a.pipeline = compiled.Pipeline
 	a.carryForwardModuleVersions = compiled.CarryForwardModuleVersions
 	a.confirmedRestrictedVersionUUIDs = compiled.ConfirmedRestrictedVersionUUIDs
 	manifestDigest := sha256.Sum256(compiled.Manifest)
@@ -131,36 +149,41 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 	}
 	artifactsDigest := sha256.Sum256(artifactsJSON)
 	encoded, err := json.Marshal(struct {
-		AdmissionID                     uuid.UUID            `json:"admission_id"`
-		OrgID                           string               `json:"org_id"`
-		ProjectUUID                     uuid.UUID            `json:"project_uuid"`
-		EnvironmentUUID                 uuid.UUID            `json:"environment_uuid"`
-		ActorID                         uuid.UUID            `json:"actor_id"`
-		Mode                            model.DeploymentMode `json:"mode"`
-		ModuleVersions                  map[string]uuid.UUID `json:"module_versions"`
-		CarryForwardModuleVersions      map[string]uuid.UUID `json:"carry_forward_module_versions"`
-		ConfirmedRestrictedVersionUUIDs []uuid.UUID          `json:"confirmed_restricted_version_uuids"`
-		ProjectID                       string               `json:"project_id"`
-		EnvironmentID                   string               `json:"environment_id"`
-		RunnerID                        string               `json:"runner_id"`
-		EffectiveBase                   uuid.UUID            `json:"effective_base_deployment_id"`
-		RollbackTo                      uuid.NullUUID        `json:"rollback_to_deployment_id"`
-		ManifestSHA256                  string               `json:"manifest_sha256"`
-		GraphSHA256                     string               `json:"graph_sha256"`
-		TofuSHA256                      string               `json:"tofu_sha256"`
-		ArtifactsSHA256                 string               `json:"module_artifacts_sha256"`
-		OutputsRecipient                string               `json:"encrypted_outputs_recipient"`
-		LogsRecipient                   string               `json:"encrypted_logs_recipient"`
-		ManagedLogs                     bool                 `json:"managed_logs,omitempty"`
-		RunnerLogLevel                  string               `json:"runner_log_level"`
-		DraftTestSnapshots              map[string]uuid.UUID `json:"draft_test_snapshots,omitempty"`
+		AdmissionID                     uuid.UUID                                              `json:"admission_id"`
+		OrgID                           string                                                 `json:"org_id"`
+		ProjectUUID                     uuid.UUID                                              `json:"project_uuid"`
+		EnvironmentUUID                 uuid.UUID                                              `json:"environment_uuid"`
+		ActorID                         uuid.UUID                                              `json:"actor_id"`
+		Mode                            model.DeploymentMode                                   `json:"mode"`
+		ModuleVersions                  map[string]uuid.UUID                                   `json:"module_versions"`
+		CarryForwardModuleVersions      map[string]uuid.UUID                                   `json:"carry_forward_module_versions"`
+		ConfirmedRestrictedVersionUUIDs []uuid.UUID                                            `json:"confirmed_restricted_version_uuids"`
+		ProjectID                       string                                                 `json:"project_id"`
+		EnvironmentID                   string                                                 `json:"environment_id"`
+		RunnerID                        string                                                 `json:"runner_id"`
+		EffectiveBase                   uuid.UUID                                              `json:"effective_base_deployment_id"`
+		RollbackTo                      uuid.NullUUID                                          `json:"rollback_to_deployment_id"`
+		ManifestSHA256                  string                                                 `json:"manifest_sha256"`
+		GraphSHA256                     string                                                 `json:"graph_sha256"`
+		TofuSHA256                      string                                                 `json:"tofu_sha256"`
+		ArtifactsSHA256                 string                                                 `json:"module_artifacts_sha256"`
+		OutputsRecipient                string                                                 `json:"encrypted_outputs_recipient"`
+		LogsRecipient                   string                                                 `json:"encrypted_logs_recipient"`
+		ManagedLogs                     bool                                                   `json:"managed_logs,omitempty"`
+		RunnerLogLevel                  string                                                 `json:"runner_log_level"`
+		DraftTestSnapshots              map[string]uuid.UUID                                   `json:"draft_test_snapshots,omitempty"`
+		RetainedSubject                 string                                                 `json:"retained_subject,omitempty"`
+		Pipeline                        *model.PipelineDefinition                              `json:"pipeline,omitempty"`
+		ExternalDispatch                *model.ExternalAdmissionDispatch                       `json:"external_dispatch,omitempty"`
+		NativeTarget                    *platformorchestratorcp.NativeExecutionTargetReference `json:"native_target,omitempty"`
+		NativeAdmissionWatermark        *platformorchestratorcp.NativeAdmissionWatermark       `json:"native_admission_watermark,omitempty"`
 	}{
 		a.AdmissionID, a.OrgID, a.ProjectUUID, a.EnvironmentUUID, a.ActorID, a.Mode, a.moduleVersions,
 		a.carryForwardModuleVersions, a.confirmedRestrictedVersionUUIDs,
 		compiled.ProjectID, compiled.EnvironmentID, compiled.RunnerID, compiled.EffectiveBaseDeploymentID,
 		compiled.RollbackToDeploymentID, hex.EncodeToString(manifestDigest[:]), hex.EncodeToString(graphDigest[:]),
 		hex.EncodeToString(tofuDigest[:]), hex.EncodeToString(artifactsDigest[:]), compiled.EncryptedOutputsRecipient,
-		compiled.EncryptedLogsRecipient, compiled.ManagedLogs, compiled.RunnerLogLevel, a.draftTestSnapshots,
+		compiled.EncryptedLogsRecipient, compiled.ManagedLogs, compiled.RunnerLogLevel, a.draftTestSnapshots, compiled.RetainedSubject, compiled.Pipeline, a.ExternalDispatch, a.nativeTarget, a.nativeAdmissionWatermark,
 	})
 	if err != nil {
 		return err
@@ -179,6 +202,33 @@ func (a *OrdinaryDeploymentAdmissionAttempt) Authorize(ctx context.Context, tx m
 		return model.NewErrConflict("Deployment admission identifier already has a durable outcome")
 	}
 	return a.authorizeCore(ctx)
+}
+
+func (a *OrdinaryDeploymentAdmissionAttempt) resolveNativeAdmissionWatermark(ctx context.Context, tx model.Tx) error {
+	// Finish the own-receipt lock before independent prepare. Holding it in the
+	// compiler transaction would make prepare wait on our own transaction.
+	lookup, err := a.service.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lookup.Rollback() }()
+	receipt, err := model.GetDeploymentAdmissionReceipt(ctx, lookup, a.OrgID, a.AdmissionID)
+	if _, missing := model.IsErrNotFound(err); err != nil && !missing {
+		return err
+	}
+	if err := lookup.Commit(); err != nil {
+		return err
+	}
+	if receipt != nil {
+		const pendingAdmissionDisposition = "pending"
+		if receipt.Disposition == pendingAdmissionDisposition {
+			return ErrDeploymentAdmissionUnavailable
+		}
+		a.nativeAdmissionWatermark = receipt.NativeAdmissionWatermark
+		return nil
+	}
+	a.nativeAdmissionWatermark, err = model.LatestNativeAdmissionWatermark(ctx, tx, a.OrgID, a.ProjectUUID, a.EnvironmentUUID)
+	return err
 }
 
 func (a *OrdinaryDeploymentAdmissionAttempt) prepare(ctx context.Context) error {
@@ -270,8 +320,8 @@ func (s *OrdinaryDeploymentAdmissionService) sealAbsent(ctx context.Context, int
 
 func (a *OrdinaryDeploymentAdmissionAttempt) receipt(disposition string, deploymentID uuid.UUID, outcome string) model.DeploymentAdmissionReceipt {
 	return model.DeploymentAdmissionReceipt{
-		OrgID: a.OrgID, AdmissionID: a.AdmissionID, ProjectUUID: a.ProjectUUID, EnvironmentUUID: a.EnvironmentUUID,
-		ActorID: a.ActorID, RequestDigest: a.requestDigest, Mode: a.Mode, ModuleVersions: a.moduleVersions, DraftTestSnapshots: a.draftTestSnapshots,
+		NativeAdmissionWatermark: a.nativeAdmissionWatermark, NativeTarget: a.nativeTarget, OrgID: a.OrgID, AdmissionID: a.AdmissionID, ProjectUUID: a.ProjectUUID, EnvironmentUUID: a.EnvironmentUUID,
+		ActorID: a.ActorID, RequestDigest: a.requestDigest, Mode: a.Mode, ModuleVersions: a.moduleVersions, DraftTestSnapshots: a.draftTestSnapshots, Pipeline: a.pipeline, ExternalDispatch: a.ExternalDispatch,
 		CarryForwardModuleVersions: a.carryForwardModuleVersions, ConfirmedRestrictedVersionUUIDs: a.confirmedRestrictedVersionUUIDs,
 		CoreEpoch: a.coreEpoch, Disposition: disposition, DeploymentID: uuid.NullUUID{UUID: deploymentID, Valid: deploymentID != uuid.Nil}, TerminalOutcome: outcome,
 	}
@@ -279,9 +329,21 @@ func (a *OrdinaryDeploymentAdmissionAttempt) receipt(disposition string, deploym
 
 func deploymentAdmissionRequest(receipt *model.DeploymentAdmissionReceipt) platformorchestratorcp.DeploymentAdmissionRequest {
 	request := platformorchestratorcp.DeploymentAdmissionRequest{
-		ActorId: receipt.ActorID, ProjectUuid: receipt.ProjectUUID, EnvironmentUuid: receipt.EnvironmentUUID,
+		NativeAdmissionWatermark: receipt.NativeAdmissionWatermark, NativeTarget: receipt.NativeTarget, ActorId: receipt.ActorID, ProjectUuid: receipt.ProjectUUID, EnvironmentUuid: receipt.EnvironmentUUID,
 		Mode: platformorchestratorcp.DeploymentAdmissionRequestMode(receipt.Mode), ModuleVersions: receipt.ModuleVersions,
 		RequestDigest: receipt.RequestDigest,
+	}
+	if receipt.ExternalDispatch != nil {
+		raw, _ := json.Marshal(receipt.ExternalDispatch)
+		if err := json.Unmarshal(raw, &request.ExternalDispatch); err != nil {
+			panic(err)
+		}
+	}
+	if receipt.Pipeline != nil && receipt.Pipeline.PipelineID != "" {
+		raw, _ := json.Marshal(map[string]any{"pipeline_id": receipt.Pipeline.PipelineID, "version_id": receipt.Pipeline.ID, "version": receipt.Pipeline.Version, "digest": receipt.Pipeline.Digest})
+		if err := json.Unmarshal(raw, &request.Pipeline); err != nil {
+			panic(err)
+		}
 	}
 	if len(receipt.DraftTestSnapshots) > 0 {
 		request.DraftTestSnapshots = &receipt.DraftTestSnapshots
@@ -404,7 +466,12 @@ func (s *OrdinaryDeploymentAdmissionService) markCoreSettled(ctx context.Context
 
 func (s *OrdinaryDeploymentAdmissionService) bearer() platformorchestratorcp.RequestEditorFn {
 	return func(_ context.Context, request *http.Request) error {
-		request.Header.Set("Authorization", "Bearer "+s.BearerToken)
+		token, err := serviceBearerToken(s.bearerTokenFile, s.BearerToken)
+		if err != nil {
+			return ErrDeploymentAdmissionUnavailable
+		}
+		request.Header.Del("From")
+		request.Header.Set("Authorization", "Bearer "+token)
 		return nil
 	}
 }

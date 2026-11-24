@@ -3,12 +3,15 @@ package api
 import (
 	"context"
 	"database/sql"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/pkg/errors"
 	"github.com/stellwerk-labs/golib/hlogger"
+	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/api/middleware"
 	"go.uber.org/zap"
 
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/logging"
@@ -17,16 +20,15 @@ import (
 )
 
 func (s *Server) ListActiveResourceNodes(ctx context.Context, request ListActiveResourceNodesRequestObject) (ListActiveResourceNodesResponseObject, error) {
-	if uid, err := GetAuthenticatedUserIdOr401(ctx); err != nil {
-		return nil, err
-	} else if err := s.checkOrgAuthorization(ctx, uid, request.OrgId, PermissionActiveResourceRead); err != nil {
-		return nil, err
+	uid, authErr := GetAuthenticatedUserIdOr401(ctx)
+	if authErr != nil {
+		return nil, authErr
 	}
 
 	if request.Params.ProjectId == nil {
-		return ListActiveResourceNodes400JSONResponse{N400BadRequestJSONResponse: Generate400Response("project_id param required")}, nil
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "project_id param required")
 	} else if request.Params.EnvId == nil {
-		return ListActiveResourceNodes400JSONResponse{N400BadRequestJSONResponse: Generate400Response("env_id param required")}, nil
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "env_id param required")
 	}
 	logger := hlogger.TraceScopedLoggerFromCtx(s.Logger, ctx).
 		With(logging.ZapOrgId(request.OrgId), logging.ZapProjectId(*request.Params.ProjectId), logging.ZapEnvId(*request.Params.EnvId))
@@ -43,11 +45,15 @@ func (s *Server) ListActiveResourceNodes(ctx context.Context, request ListActive
 		dep, _, _, _, err := s.Database.GetLastDeployment(ctx, tx, request.OrgId, *request.Params.ProjectId, *request.Params.EnvId, model.GetLastDeploymentParams{StateChangeOnly: true})
 		if err != nil {
 			if me, ok := model.IsErrNotFound(err); ok {
+				middleware.SetAuthCheckedCtx(ctx)
 				return ListActiveResourceNodes404JSONResponse{N404NotFoundJSONResponse: Generate404FromModelErr(me)}, nil
 			}
 			return nil, errors.Wrap(err, "failed to get last deployment")
 		}
 
+		if err := s.checkEnvAuthorization(ctx, uid, request.OrgId, dep.DeploymentEnvUuid, PermissionActiveResourceRead); err != nil {
+			return nil, err
+		}
 		items, err := s.Database.GetActiveResources(ctx, tx, dep.DeploymentEnvUuid)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get active resources")

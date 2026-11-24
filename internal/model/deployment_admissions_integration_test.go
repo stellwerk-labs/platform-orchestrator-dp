@@ -27,6 +27,7 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 
 	intent := testDeploymentAdmissionIntent()
+	intent.NativeTarget = testNativeTarget()
 	prepare, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	prepared, err := PrepareDeploymentAdmissionReceipt(ctx, prepare, intent)
@@ -64,7 +65,7 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 	deployment, err := store.CreateDeployment(ctx, live, intent.OrgID, "project", "environment", CreateDeploymentParams{
 		CreatedBy: intent.ActorID, DeploymentEnvUuid: intent.EnvironmentUUID, Mode: DeploymentModeDeploy,
 		Manifest: EncodedDeploymentManifest(`{"workloads":{}}`), Graph: EncodedDeploymentGraph(`{}`), Tofu: RawTofu("terraform {}"),
-		RunnerId: "runner", RunnerLogLevel: "info", IdempotencyKeyDigest: opt.Empty[string](),
+		NativeTarget: intent.NativeTarget, RunnerId: intent.NativeTarget.RunnerId, RunnerLogLevel: "info", IdempotencyKeyDigest: opt.Empty[string](),
 	})
 	require.NoError(t, err)
 	bound, err := BindDeploymentAdmissionReceipt(ctx, live, intent, deployment.Id, 11)
@@ -135,6 +136,10 @@ func TestDeploymentAdmissionJournalSerializesOutcomeAndRetainsReceipts(t *testin
 		`SELECT count(*) FROM deployment_admission_receipts WHERE admission_id IN ($1,$2)`, intent.AdmissionID, absentIntent.AdmissionID,
 	).Scan(&receipts))
 	require.Equal(t, 2, receipts, "admission outcomes must outlive normal Deployment retention")
+	latest, err := LatestNativeAdmissionWatermark(ctx, retained, intent.OrgID, intent.ProjectUUID, intent.EnvironmentUUID)
+	require.NoError(t, err)
+	require.Equal(t, intent.AdmissionID, latest.AdmissionId)
+	require.Equal(t, int64(11), latest.Epoch)
 	require.NoError(t, retained.Commit())
 }
 

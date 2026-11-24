@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -45,18 +44,16 @@ func NewOrdinaryDeploymentAdmissionService(database model.Databaser, rawCoreURL,
 	if err != nil {
 		return nil, err
 	}
+	service := &OrdinaryDeploymentAdmissionService{Database: database, Core: client, BearerToken: bearerToken, bearerTokenFile: bearerTokenFile}
 	catalogueHTTPClient := *baseHTTPClient
 	catalogueHTTPClient.Timeout = executionCatalogueTimeout
 	catalogueHTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	catalogueClient, err := platformorchestratorcp.NewClientWithResponses(coreURL.String(), platformorchestratorcp.WithHTTPClient(&catalogueHTTPClient), platformorchestratorcp.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
-		request.Header.Del("From")
-		request.Header.Set("Authorization", "Bearer "+bearerToken)
-		return nil
-	}))
+	catalogueClient, err := platformorchestratorcp.NewClientWithResponses(coreURL.String(), platformorchestratorcp.WithHTTPClient(&catalogueHTTPClient), platformorchestratorcp.WithRequestEditorFn(service.bearer()))
 	if err != nil {
 		return nil, err
 	}
-	return &OrdinaryDeploymentAdmissionService{Database: database, Core: client, BearerToken: bearerToken, ExecutionCatalogue: catalogueClient}, nil
+	service.ExecutionCatalogue = catalogueClient
+	return service, nil
 }
 
 type deploymentAdmissionResponseLimitTransport struct {

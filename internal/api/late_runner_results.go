@@ -27,6 +27,18 @@ func (s *Server) retainLateRunnerResult(ctx context.Context, previous model.Depl
 	if envelope.EventID != previous.Id.String()+":deployment-result" {
 		return invalid("late completion lacks exact gateway Deployment event identity")
 	}
+	dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, previous.OrgId, previous.Id, model.GetModeForUpdate)
+	if err != nil {
+		return err
+	}
+	inboxID, err := runnerEventInboxID(dep, &RunnerEventMetadata{EventID: envelope.EventID, RunnerID: runnerID, Type: envelope.Type, Envelope: &envelope})
+	if err != nil {
+		return err
+	}
+	runnerID = dep.RunnerId
+	if err := recordPipelineResultEvidence(ctx, tx, dep, &body, true); err != nil {
+		return err
+	}
 	var retainedDigest string
 	err = tx.QueryRowContext(ctx, `SELECT payload_sha256 FROM deployment_late_runner_results WHERE deployment_id=$1 AND org_id=$2 AND runner_id=$3 AND event_id=$4`, previous.Id, previous.OrgId, runnerID, envelope.EventID).Scan(&retainedDigest)
 	if err == nil {
@@ -40,7 +52,7 @@ func (s *Server) retainLateRunnerResult(ctx context.Context, previous model.Depl
 	}
 	var alreadyApplied bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_event_inbox WHERE event_id=$1 AND org_id=$2 AND runner_id=$3
-        AND deployment_id=$4 AND event_type='deployment-result')`, envelope.EventID, previous.OrgId, runnerID, previous.Id).Scan(&alreadyApplied); err != nil {
+        AND deployment_id=$4 AND event_type='deployment-result')`, inboxID, previous.OrgId, runnerID, previous.Id).Scan(&alreadyApplied); err != nil {
 		return err
 	}
 	if alreadyApplied {
@@ -51,11 +63,7 @@ func (s *Server) retainLateRunnerResult(ctx context.Context, previous model.Depl
         WHERE id=$1 AND org_id=$2 AND project_id=$3 AND env_id=$4 FOR UPDATE`, previous.DeploymentEnvUuid, previous.OrgId, previous.ProjectId, previous.EnvId).Scan(&head); err != nil {
 		return err
 	}
-	dep, _, _, _, err := s.Database.GetDeployment(ctx, tx, previous.OrgId, previous.Id, model.GetModeForUpdate)
-	if err != nil {
-		return err
-	}
-	if dep.RunnerId != runnerID || dep.Status != model.DeploymentStatusFailed || !dep.CompletedAt.IsSet() || head != dep.Id.String() ||
+	if dep.Status != model.DeploymentStatusFailed || !dep.CompletedAt.IsSet() || head != dep.Id.String() ||
 		envelope.CreatedAt.Before(dep.CreatedAt) || !body.Status.Valid() {
 		return invalid("late completion does not belong to the current failed Runner attempt")
 	}
@@ -184,8 +192,15 @@ func (s *Server) retainLateOrdinaryCapacityCompletion(ctx context.Context, previ
 	if err != nil {
 		return false, err
 	}
-	if dep.RunnerId != runnerID {
-		return true, fmt.Errorf("%w: foreign Runner identity", ErrRunnerEventTargetInvalid)
+	event := &RunnerEventMetadata{RunnerID: runnerID, Type: runnerDeploymentResultEventType, Envelope: envelope}
+	if envelope != nil {
+		event.EventID = envelope.EventID
+	}
+	if _, err := runnerEventInboxID(dep, event); err != nil {
+		return true, err
+	}
+	if err := recordPipelineResultEvidence(ctx, tx, dep, &body, true); err != nil {
+		return true, err
 	}
 	if envelope != nil && dep.Mode != model.DeploymentModeObservation {
 		evidence, err := model.ReadDeploymentStopEvidence(ctx, tx, dep.Id)

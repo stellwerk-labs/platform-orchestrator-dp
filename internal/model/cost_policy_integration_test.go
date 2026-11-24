@@ -102,3 +102,47 @@ func TestCostPolicyKeyPreserveClearAndRequired(t *testing.T) {
 	require.NotContains(t, events, "ciphertext")
 	require.Contains(t, events, `"api_key_changed":false`)
 }
+
+func TestNativePipelineCostActivationIsFrozenAndGatesAdmission(t *testing.T) {
+	f := newQueueModelFixture(t)
+	definition := &PipelineDefinition{ID: "cost-recipe", Version: 1, Name: "Cost review", Strategy: PipelinePlan, IntendedStrategy: PipelineReviewed, Steps: []PipelineStep{}, Cost: &PipelineCost{Enabled: true, PolicyRevision: 1}}
+	create := func() (*DeploymentSummary, error) {
+		return f.create(t, DeploymentModeDeployPlan, func(params *CreateDeploymentParams) {
+			params.Pipeline = definition
+			params.PipelineBackend = "kubernetes"
+		})
+	}
+	_, err := create()
+	require.ErrorContains(t, err, "disabled in platform settings")
+	tx, err := f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, tx.QueryRowContext(f.ctx, `SELECT count(*) FROM deployments`).Scan(&count))
+	require.NoError(t, tx.Rollback())
+	require.Zero(t, count, "feature denial rolls back the entire native Plan admission")
+	policy, err := UpdateCostPolicy(f.ctx, f.store, uuid.New(), 1, true, ref.Ref("vault:v1:owned-test-ciphertext"))
+	require.NoError(t, err)
+	definition.Cost.PolicyRevision = policy.Revision
+	plan, err := create()
+	require.NoError(t, err)
+	tx, err = f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	var enabled bool
+	var revision int64
+	require.NoError(t, tx.QueryRowContext(f.ctx, `SELECT enabled,policy_revision FROM deployment_cost_policy_snapshots WHERE deployment_id=$1`, plan.Id).Scan(&enabled, &revision))
+	require.NoError(t, tx.Rollback())
+	require.True(t, enabled)
+	require.Equal(t, policy.Revision, revision)
+	f.end(t, plan.Id, DeploymentStatusSucceeded)
+	disabled, err := UpdateCostPolicy(f.ctx, f.store, uuid.New(), policy.Revision, false, nil)
+	require.NoError(t, err)
+	_, err = create()
+	require.ErrorContains(t, err, "disabled in platform settings")
+	current, err := UpdateCostPolicy(f.ctx, f.store, uuid.New(), disabled.Revision, true, nil)
+	require.NoError(t, err)
+	_, err = create()
+	require.ErrorContains(t, err, "policy changed", "queued or saved-source authority cannot silently adopt a newer activation revision")
+	definition.Cost.PolicyRevision = current.Revision
+	_, err = create()
+	require.NoError(t, err, "a newly planned request can explicitly freeze the current activation revision")
+}

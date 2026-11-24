@@ -51,6 +51,16 @@ func LoadServiceBearerToken(bearerTokenPath string) (string, error) {
 	return token, nil
 }
 
+func serviceBearerToken(name, fallback string) (string, error) {
+	if name != "" {
+		return LoadServiceBearerToken(name)
+	}
+	if fallback == "" {
+		return "", errors.New("service bearer token is not configured")
+	}
+	return fallback, nil
+}
+
 func readBoundedOperatorFile(name string) ([]byte, error) {
 	if !filepath.IsAbs(name) {
 		return nil, errors.New("operator credential files require an absolute path")

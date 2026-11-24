@@ -28,7 +28,7 @@ func TestObservationResolutionSealsAbsentAndPreservesExactBinding(t *testing.T) 
 	again, err := ResolveObservationRequest(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request)
 	require.NoError(t, err)
 	require.Equal(t, first, again)
-	_, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	_, pending, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.ErrorIs(t, err, ErrObservationRequestSealed)
 	require.Empty(t, pending)
 	changed := request
@@ -58,7 +58,7 @@ func TestObservationResolutionRacesAdmission(t *testing.T) {
 			go func() {
 				defer group.Done()
 				<-start
-				receipt, _, admissionErr = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+				receipt, _, admissionErr = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 			}()
 			go func() {
 				defer group.Done()
@@ -97,7 +97,7 @@ func TestObservationResolutionWaitsForUncommittedSealAndSurvivesLostAck(t *testi
 	require.NoError(t, sealObservationRequest(f.ctx, tx, ObservationRequestKindObservation, "queue-org", "dev.example.plugin", request.RequestId, actor, uuid.Nil, digest))
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+		_, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 		done <- err
 	}()
 	select {
@@ -119,7 +119,7 @@ func TestObservationResolutionWaitsForUncommittedSealAndSurvivesLostAck(t *testi
 func TestObservationResolutionAcceptedNeverReleasesUnknownRunner(t *testing.T) {
 	f, _ := observationBaselineFixture(t)
 	request, actor := observationRequest(f), uuid.New()
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	dep, _, _, _, err := f.store.GetDeployment(f.ctx, nil, "queue-org", *receipt.RunId, GetModeDefault)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestObservationResolutionSkippedRemainsGetVisible(t *testing.T) {
 	f, _ := observationBaselineFixture(t)
 	request, actor := observationRequest(f), uuid.New()
 	request.AdmissionDeadline = time.Now().Add(-time.Second)
-	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	receipt, _, err := TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	resolution, err := ResolveObservationRequest(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request)
 	require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestObservationResolutionArbitratesInflightAdmissionCommitOrCancellation(t 
 			defer cancel()
 			admitted := make(chan error, 1)
 			go func() {
-				_, _, err := TryStartObservation(admissionCtx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+				_, _, err := TryStartObservation(admissionCtx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 				admitted <- err
 			}()
 			// The real admission owns its request lock and is blocked at the actual
@@ -208,7 +208,7 @@ func TestObservationResolutionArbitratesInflightAdmissionCommitOrCancellation(t 
 			if cancelAdmission {
 				require.Error(t, admissionErr)
 				require.Equal(t, observation.ObservationResolutionDispositionNotStarted, value.Disposition)
-				_, _, err = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+				_, _, err = TryStartObservation(f.ctx, f.store, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 				require.ErrorIs(t, err, ErrObservationRequestSealed)
 				require.Zero(t, readObservationCount(t, f, `SELECT count(*) FROM deployments WHERE mode='observation'`))
 			} else {

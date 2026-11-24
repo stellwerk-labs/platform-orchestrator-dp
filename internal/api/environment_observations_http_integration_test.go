@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging"
 	cp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
+	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/pipelineapi"
 	"github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/plugincontext"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
@@ -68,7 +71,7 @@ func TestObservationHTTPBoundaryAndSafeRunnerCompletion(t *testing.T) {
 		case "/orgs/acme/projects/p/envs/e":
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "e", "project_id": "p", "project_uuid": projectID, "uuid": envID, "runner_id": "runner", "status": "active"}))
 		case "/internal/orgs/acme/runners/runner":
-			_, _ = w.Write([]byte(`{"id":"runner","runner_configuration":{"type":"kubernetes-agent","max_parallel_jobs":2,"supported_protocols":["environment-observation/v1"]}}`))
+			_, _ = w.Write([]byte(`{"org_id":"acme","id":"runner","runner_configuration":{"type":"kubernetes-agent","max_parallel_jobs":2,"supported_protocols":["environment-observation/v1"]}}`))
 		default:
 			t.Errorf("unexpected Core route %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -129,6 +132,65 @@ func TestObservationHTTPBoundaryAndSafeRunnerCompletion(t *testing.T) {
 	presentCapability := serve(signed(http.MethodGet, capabilityPath, ObservationCapabilitiesAction, "", nil))
 	require.Equal(t, http.StatusOK, presentCapability.Code)
 	require.JSONEq(t, `{"protocols":["environment-observation/v1","environment-observation-recovery/v1"]}`, presentCapability.Body.String())
+
+	policy, err := pipelineapi.NewClientWithResponses(core.URL)
+	require.NoError(t, err)
+	pipelineServer := &Server{Database: db, ControlPlaneClient: client, PipelineClient: policy}
+	keyFile := filepath.Join(t.TempDir(), "pipeline-signing.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(base64.StdEncoding.EncodeToString(private)), 0600))
+	nativeDispatcher, err := NewPipelineDispatcher(pipelineServer, publisher, keyFile, "", "")
+	require.NoError(t, err)
+	pipelineServer.PipelineDispatcher = nativeDispatcher
+	adapter.Server = pipelineServer
+	nativeCapability := serve(signed(http.MethodGet, capabilityPath, ObservationCapabilitiesAction, "", nil))
+	require.Equal(t, http.StatusOK, nativeCapability.Code)
+	pipelineProtocols := `{"protocols":["environment-observation/v1","environment-observation-recovery/v1","plugin-pipelines/v1"]}`
+	require.JSONEq(t, pipelineProtocols, nativeCapability.Body.String())
+
+	tokenFile := filepath.Join(t.TempDir(), "legacy-operator.token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("configured-legacy-boundary"), 0600))
+	pipelineServer.RunnerRollouts, err = NewRunnerRolloutService(pipelineServer, core.URL, tokenFile, "acme", "runner")
+	require.NoError(t, err)
+	pipelineServer.PipelineDispatcher, err = NewPipelineDispatcher(pipelineServer, publisher, keyFile, strings.Repeat("a", 64), "")
+	require.NoError(t, err)
+	legacyCapability := serve(signed(http.MethodGet, capabilityPath, ObservationCapabilitiesAction, "", nil))
+	require.Equal(t, http.StatusOK, legacyCapability.Code)
+	require.JSONEq(t, pipelineProtocols, legacyCapability.Body.String())
+	pipelineServer.RunnerRollouts = nil
+	pipelineServer.PipelineDispatcher = nativeDispatcher
+	ordinary := adapter.OrdinaryAdmissions
+	observationProtocols := `{"protocols":["environment-observation/v1","environment-observation-recovery/v1"]}`
+	for _, test := range []struct {
+		name   string
+		remove func(*ExternalDeploymentHTTPAdapter)
+		want   string
+	}{
+		{"server", func(a *ExternalDeploymentHTTPAdapter) { a.Server = nil }, observationProtocols},
+		{"policy-client", func(a *ExternalDeploymentHTTPAdapter) { a.Server.PipelineClient = nil }, observationProtocols},
+		{"dispatcher", func(a *ExternalDeploymentHTTPAdapter) { a.Server.PipelineDispatcher = nil }, observationProtocols},
+		{"ordinary-admissions", func(a *ExternalDeploymentHTTPAdapter) { a.OrdinaryAdmissions = nil }, `{"protocols":[]}`},
+		{"ordinary-core", func(a *ExternalDeploymentHTTPAdapter) { a.OrdinaryAdmissions.Core = nil }, `{"protocols":[]}`},
+		{"ordinary-database", func(a *ExternalDeploymentHTTPAdapter) { a.OrdinaryAdmissions.Database = nil }, `{"protocols":[]}`},
+		{"ordinary-bearer", func(a *ExternalDeploymentHTTPAdapter) { a.OrdinaryAdmissions.BearerToken = "" }, `{"protocols":[]}`},
+	} {
+		t.Run("capability-without-"+test.name, func(t *testing.T) {
+			adapter.Server = &Server{PipelineClient: pipelineServer.PipelineClient, PipelineDispatcher: nativeDispatcher}
+			adapter.OrdinaryAdmissions = &OrdinaryDeploymentAdmissionService{Database: ordinary.Database, Core: ordinary.Core, BearerToken: ordinary.BearerToken}
+			test.remove(adapter)
+			response := serve(signed(http.MethodGet, capabilityPath, ObservationCapabilitiesAction, "", nil))
+			require.Equal(t, http.StatusOK, response.Code)
+			require.JSONEq(t, test.want, response.Body.String())
+		})
+	}
+	adapter.Server, adapter.OrdinaryAdmissions = pipelineServer, ordinary
+	adapter.ControlPlaneClient = nil
+	unavailableCapability := serve(signed(http.MethodGet, capabilityPath, ObservationCapabilitiesAction, "", nil))
+	require.Equal(t, http.StatusServiceUnavailable, unavailableCapability.Code)
+	adapter.ControlPlaneClient = client
+	require.Equal(t, http.StatusUnauthorized, serve(httptest.NewRequest(http.MethodGet, capabilityPath, nil)).Code)
+	wrongCapability := serve(signed(http.MethodGet, capabilityPath, ObservationGetAction, "", nil))
+	require.Equal(t, http.StatusUnauthorized, wrongCapability.Code)
+	adapter.Server = nil
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
 	missing := httptest.NewRequest(http.MethodPost, startPath, bytes.NewReader(raw))
@@ -204,14 +266,23 @@ func TestObservationRedeployReusesExactSnapshotThroughOrdinaryAdmission(t *testi
 	base, manifest, tofu, graph, err := f.store.GetDeployment(f.ctx, nil, queueOrg, ordinary.Id, model.GetModeDefault)
 	require.NoError(t, err)
 	request := observation.ObservationRequest{GrantId: uuid.New(), GrantRevision: 1, ProjectId: queueProject, EnvId: queueEnv, ProjectUuid: f.core.projectUUID, EnvironmentUuid: f.core.envUUID, RequestId: uuid.New(), Occurrence: time.Now().UTC(), AdmissionDeadline: time.Now().UTC().Add(time.Minute)}
-	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true)
+	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	result := ObservationResult{SchemaVersion: "1", Complete: true, Tool: "opentofu", ToolVersion: "1.9.0", ObservedChanges: []ObservationChange{}, ProposedChanges: []ObservationChange{{Id: "r1", ResourceType: "test_resource", Actions: []ObservationChangeActions{"update"}}}}
 	require.NoError(t, f.server.ApplyRunnerDeploymentResult(f.ctx, queueOrg, queueRunner, *receipt.RunId, receipt.RunId.String()+":deployment-result", DeploymentResultsUpdateBody{Status: Success, ObservationResult: &result}))
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-	adapter := &ExternalDeploymentHTTPAdapter{Issuer: "core", VerificationKey: public, Admission: ExternalDeploymentAdmissionService{Database: f.store}, OrdinaryAdmissions: f.server.DeploymentAdmissions, ControlPlaneClient: f.coreClient, EventPublisher: f.server.EventPublisher, Logger: zap.NewNop()}
+	adapter := &ExternalDeploymentHTTPAdapter{
+		Server:             f.server,
+		Issuer:             "core",
+		VerificationKey:    public,
+		Admission:          ExternalDeploymentAdmissionService{Database: f.store},
+		OrdinaryAdmissions: f.server.DeploymentAdmissions,
+		ControlPlaneClient: f.coreClient,
+		EventPublisher:     f.server.EventPublisher,
+		Logger:             zap.NewNop(),
+	}
 	router := echo.New()
 	router.POST(ObservationRedeployPath, adapter.HandleObservationRedeploy)
 	router.GET(ObservationRedeployReadPath, adapter.HandleObservationRedeployRead)
@@ -312,12 +383,25 @@ func TestObservationRedeployReusesExactSnapshotThroughOrdinaryAdmission(t *testi
 	require.Equal(t, response.Body.String(), lookedUp.Body.String())
 	tx, err := f.store.BeginTx(f.ctx, nil)
 	require.NoError(t, err)
+	err = f.store.DeleteDeploymentsForEnv(f.ctx, tx, queueOrg, queueProject, queueEnv, true, opt.Empty[uuid.UUID]())
+	require.ErrorContains(t, err, "unsettled Deployment admission")
+	require.NoError(t, tx.Rollback())
+	f.finish(replay.DeploymentId, model.DeploymentStatusSucceeded)
+	tx, err = f.store.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
 	require.NoError(t, f.store.DeleteDeploymentsForEnv(f.ctx, tx, queueOrg, queueProject, queueEnv, true, opt.Empty[uuid.UUID]()))
 	require.NoError(t, tx.Commit())
 	gone := read()
 	require.Equal(t, http.StatusOK, gone.Code, gone.Body.String())
-	require.Contains(t, gone.Body.String(), `"status":"unavailable"`)
-
+	var unavailable observation.ObservationRedeployReceipt
+	require.NoError(t, json.Unmarshal(gone.Body.Bytes(), &unavailable))
+	require.Equal(t, body.RequestId, unavailable.RequestId)
+	require.Equal(t, replay.DeploymentId, unavailable.DeploymentId)
+	require.Equal(t, base.Id, unavailable.BaselineId)
+	require.Equal(t, observation.ObservationRedeployReceiptStatusUnavailable, unavailable.Status)
+	require.Nil(t, unavailable.AdmissionClosed, "missing history cannot prove closed admission")
+	require.Nil(t, unavailable.ResultingBaselineFingerprint)
+	require.Nil(t, unavailable.Pipeline)
 }
 
 // This component test uses real PostgreSQL and the existing Core bridge fixture.
@@ -360,14 +444,23 @@ func TestObservationInlineNoDigestSnapshotAdmitsAndReplaysThroughOrdinaryGate(t 
 	require.NoError(t, err)
 	now := time.Now().UTC()
 	request := observation.ObservationRequest{GrantId: uuid.New(), GrantRevision: 1, ProjectId: queueProject, EnvId: queueEnv, ProjectUuid: f.core.projectUUID, EnvironmentUuid: f.core.envUUID, RequestId: uuid.New(), Occurrence: now, AdmissionDeadline: now.Add(time.Minute)}
-	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true)
+	receipt, _, err := model.TryStartObservation(f.ctx, f.store, queueOrg, "dev.example.plugin", f.actor, request, queueRunner, 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	result := ObservationResult{SchemaVersion: "1", Complete: true, Tool: "opentofu", ToolVersion: "1.10.0", ObservedChanges: []ObservationChange{}, ProposedChanges: []ObservationChange{{Id: "r1", ResourceType: "test_resource", Actions: []ObservationChangeActions{"update"}}}}
 	require.NoError(t, f.server.ApplyRunnerDeploymentResult(f.ctx, queueOrg, queueRunner, *receipt.RunId, receipt.RunId.String()+":deployment-result", DeploymentResultsUpdateBody{Status: Success, ObservationResult: &result}))
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
-	adapter := &ExternalDeploymentHTTPAdapter{Issuer: "core", VerificationKey: public, Admission: ExternalDeploymentAdmissionService{Database: f.store}, OrdinaryAdmissions: f.server.DeploymentAdmissions, ControlPlaneClient: f.coreClient, EventPublisher: f.server.EventPublisher, Logger: zap.NewNop()}
+	adapter := &ExternalDeploymentHTTPAdapter{
+		Server:             f.server,
+		Issuer:             "core",
+		VerificationKey:    public,
+		Admission:          ExternalDeploymentAdmissionService{Database: f.store},
+		OrdinaryAdmissions: f.server.DeploymentAdmissions,
+		ControlPlaneClient: f.coreClient,
+		EventPublisher:     f.server.EventPublisher,
+		Logger:             zap.NewNop(),
+	}
 	router := echo.New()
 	router.POST(ObservationRedeployPath, adapter.HandleObservationRedeploy)
 	fixture := observationRecoveryFixture{

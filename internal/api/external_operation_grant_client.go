@@ -29,9 +29,10 @@ const (
 )
 
 type CoreExternalDeploymentGrantClient struct {
-	BaseURL     *url.URL
-	HTTPClient  *http.Client
-	BearerToken string
+	BaseURL         *url.URL
+	HTTPClient      *http.Client
+	BearerToken     string
+	BearerTokenFile string
 }
 
 func (c CoreExternalDeploymentGrantClient) AuthorizeExternalDeployment(
@@ -39,7 +40,7 @@ func (c CoreExternalDeploymentGrantClient) AuthorizeExternalDeployment(
 	claims plugincontext.Claims,
 	request ExternalDeploymentGrantRequest,
 ) (AuthorizedExternalDeployment, error) {
-	if c.BaseURL == nil || c.HTTPClient == nil || c.BearerToken == "" {
+	if c.BaseURL == nil || c.HTTPClient == nil || c.BearerToken == "" && c.BearerTokenFile == "" {
 		return AuthorizedExternalDeployment{}, fmt.Errorf("%w: Core grant client is not configured", ErrExternalDeploymentUnavailable)
 	}
 	if !validExternalPathIdentity(claims.OrgID, claims.PluginID) {
@@ -71,7 +72,11 @@ func (c CoreExternalDeploymentGrantClient) AuthorizeExternalDeployment(
 	if err != nil {
 		return AuthorizedExternalDeployment{}, fmt.Errorf("build Core grant check: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+c.BearerToken)
+	token, err := serviceBearerToken(c.BearerTokenFile, c.BearerToken)
+	if err != nil {
+		return AuthorizedExternalDeployment{}, fmt.Errorf("%w: service credential unavailable", ErrExternalDeploymentUnavailable)
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+token)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
 

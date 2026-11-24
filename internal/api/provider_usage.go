@@ -96,6 +96,9 @@ func scanProviderUsage(ctx context.Context, db model.Databaser, org string, expe
 		}
 		page = next
 	}
+	if err := scanEmptyEffectiveState(ctx, tx, org, &report); err != nil {
+		return InternalProviderUsage{}, err
+	}
 	for _, environment := range expected {
 		if !slices.Contains(report.EnvironmentUuids, environment) {
 			return InternalProviderUsage{}, fmt.Errorf("required Environment state is unavailable")
@@ -103,4 +106,33 @@ func scanProviderUsage(ctx context.Context, db model.Databaser, org string, expe
 	}
 	report.Providers = append([]string{}, slices.Sorted(maps.Keys(providers))...)
 	return report, nil
+}
+
+// A proven pre-effect failure can be the only Deployment of an Environment.
+// Count that explicit empty state as coverage, rather than inventing a head or
+// interpreting an absent row as evidence that provider material is unused.
+func scanEmptyEffectiveState(ctx context.Context, tx model.Tx, org string, report *InternalProviderUsage) error {
+	rows, err := tx.QueryContext(ctx, `SELECT e.id,
+ EXISTS(SELECT 1 FROM deployments d WHERE d.de_id=e.id AND d.status='executing')
+ OR EXISTS(SELECT 1 FROM runner_job_reservations r JOIN deployments d ON d.id=r.deployment_id WHERE d.de_id=e.id AND r.released_at IS NULL)
+ FROM deployment_environments e JOIN deployment_effective_state effective ON effective.environment_id=e.id
+ WHERE e.org_id=$1 AND effective.deployment_id IS NULL ORDER BY e.id LIMIT $2`, org, providerUsageEnvironmentLimit+1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var environment uuid.UUID
+		var busy bool
+		if err := rows.Scan(&environment, &busy); err != nil {
+			return err
+		}
+		report.EnvironmentsScanned++
+		if report.EnvironmentsScanned > providerUsageEnvironmentLimit {
+			return fmt.Errorf("provider usage scan limit exceeded")
+		}
+		report.EnvironmentUuids = append(report.EnvironmentUuids, environment)
+		report.Busy = report.Busy || busy
+	}
+	return rows.Err()
 }

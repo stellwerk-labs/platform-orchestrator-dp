@@ -49,6 +49,7 @@ var (
 )
 
 type ExternalDeploymentHTTPAdapter struct {
+	Server             *Server
 	Issuer             string
 	VerificationKey    ed25519.PublicKey
 	OrdinaryAdmissions *OrdinaryDeploymentAdmissionService
@@ -128,24 +129,7 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, externalDeploymentErrorResponse{Error: "invalid_deployment", Message: err.Error()})
 	}
 
-	environmentResponse, err := a.ControlPlaneClient.GetEnvironmentWithResponse(
-		request.Context(), orgID, body.ProjectId, body.EnvId,
-	)
-	if err != nil {
-		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core environment lookup is unavailable"})
-	}
-	if environmentResponse.StatusCode() == http.StatusNotFound {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: "environment_not_found", Message: "target environment does not exist"})
-	}
-	if environmentResponse.StatusCode() != http.StatusOK || environmentResponse.JSON200 == nil || environmentResponse.JSON200.ProjectUuid == nil {
-		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentCoreUnavailableCode, Message: "Core environment lookup did not return an authoritative target"})
-	}
-	environment := *environmentResponse.JSON200
-	if environment.ProjectId != body.ProjectId || environment.Id != body.EnvId ||
-		*environment.ProjectUuid != body.ProjectUuid || environment.Uuid != body.EnvironmentUuid {
-		return c.JSON(http.StatusConflict, externalDeploymentErrorResponse{Error: externalEnvironmentIdentityChangedCode, Message: externalEnvironmentIdentityChangedMessage})
-	}
-
+	var pipelineAdmission externalPipelineAdmission
 	admissionRequest := ExternalDeploymentAdmissionRequest{
 		Claims:        claims,
 		OperationRef:  body.OperationRef.String(),
@@ -156,18 +140,47 @@ func (a *ExternalDeploymentHTTPAdapter) Handle(c echo.Context) error {
 		ProjectID:     body.ProjectId,
 		EnvID:         body.EnvId,
 		Create: func(ctx context.Context, tx model.Tx, actorID uuid.UUID) (*ExternalDeploymentCreation, error) {
+			response, err := a.ControlPlaneClient.GetEnvironmentWithResponse(ctx, orgID, body.ProjectId, body.EnvId)
+			if err != nil {
+				return nil, errors.Join(ErrExternalDeploymentUnavailable, err)
+			}
+			if response.StatusCode() == http.StatusNotFound {
+				return nil, model.NewErrCodedConflict("environment_not_found", "target environment does not exist")
+			}
+			if response.StatusCode() != http.StatusOK || response.JSON200 == nil || response.JSON200.ProjectUuid == nil {
+				return nil, ErrExternalDeploymentUnavailable
+			}
+			environment := *response.JSON200
+			if environment.ProjectId != body.ProjectId || environment.Id != body.EnvId || *environment.ProjectUuid != body.ProjectUuid || environment.Uuid != body.EnvironmentUuid {
+				return nil, model.NewErrCodedConflict(externalEnvironmentIdentityChangedCode, externalEnvironmentIdentityChangedMessage)
+			}
+			pipelineAdmission, err = a.resolvePipelineAdmission(ctx, actorID, orgID, pluginID, claims.RequestID, &environment, mode, body.Pipeline)
+			if err != nil {
+				return nil, err
+			}
+			target, err := nativeExecutionTarget(orgID, *environment.RunnerId, *pipelineAdmission.Runner, mode, pipelineAdmission.Definition)
+			if err != nil {
+				return nil, err
+			}
+			if err := model.RequireStateCustody(ctx, tx, orgID, body.ProjectId, body.EnvId, environment.Uuid, pipelineAdmission.Runner.Id, target); err != nil {
+				return nil, err
+			}
+			pipelineAdmission.Attempt.ExternalDispatch = &model.ExternalAdmissionDispatch{PluginID: pluginID, OperationID: body.OperationRef, DispatchID: claims.RequestID, Fence: body.Fence, RequestDigest: claims.BodySHA256}
 			material, err := a.Materials.GetOrCreate(ctx, tx, orgID, pluginID, body.OperationRef)
 			if err != nil {
 				return nil, errors.Join(ErrExternalDeploymentUnavailable, err)
 			}
 			if mode == model.DeploymentModeDeploy {
-				return a.createExternalDeploymentFromSnapshot(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient)
+				return a.createExternalDeploymentFromSnapshot(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient, pipelineAdmission)
 			}
-			return a.createExternalRollback(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient)
+			return a.createExternalRollback(ctx, tx, actorID, orgID, pluginID, body, environment, material.Recipient, pipelineAdmission)
 		},
 	}
 	result, err := a.Admission.Admit(request.Context(), admissionRequest)
 	if err != nil {
+		if pipelineAdmission.Attempt != nil {
+			_ = pipelineAdmission.Attempt.SealAbsent(context.WithoutCancel(request.Context()))
+		}
 		return a.writeAdmissionError(c, err)
 	}
 	if !result.Replayed {
@@ -221,7 +234,7 @@ func (a *ExternalDeploymentHTTPAdapter) writeAdmissionError(c echo.Context, err 
 	if errors.Is(err, ErrExternalDeploymentUnauthorized) {
 		return c.JSON(http.StatusForbidden, externalDeploymentErrorResponse{Error: "external_operation_not_authorized", Message: "Core did not authorize this deployment dispatch"})
 	}
-	if errors.Is(err, ErrExternalDeploymentUnavailable) {
+	if errors.Is(err, ErrExternalDeploymentUnavailable) || errors.Is(err, ErrDeploymentAdmissionUnavailable) {
 		return c.JSON(http.StatusServiceUnavailable, externalDeploymentErrorResponse{Error: externalDeploymentUnavailableCode, Message: "an authoritative external deployment dependency is unavailable"})
 	}
 	if badRequest, ok := model.IsErrBadRequest(err); ok {
@@ -277,10 +290,18 @@ func validateExternalDeploymentBody(body ExternalDeploymentAdmissionBody) (model
 
 func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
-	environment platformorchestratorcp.Environment, recipient string,
+	environment platformorchestratorcp.Environment, recipient string, pipelineOptions ...externalPipelineAdmission,
 ) (*ExternalDeploymentCreation, error) {
+	var pipeline externalPipelineAdmission
+	if len(pipelineOptions) > 0 {
+		pipeline = pipelineOptions[0]
+	}
+	logRecipient := &recipient
+	if pipeline.Definition != nil {
+		logRecipient = nil
+	}
 	scope := externalRollbackScope(orgID, pluginID, body)
-	anchor, err := a.operationRollbackAnchor(ctx, tx, scope, true)
+	anchor, base, err := a.operationRollbackAnchor(ctx, tx, scope, true)
 	if err != nil {
 		return nil, err
 	}
@@ -294,10 +315,22 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	if snapshot.ActorID != actorID || snapshot.ProjectID != body.ProjectId || snapshot.ProjectUUID != body.ProjectUuid ||
 		snapshot.EnvID != body.EnvId || snapshot.EnvironmentUUID != body.EnvironmentUuid || snapshot.Fingerprint != body.Plan.Fingerprint ||
 		deploymentPlanFingerprint(DeploymentPlanCapture{
-			BaseDeploymentID: snapshot.BaseDeploymentID, Manifest: snapshot.Manifest, Graph: snapshot.Graph,
+			NativeTarget: snapshot.NativeTarget, BaseDeploymentID: snapshot.BaseDeploymentID, Manifest: snapshot.Manifest, Graph: snapshot.Graph,
 			Diff: snapshot.Diff, ModuleArtifacts: snapshot.ModuleArtifacts,
 		}) != snapshot.Fingerprint {
 		return nil, model.NewErrConflict("external deployment plan snapshot identity or content changed")
+	}
+	snapshotBase := base
+	if snapshotBase == nil || snapshotBase.Id != snapshot.BaseDeploymentID {
+		capturedBase := scope
+		capturedBase.RollbackBaseDeploymentID = snapshot.BaseDeploymentID
+		snapshotBase, err = a.validateRollbackBase(ctx, tx, capturedBase)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !reflect.DeepEqual(snapshot.NativeTarget, snapshotBase.NativeTarget) || (base != nil && !reflect.DeepEqual(snapshot.NativeTarget, base.NativeTarget)) {
+		return nil, model.NewErrConflict("planned execution target differs from immutable operation lineage")
 	}
 	explicitVersions := make(map[string]string, len(snapshot.ExplicitTargets))
 	expectedVersions := make(map[string]uuid.UUID, len(snapshot.ExplicitTargets))
@@ -323,9 +356,13 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	}
 	deployment, pending, _, err := CreateDeploymentWithOptions(
 		ctx, a.logger(), actorID, orgID, body.ProjectId, body.EnvId, environment,
-		model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), manifest, &recipient, &recipient, nil, false,
+		model.DeploymentModeDeploy, opt.Empty[uuid.UUID](), manifest, &recipient, logRecipient, nil, false,
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
+			ExpectedNativeTarget: opt.Of(snapshot.NativeTarget), Runner: pipeline.Runner,
+			Pipeline: pipeline.Definition, Admission: pipeline.Attempt,
+			ManagedLogs:             pipeline.Definition != nil,
+			LogMaterial:             &DeploymentLogMaterialService{Vault: a.Materials.Vault},
 			ExplicitModuleVersions:  explicitVersions,
 			ModuleMaterialCatalogue: a.OrdinaryAdmissions.ExecutionCatalogueClient(),
 			ModuleOperationID:       opt.Of(body.OperationRef),
@@ -357,9 +394,6 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 	}
 	if anchor == nil {
 		scope.FirstForwardDeploymentID, scope.RollbackBaseDeploymentID = deployment.Id, snapshot.BaseDeploymentID
-		if err := a.validateRollbackBase(ctx, tx, scope); err != nil {
-			return nil, err
-		}
 		if err := model.CreateExternalOperationRollbackAnchor(ctx, tx, scope); err != nil {
 			return nil, err
 		}
@@ -371,10 +405,18 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalDeploymentFromSnapshot(
 
 func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 	ctx context.Context, tx model.Tx, actorID uuid.UUID, orgID, pluginID string, body ExternalDeploymentAdmissionBody,
-	environment platformorchestratorcp.Environment, recipient string,
+	environment platformorchestratorcp.Environment, recipient string, pipelineOptions ...externalPipelineAdmission,
 ) (*ExternalDeploymentCreation, error) {
+	var pipeline externalPipelineAdmission
+	if len(pipelineOptions) > 0 {
+		pipeline = pipelineOptions[0]
+	}
+	logRecipient := &recipient
+	if pipeline.Definition != nil {
+		logRecipient = nil
+	}
 	scope := externalRollbackScope(orgID, pluginID, body)
-	anchor, err := a.operationRollbackAnchor(ctx, tx, scope, true)
+	anchor, base, err := a.operationRollbackAnchor(ctx, tx, scope, true)
 	if err != nil {
 		return nil, err
 	}
@@ -398,6 +440,9 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 		forward.DeploymentEnvUuid != body.EnvironmentUuid || forward.ProjectId != body.ProjectId || forward.EnvId != body.EnvId {
 		return nil, model.NewErrConflict("forward deployment is not a stopped terminal Deployment in this Environment")
 	}
+	if !reflect.DeepEqual(forward.NativeTarget, base.NativeTarget) {
+		return nil, model.NewErrConflict("forward execution target differs from immutable rollback lineage")
+	}
 	baseID := anchor.RollbackBaseDeploymentID
 	expectedHead := forward.Id
 	retryOf := opt.Empty[uuid.UUID]()
@@ -415,11 +460,10 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 			!previous.RollbackToId.IsSet() || previous.RollbackToId.Must() != baseID {
 			return nil, model.NewErrConflict("rollback retry requires this operation's terminal failed rollback to the original base")
 		}
+		if !reflect.DeepEqual(previous.NativeTarget, base.NativeTarget) {
+			return nil, model.NewErrConflict("rollback retry execution target differs from immutable lineage")
+		}
 		expectedHead, retryOf = previousID, opt.Of(previousID)
-	}
-	base, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, orgID, baseID, model.GetModeDefault)
-	if err != nil || base.Status != model.DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || base.DeploymentEnvUuid != body.EnvironmentUuid || base.ProjectId != body.ProjectId || base.EnvId != body.EnvId {
-		return nil, model.NewErrConflict("captured rollback base is not retained as a succeeded Deployment")
 	}
 	expectedVersions, err := immutableModuleVersions(base.ModuleArtifacts)
 	if err != nil {
@@ -431,9 +475,12 @@ func (a *ExternalDeploymentHTTPAdapter) createExternalRollback(
 	}
 	deployment, pending, _, err := CreateDeploymentWithOptions(
 		ctx, a.logger(), actorID, orgID, body.ProjectId, body.EnvId, environment,
-		model.DeploymentModeRollback, opt.Of(baseID), DeploymentManifest{}, &recipient, &recipient, nil, false,
+		model.DeploymentModeRollback, opt.Of(baseID), DeploymentManifest{}, &recipient, logRecipient, nil, false,
 		externalRunnerLogLevel(body.RunnerLogLevel), a.ControlPlaneClient, a.Admission.Database, tx,
 		DeploymentOptions{
+			Pipeline: pipeline.Definition, Admission: pipeline.Attempt, Runner: pipeline.Runner, ExpectedNativeTarget: opt.Of(base.NativeTarget),
+			ManagedLogs:                 pipeline.Definition != nil,
+			LogMaterial:                 &DeploymentLogMaterialService{Vault: a.Materials.Vault},
 			RestrictedConfirmations:     confirmations,
 			ModuleMaterialCatalogue:     a.OrdinaryAdmissions.ExecutionCatalogueClient(),
 			ExpectedCurrentDeploymentID: opt.Of(expectedHead),

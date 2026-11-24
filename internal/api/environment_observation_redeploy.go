@@ -9,11 +9,13 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"reflect"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/stellwerk-labs/golib/hmessaging/reliableoutbox"
 	"github.com/stellwerk-labs/golib/hstandardoutbox"
+	platformorchestratorcp "github.com/stellwerk-labs/platform-orchestrator-cp/shared/v3/genclient"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/graphs"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/model"
 	"github.com/stellwerk-labs/platform-orchestrator-dp/internal/opt"
@@ -84,11 +86,15 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 		if previousRun != runID || previousActor != actor || previousDigest != digest {
 			return writeObservationError(c, model.NewErrConflict("redeploy request identity already used with different content"))
 		}
-		dep, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, claims.OrgID, deploymentID, model.GetModeDefault)
+		_, _, _, _, err := a.Admission.Database.GetDeployment(ctx, tx, claims.OrgID, deploymentID, model.GetModeDefault)
 		if err != nil {
 			return writeObservationError(c, err)
 		}
-		return c.JSON(http.StatusOK, observation.ObservationRedeployReceipt{RequestId: body.RequestId, DeploymentId: deploymentID, BaselineId: baselineID, Status: observation.ObservationRedeployReceiptStatus(dep.Status)})
+		out, err := a.observationRedeployReceipt(ctx, tx, claims.OrgID, body.RequestId, deploymentID, baselineID)
+		if err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, out)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -116,20 +122,25 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 	}
 	if base.Id != body.BaselineId || base.DeploymentEnvUuid != body.EnvironmentUuid || base.Status != model.DeploymentStatusSucceeded || !base.CompletedAt.IsSet() || (base.Mode != model.DeploymentModeDeploy && base.Mode != model.DeploymentModeRollback) ||
 		!model.CompleteDeploymentSnapshot(manifest, tofu, graph) ||
-		model.ObservationBaselineFingerprint(manifest, tofu, graph, base.ModuleArtifacts) != body.BaselineFingerprint {
+		model.ObservationBaselineFingerprint(manifest, tofu, graph, base.ModuleArtifacts, base.NativeTarget) != body.BaselineFingerprint {
 		return writeObservationError(c, model.NewErrConflict("latest successful baseline no longer matches finding"))
 	}
 	env, err := a.ControlPlaneClient.GetEnvironmentWithResponse(ctx, claims.OrgID, body.ProjectId, body.EnvId)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "Core Environment lookup unavailable")
 	}
-	if env.StatusCode() != http.StatusOK || env.JSON200 == nil || env.JSON200.ProjectUuid == nil || *env.JSON200.ProjectUuid != body.ProjectUuid || env.JSON200.Uuid != body.EnvironmentUuid || env.JSON200.RunnerId == nil || string(env.JSON200.Status) == "deleting" {
+	if env.StatusCode() != http.StatusOK || env.JSON200 == nil || env.JSON200.ProjectId != body.ProjectId || env.JSON200.Id != body.EnvId || env.JSON200.ProjectUuid == nil || *env.JSON200.ProjectUuid != body.ProjectUuid || env.JSON200.Uuid != body.EnvironmentUuid || env.JSON200.RunnerId == nil ||
+		string(env.JSON200.Status) == "deleting" {
 		return writeObservationError(c, model.NewErrConflict("current Environment identity or lifecycle changed"))
 	}
 	for _, artifact := range base.ModuleArtifacts {
 		if !artifact.HasObservationProvenance() {
 			return writeObservationError(c, model.NewErrConflict("baseline has unavailable immutable module material"))
 		}
+	}
+	definition, backend, outputsRecipient, err := a.observationPipelineAdmission(ctx, tx, claims.OrgID, claims.PluginID, body, env.JSON200, base.NativeTarget)
+	if err != nil {
+		return writeObservationError(c, err)
 	}
 	attempt := a.OrdinaryAdmissions.NewAttempt(claims.OrgID, body.ProjectUuid, body.EnvironmentUuid, actor, model.DeploymentModeDeploy, "observation-redeploy:"+claims.PluginID+":"+body.RequestId.String())
 	committed := false
@@ -147,9 +158,23 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 		ctx,
 		tx,
 		base.ModuleArtifacts,
-		ordinaryDeploymentCompiledIntent{ProjectID: body.ProjectId, EnvironmentID: body.EnvId, RunnerID: *env.JSON200.RunnerId, EffectiveBaseDeploymentID: base.Id, Manifest: manifest, Graph: graph, Tofu: tofu, RunnerLogLevel: "info", CarryForwardModuleVersions: carry},
+		ordinaryDeploymentCompiledIntent{
+			NativeTarget: base.NativeTarget,
+			Pipeline:     definition, EncryptedOutputsRecipient: outputsRecipient,
+			ManagedLogs: definition != nil,
+			ProjectID:   body.ProjectId, EnvironmentID: body.EnvId, RunnerID: *env.JSON200.RunnerId,
+			EffectiveBaseDeploymentID: base.Id, Manifest: manifest, Graph: graph, Tofu: tofu,
+			RunnerLogLevel: "info", CarryForwardModuleVersions: carry,
+		},
 	); err != nil {
 		return writeObservationError(c, err)
+	}
+	logRecipient, logMaterial, err := (DeploymentOptions{
+		ManagedLogs: definition != nil,
+		LogMaterial: &DeploymentLogMaterialService{Vault: a.Materials.Vault},
+	}).prepareLogMaterial(ctx, nil)
+	if err != nil {
+		return err
 	}
 	dep, err := a.Admission.Database.CreateDeployment(
 		ctx,
@@ -158,6 +183,9 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 		body.ProjectId,
 		body.EnvId,
 		model.CreateDeploymentParams{
+			NativeTarget: base.NativeTarget,
+			Pipeline:     definition, PipelineBackend: backend, EncryptedOutputsRecipient: opt.Of(outputsRecipient),
+			EncryptedLogsRecipient:     opt.OfRef(logRecipient),
 			CreatedBy:                  actor,
 			DeploymentEnvUuid:          body.EnvironmentUuid,
 			Mode:                       model.DeploymentModeDeploy,
@@ -174,6 +202,11 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 	)
 	if err != nil {
 		return writeObservationError(c, err)
+	}
+	if logMaterial != nil {
+		if err := model.StoreDeploymentLogMaterial(ctx, tx, claims.OrgID, dep.Id, *logMaterial); err != nil {
+			return err
+		}
 	}
 	if err := attempt.Bind(ctx, tx, dep.Id); err != nil {
 		return err
@@ -208,7 +241,16 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeploy(c echo.Context
 	}
 	committed = true
 	reliableoutbox.OptimisticPublish(ctx, a.logger(), a.Admission.Database.AsReliableOutboxStore(), a.EventPublisher, pending)
-	return c.JSON(http.StatusOK, observation.ObservationRedeployReceipt{RequestId: body.RequestId, DeploymentId: dep.Id, BaselineId: base.Id, Status: observation.ObservationRedeployReceiptStatus(dep.Status)})
+	readTx, err := a.Admission.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = readTx.Rollback() }()
+	out, err := a.observationRedeployReceipt(ctx, readTx, claims.OrgID, body.RequestId, dep.Id, base.Id)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 const ObservationRedeployReadPath = "/orgs/:orgId/plugins/:pluginId/observations/v1/redeployments/:requestId"
@@ -239,5 +281,55 @@ func (a *ExternalDeploymentHTTPAdapter) HandleObservationRedeployRead(c echo.Con
 	if err != nil {
 		return err
 	}
+	out, err = a.observationRedeployReceipt(ctx, tx, claims.OrgID, out.RequestId, out.DeploymentId, out.BaselineId)
+	if err != nil {
+		return err
+	}
 	return c.JSON(http.StatusOK, out)
+}
+
+func (a *ExternalDeploymentHTTPAdapter) observationPipelineAdmission(
+	ctx context.Context,
+	tx model.Tx,
+	org, plugin string,
+	body observation.ObservationRedeployRequest,
+	env *platformorchestratorcp.Environment,
+	expectedTarget *platformorchestratorcp.NativeExecutionTargetReference,
+) (*model.PipelineDefinition, string, string, error) {
+	if a.Server == nil {
+		return nil, "", "", ErrDeploymentAdmissionUnavailable
+	}
+	var selection *PipelineReference
+	if body.Pipeline != nil {
+		raw, _ := json.Marshal(body.Pipeline)
+		if err := json.Unmarshal(raw, &selection); err != nil {
+			return nil, "", "", err
+		}
+	}
+	definition, runner, err := a.Server.resolveExternalPipeline(ctx, org, env, model.DeploymentModeDeploy, selection)
+	if err != nil {
+		return nil, "", "", err
+	}
+	currentTarget, err := nativeExecutionTarget(org, *env.RunnerId, *runner, model.DeploymentModeDeploy, definition)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if !reflect.DeepEqual(expectedTarget, currentTarget) {
+		return nil, "", "", model.NewErrConflict("remediation execution target differs from the observation baseline")
+	}
+	if err := model.RequireStateCustody(ctx, tx, org, body.ProjectId, body.EnvId, body.EnvironmentUuid, runner.Id, currentTarget); err != nil {
+		return nil, "", "", err
+	}
+	if definition == nil {
+		return nil, "", "", nil
+	}
+	backend, err := runner.StateStorageConfiguration.Discriminator()
+	if err != nil {
+		return nil, "", "", err
+	}
+	material, err := a.Materials.GetOrCreate(ctx, tx, org, plugin, body.RequestId)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return definition, backend, material.Recipient, nil
 }

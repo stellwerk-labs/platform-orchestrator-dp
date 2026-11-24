@@ -82,8 +82,28 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 		DraftTestSnapshots: map[string]uuid.UUID{reference.ModuleUUID.String(): reference.SnapshotUUID},
 		Disposition:        "pending",
 	}
-	_, err = PrepareDeploymentAdmissionReceipt(t.Context(), tx, wanted)
+	selection, err := json.Marshal(wanted.DraftTestSnapshots)
 	require.NoError(t, err)
+	// Seed the version-37 shape before testing its downgrade fence; current APIs require the upgraded schema.
+	_, err = tx.ExecContext(t.Context(), `INSERT INTO deployment_admission_receipts
+		(org_id,admission_id,project_uuid,environment_uuid,actor_id,request_digest,mode,module_versions,
+		 carry_forward_module_versions,confirmed_restricted_version_uuids,disposition,draft_test_snapshots)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'null'::jsonb,'null'::jsonb,$9,$8)`,
+		wanted.OrgID, wanted.AdmissionID, wanted.ProjectUUID, wanted.EnvironmentUUID, wanted.ActorID,
+		wanted.RequestDigest, wanted.Mode, selection, wanted.Disposition)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	before := appliedMigrations(t, t.Context(), db)
+	_, err = provider.DownTo(t.Context(), 36)
+	require.ErrorContains(t, err, "cannot downgrade while Draft test execution history exists")
+	require.Equal(t, before, appliedMigrations(t, t.Context(), db))
+	requireStarts(t, t.Context(), scoped)
+	tx, err = db.BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	replay, err := PrepareDeploymentAdmissionReceipt(t.Context(), tx, wanted)
+	require.NoError(t, err)
+	require.Equal(t, wanted.DraftTestSnapshots, replay.DraftTestSnapshots)
 	require.NoError(t, tx.Commit())
 	tx, err = db.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
@@ -100,11 +120,6 @@ func TestDraftTestSnapshotStorageShapesAndDowngrade(t *testing.T) {
 	require.Len(t, recovered, 1)
 	require.Equal(t, wanted.DraftTestSnapshots, recovered[0].DraftTestSnapshots)
 	require.NoError(t, tx.Commit())
-	before := appliedMigrations(t, t.Context(), db)
-	_, err = provider.DownTo(t.Context(), 36)
-	require.ErrorContains(t, err, "cannot downgrade while Draft test execution history exists")
-	require.Equal(t, before, appliedMigrations(t, t.Context(), db))
-	requireStarts(t, t.Context(), scoped)
 }
 
 func TestDraftTestSnapshotStorageEmptyDowngradeAndLegacyEncoding(t *testing.T) {

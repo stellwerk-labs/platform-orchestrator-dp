@@ -53,8 +53,9 @@ func (a *ExternalDeploymentHTTPAdapter) handleMaterial(c echo.Context, kind exte
 	requestContext, cancel := context.WithTimeout(c.Request().Context(), RequestHandlerTimeout)
 	defer cancel()
 	c.SetRequest(c.Request().WithContext(requestContext))
-	if _, err := a.verifyInspectionGET(c, action); err != nil {
-		return err
+	claims, verifyErr := a.verifyInspectionGET(c, action)
+	if verifyErr != nil {
+		return verifyErr
 	}
 
 	deploymentID, deploymentErr := uuid.Parse(c.Param("deploymentId"))
@@ -88,6 +89,22 @@ func (a *ExternalDeploymentHTTPAdapter) handleMaterial(c echo.Context, kind exte
 		receipt.ProjectUUID.Must() != projectUUID || receipt.EnvironmentUUID.Must() != environmentUUID ||
 		receipt.ProjectID != deployment.ProjectId || receipt.EnvID != deployment.EnvId {
 		return a.writeMaterialNotFound(c, kind)
+	}
+	if kind == externalDeploymentLogs && deployment.HasPipeline {
+		if a.Server == nil || a.Server.RunnerRollouts == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "pipeline logs require the execution site")
+		}
+		actor, err := uuid.Parse(claims.ActorID)
+		if err != nil {
+			return err
+		}
+		content, err := a.Server.RunnerRollouts.loadPipelineLog(c.Request().Context(), actor, runnerRolloutView{ID: deploymentID.String()}, "execution")
+		if err != nil {
+			return err
+		}
+		c.Response().Header().Set("Cache-Control", "no-store")
+		c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+		return c.Blob(http.StatusOK, "text/plain; charset=utf-8", content)
 	}
 	operationRef, err := uuid.Parse(receipt.OperationRef)
 	if err != nil || operationRef == uuid.Nil {

@@ -17,6 +17,7 @@ func TestSkipGeneratedOpenAPIValidationIsExact(t *testing.T) {
 	server := echo.New()
 	context := server.NewContext(httptest.NewRequest("GET", "/", nil), httptest.NewRecorder())
 	for _, path := range []string{
+		LegacyDeploymentAccessPath,
 		"/alive", "/health", "/internal/actions/flush-pending-messages",
 		ExternalDeploymentAdmissionPath,
 		ExternalDeploymentReadinessPath,
@@ -31,7 +32,13 @@ func TestSkipGeneratedOpenAPIValidationIsExact(t *testing.T) {
 	}
 
 	for _, path := range []string{
+		LegacyDeploymentAccessPath + "/extra",
+		"/v1/orgs/:orgId/runners/:runnerId/deployments/:deploymentId/legacy-access-extra",
+		CanonicalPipelinePath, PipelineCataloguePath, PipelineApplyPlanPath, CanonicalPipelineReplanPath, PipelineControlsPath, PipelineControlsPath + "/:controlId",
 		"/orgs/:orgId/deployments",
+		"/orgs/:orgId/deployment-pipelines",
+		"/orgs/:orgId/deployment-pipelines/:pipelineId/replan",
+		"/orgs/:orgId/deployment-pipeline-tools",
 		ExternalDeploymentReadinessPath + "/extra",
 		"/orgs/:orgId/plugins/:pluginId/external-deployment",
 		"/internal/orgs/:orgId/plugins/:pluginId/external-deployment-readiness",

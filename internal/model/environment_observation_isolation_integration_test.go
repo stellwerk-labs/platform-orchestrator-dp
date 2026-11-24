@@ -138,7 +138,7 @@ func TestObservationIsolationRejectsInheritedRepeatableReadForwardsAndResolvers(
 	require.NoError(t, snapshot.QueryRowContext(ctx, `SELECT current_setting('transaction_isolation'),count(*) FROM environment_observation_receipts WHERE request_id=$1`, request.RequestId).Scan(&isolation, &visible))
 	require.Equal(t, "repeatable read", isolation)
 	require.Zero(t, visible)
-	receipt, pending, err := TryStartObservation(ctx, normal, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true)
+	receipt, pending, err := TryStartObservation(ctx, normal, "queue-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, observation.ObservationReceiptDispositionAccepted, receipt.Disposition)
 	require.Len(t, pending, 1)
@@ -157,7 +157,7 @@ func TestObservationIsolationRejectsInheritedRepeatableReadForwardsAndResolvers(
 	require.Nil(t, replay)
 	newRequest := request
 	newRequest.RequestId = uuid.New()
-	_, pending, err = TryStartObservation(ctx, frozen, "queue-org", "dev.example.plugin", actor, newRequest, "runner", 2, true)
+	_, pending, err = TryStartObservation(ctx, frozen, "queue-org", "dev.example.plugin", actor, newRequest, "runner", 2, true, nil)
 	require.ErrorIs(t, err, ErrObservationIsolationUnsupported)
 	require.Empty(t, pending)
 	require.Zero(t, readObservationCount(t, f, `SELECT count(*) FROM environment_observation_request_seals`))

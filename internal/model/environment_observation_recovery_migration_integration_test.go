@@ -39,7 +39,7 @@ func TestObservationRecoveryMigrationRetainsNegativeReceiptsAcrossRestart(t *tes
 		resolution, err := ResolveObservationRequest(ctx, store, "migration-org", "dev.example.plugin", actor, request)
 		require.NoError(t, err)
 		require.Equal(t, observation.ObservationResolutionDispositionNotStarted, resolution.Disposition)
-		_, _, err = TryStartObservation(ctx, store, "migration-org", "dev.example.plugin", actor, request, "runner", 2, true)
+		_, _, err = TryStartObservation(ctx, store, "migration-org", "dev.example.plugin", actor, request, "runner", 2, true, nil)
 		require.ErrorIs(t, err, ErrObservationRequestSealed)
 		require.NoError(t, store.Close())
 	}

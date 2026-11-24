@@ -61,6 +61,17 @@ func BeginDeploymentDispatch(ctx context.Context, db Databaser, dep *DeploymentS
 	if revision != dep.Revision || status != string(DeploymentStatusExecuting) {
 		return time.Time{}, NewErrConflict("deployment changed before Runner dispatch")
 	}
+	// A retained apply can never be launched twice when start acknowledgement is
+	// lost. A pre-start crash also requires reconciliation, conservatively.
+	if dep.RetainedPlan != nil && !dep.RetainedPlan.Export {
+		budget, err := ReadDeploymentDispatchBudget(ctx, tx, dep.Id)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if budget.FirstAttemptAt.Valid {
+			return time.Time{}, NewErrConflict("retained apply dispatch outcome is unresolved")
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE deployment_dispatch_budgets SET first_attempt_at=now(), deadline=now()+interval '1 hour'
         WHERE deployment_id=$1 AND deployment_revision=$2 AND first_attempt_at IS NULL AND NOT legacy`, dep.Id, dep.Revision); err != nil {
 		return time.Time{}, err
@@ -87,6 +98,7 @@ type DeploymentStopEvidence struct {
 	// PluginDispatched is set when a plugin operation receipt admitted the
 	// Deployment. Ordinary Core Deployments never have one.
 	PluginDispatched bool
+	RetainedApply    bool
 	// Dispatched is set when a durable first dispatch attempt exists, or when
 	// no dispatch budget exists at all and the attempt must be assumed.
 	Dispatched bool
@@ -108,7 +120,7 @@ func (e DeploymentStopEvidence) OutcomeUnreconciled() bool {
 // Deployment failure never blocks the next Deployment, exactly as before
 // dispatch evidence existed.
 func (e DeploymentStopEvidence) BlocksReplacement() bool {
-	return e.Failed && e.PluginDispatched && e.OutcomeUnreconciled()
+	return e.Failed && (e.PluginDispatched || e.RetainedApply) && e.OutcomeUnreconciled()
 }
 
 func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UUID) (DeploymentStopEvidence, error) {
@@ -116,6 +128,7 @@ func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UU
 	err := tx.QueryRowContext(ctx, `SELECT d.status='failed',
  EXISTS(SELECT 1 FROM runner_job_reservations r WHERE r.deployment_id=d.id AND r.released_at IS NULL),
         (EXISTS (SELECT 1 FROM external_operation_deployments receipt WHERE receipt.deployment_id=d.id AND receipt.org_id=e.org_id) OR EXISTS (SELECT 1 FROM environment_observation_receipts observation WHERE observation.deployment_id=d.id AND observation.org_id=e.org_id)),
+        EXISTS (SELECT 1 FROM retained_plans plan WHERE plan.apply_deployment_id=d.id AND plan.org_id=e.org_id),
         budget.deployment_id IS NULL OR budget.first_attempt_at IS NOT NULL,
         budget.completion_received_at IS NOT NULL
           OR EXISTS (SELECT 1 FROM runner_event_inbox result WHERE result.deployment_id=d.id AND result.event_type='deployment-result'
@@ -127,7 +140,7 @@ func ReadDeploymentStopEvidence(ctx context.Context, tx Tx, deploymentID uuid.UU
         JOIN deployment_environments e ON e.id=d.de_id
         LEFT JOIN deployment_dispatch_budgets budget ON budget.deployment_id=d.id
         WHERE d.id=$1`, deploymentID).Scan(
-		&evidence.Failed, &evidence.CapacityReserved, &evidence.PluginDispatched, &evidence.Dispatched, &evidence.StopProven, &evidence.Acknowledged)
+		&evidence.Failed, &evidence.CapacityReserved, &evidence.PluginDispatched, &evidence.RetainedApply, &evidence.Dispatched, &evidence.StopProven, &evidence.Acknowledged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeploymentStopEvidence{}, NewErrNotFound("deployment not found for stop evidence")
 	}

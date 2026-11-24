@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -491,4 +492,51 @@ func TestHandle_start_runner_kubernetes_agent_not_reachable_tolerance_exceeded(t
 	db.EXPECT().CreateDeploymentHistoryRecord(gomock.Any(), gomock.Not(nil), gomock.Not(nil)).Return(nil)
 
 	require.NoError(t, h.Handle(t.Context(), zaptest.NewLogger(t), hmessaging.Delivery{Message: hmessaging.Message{Data: buildDepEvent(t, orgId, depId)}}))
+}
+
+func TestRetainedDispatchFailsClosedWhenFeatureDisabled(t *testing.T) {
+	for _, mode := range []model.DeploymentMode{model.DeploymentModeDeployPlan, model.DeploymentModeDeploy} {
+		t.Run(string(mode), func(t *testing.T) {
+			handler := &CreateDepHandler{}
+			err := handler.handleInner(t.Context(), zaptest.NewLogger(t), &model.DeploymentSummary{Mode: mode, HasRetainedPlan: true})
+			require.ErrorContains(t, err, "retained plan execution is disabled")
+		})
+	}
+}
+
+func TestNativeTargetRefusesAllV1WorkerBranchesBeforeEffects(t *testing.T) {
+	for _, dep := range []model.DeploymentSummary{{}, {HasPipeline: true}, {HasNativeObservation: true}, {HasPipeline: true, HasNativeObservation: true}} {
+		dep.NativeTarget = &platformorchestratorcp.NativeExecutionTargetReference{}
+		handler := &CreateDepHandler{
+			PipelineDispatch: func(context.Context, *model.DeploymentSummary) error {
+				t.Fatal("must not invoke v1 pipeline")
+				return nil
+			},
+			ObservationDispatch: func(context.Context, *model.DeploymentSummary) error {
+				t.Fatal("must not invoke v1 observer")
+				return nil
+			},
+		}
+		require.ErrorContains(t, handler.handleInner(t.Context(), zaptest.NewLogger(t), &dep), "requires v2 dispatch")
+	}
+}
+
+func TestNativePipelineRoutesOnlyToV2Dispatcher(t *testing.T) {
+	for _, mode := range []model.DeploymentMode{model.DeploymentModeDeploy, model.DeploymentModeDeployPlan, model.DeploymentModeRollback, model.DeploymentModeDestroy} {
+		t.Run(string(mode), func(t *testing.T) {
+			dep := &model.DeploymentSummary{HasPipeline: true, Mode: mode, RunnerId: "site", NativeTarget: &platformorchestratorcp.NativeExecutionTargetReference{
+				RunnerId: "site", RunnerUuid: uuid.New(), RuntimeVersion: platformorchestratorcp.NativeTargetRuntimeV2,
+				PipelineVersion: platformorchestratorcp.NativeTargetPipelineV2, ToolsDigest: strings.Repeat("a", 64),
+				StateBackendType: platformorchestratorcp.StateStorageTypeKubernetes, StateConfigurationDigest: strings.Repeat("b", 64),
+			}}
+			called := false
+			handler := &CreateDepHandler{PipelineDispatch: func(_ context.Context, actual *model.DeploymentSummary) error {
+				require.Same(t, dep, actual)
+				called = true
+				return nil
+			}}
+			require.NoError(t, handler.handleInner(t.Context(), zaptest.NewLogger(t), dep))
+			require.True(t, called, "Native cannot reach the nil legacy factory")
+		})
+	}
 }
