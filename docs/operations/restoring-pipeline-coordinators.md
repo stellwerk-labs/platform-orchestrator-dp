@@ -1,5 +1,10 @@
 # Quarantine a restored pipeline coordinator
 
+> **RC feature:** This page describes Deployment Pipelines in the coordinated
+> release candidate (DP `4.5.0-rc.1`). Pipelines are not available in the
+> current stable release from `main`. Use matching Pipeline RC components; Native
+> execution requires explicit operator activation.
+
 Set `RESTORE_QUARANTINE=true` before starting any restored data-plane process.
 The process exits before opening the database, applying migrations, connecting
 to other services or starting workers. This prevents restored pending admissions
