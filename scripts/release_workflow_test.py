@@ -161,22 +161,70 @@ class WorkflowTests(unittest.TestCase):
                 component(checkout)
 
 
-    def test_score_routes_public_queue_api_only_to_data_plane(self):
-        paths = [line.strip().removeprefix("path: ") for line in
-                 (ROOT / "score.yaml").read_text().splitlines()
-                 if line.strip().startswith("path: /orgs/")]
-        self.assertEqual(len(paths), 1)
-        route = re.compile(paths[0])
-        for path in ("/orgs/example/deployment-queue",
-                     "/orgs/example/deployment-queue/item",
-                     "/orgs/example/deployment-queue/item/actions/cancel"):
-            with self.subTest(path=path):
-                self.assertIsNotNone(route.fullmatch(path))
+    def assert_score_public_route_ownership(self, score):
+        self.assertRegex(score, r"(?m)^metadata:\n  name: platform-orchestrator-dp$")
+        resources = score.split("\nresources:\n", 1)[1]
+        blocks = re.split(r"(?m)^  ([a-z][a-z0-9-]*):\n", resources)
+        routes = {}
+        for name, body in zip(blocks[1::2], blocks[2::2]):
+            if not re.search(r"(?m)^    type: route$", body):
+                continue
+            paths = re.findall(r"(?m)^      path: (.+)$", body)
+            self.assertEqual(len(paths), 1, name)
+            routes[name] = re.compile(paths[0])
+            if name in ("route", "runner-rollouts-route"):
+                self.assertEqual(re.findall(r"(?m)^      host: (.+)$", body),
+                                 ["${resources.dns.host}"], name)
+                self.assertEqual(re.findall(r"(?m)^      port: (.+)$", body), ["8080"], name)
+        for path, owner in (
+                ("/orgs/example/deployment-queue", "route"),
+                ("/orgs/example/deployment-queue/item", "route"),
+                ("/orgs/example/deployment-queue/item/actions/cancel", "route"),
+                ("/orgs/example/projects/project/envs/env/runner-rollouts", "runner-rollouts-route"),
+                ("/orgs/example/projects/project/envs/env/runner-rollouts/run", "runner-rollouts-route"),
+                ("/orgs/example/projects/project/envs/env/runner-rollouts/run/approve", "runner-rollouts-route"),
+                ("/orgs/example/projects/project/envs/env/runner-rollouts/run/plan-logs", "runner-rollouts-route")):
+            self.assertEqual({name for name, route in routes.items() if route.fullmatch(path)},
+                             {owner}, path)
         for path in ("/orgs/example/projects", "/orgs/example/runners",
+                     "/orgs/example/projects/project", "/orgs/example/projects/project/envs/env",
                      "/internal/orgs/example/deployment-queue",
-                     "/orgs/example/deployment-queue-adjacent"):
-            with self.subTest(path=path):
-                self.assertIsNone(route.fullmatch(path))
+                     "/internal/orgs/example/projects/project/envs/env/runner-rollouts",
+                     "/orgs/example/deployment-queue-adjacent",
+                     "/orgs/example/projects/project/envs/env/runner-rollouts-adjacent"):
+            self.assertFalse(any(route.fullmatch(path) for route in routes.values()), path)
+
+    def test_score_routes_public_queue_api_only_to_data_plane(self):
+        score = (ROOT / "score.yaml").read_text()
+        self.assert_score_public_route_ownership(score)
+        self.assert_score_public_route_ownership(score + (
+            "  additional-public-route:\n"
+            "    type: route\n"
+            "    params:\n"
+            "      host: ${resources.dns.host}\n"
+            "      port: 8080\n"
+            "      path: /orgs/[^/]+/public-extension($|/.*)\n"))
+        queue = "/orgs/[^/]+/(deployments|deployment-queue|module-test-deployments|last-deployments|active-resources|metadata-keys)($|/.*)"
+        rollouts = "/orgs/[^/]+/projects/[^/]+/envs/[^/]+/runner-rollouts($|/.*)"
+        endpoint = ("  route:\n    type: route\n    params:\n"
+                    "      host: ${resources.dns.host}\n      port: 8080\n")
+        changes = (
+            ("missing queue", "  route:\n    type: route\n", "  route:\n    type: service\n"),
+            ("missing rollouts", "  runner-rollouts-route:\n    type: route\n",
+             "  runner-rollouts-route:\n    type: service\n"),
+            ("overlap", rollouts, queue),
+            ("Core paths", queue, "/orgs/.*"),
+            ("queue boundary", queue, queue.removesuffix("($|/.*)") + ".*"),
+            ("rollout boundary", rollouts, rollouts.removesuffix("($|/.*)") + ".*"),
+            ("public host", endpoint, endpoint.replace("${resources.dns.host}", "${resources.dns-oidc.host}")),
+            ("public port", endpoint, endpoint.replace("port: 8080", "port: 8081")),
+            ("workload owner", "  name: platform-orchestrator-dp\n", "  name: platform-orchestrator-cp\n"),
+        )
+        for reason, old, new in changes:
+            with self.subTest(change=reason):
+                self.assertEqual(score.count(old), 1)
+                with self.assertRaises(AssertionError):
+                    self.assert_score_public_route_ownership(score.replace(old, new, 1))
 
 
 if __name__ == "__main__":

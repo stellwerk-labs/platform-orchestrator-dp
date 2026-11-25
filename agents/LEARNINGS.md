@@ -146,3 +146,9 @@ Put availability guidance at feature entry points and keep operational limits ex
 Customer guidance must avoid internal experiment history and private environment details.
 For generated documentation, preserve notices in the source templates while retaining
 dynamic schemas, examples and imports.
+
+## 2026-11-25: Named public route publication contract
+
+A legitimate additional route must not break an unrelated publication contract.
+Check positive route ownership and negative Core/internal boundaries, with
+in-memory controls that prove broad, overlapping and misowned routes fail.

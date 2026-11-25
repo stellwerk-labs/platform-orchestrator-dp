@@ -261,3 +261,12 @@ runtime, schema, dependency or version changes. Focused documentation checks cov
 text, links, file hashes and applicable generator templates; the full functional
 suite was not rerun because the qualified application code is unchanged.
 See DECISIONS.md and LEARNINGS.md for scope and documentation maintenance guidance.
+
+## 2026-11-25: Named public route publication contract
+
+Corrected the publication-route test assumption without changing routing,
+workflows, application code, schemas or dependencies. The focused 8-test workflow
+suite includes positive unrelated-route coverage and route-boundary controls.
+The original route-count failure was reproduced before the correction. Full
+application qualification is unchanged; no publisher was invoked.
+See DECISIONS.md and LEARNINGS.md for the route-contract testing rule.
