@@ -154,4 +154,8 @@ The first hosted full-candidate integration run failed two fixture assumptions, 
 
 ## 2026-11-25: Filtered deployment lists for a missing scope
 
-When the requested Environment or project no longer exists, authorize the list at the next wider scope instead of returning 404. A missing scope has nothing to disclose, clients keep the stable empty page for a deleted Environment, and the response no longer distinguishes a missing scope from a forbidden one. Only an explicit Core 404 falls back; Core failures stay failures. This replaces the earlier plan to answer a missing filter scope with 404.
+When the requested Environment or project no longer exists, authorize the list at the next wider scope instead of returning 404. The page discloses nothing beyond the wider list, clients keep the stable empty page for a deleted Environment, and missing and forbidden scopes get the same status. Only an explicit Core 404 falls back; Core failures stay failures. This replaces the earlier plan to answer a missing filter scope with 404.
+
+## 2026-11-25: Forward candidate after the first full hosted integration run
+
+Publish the corrected source as the next candidate. Keep the previous candidate tag, its failed hosted run and release notes unchanged. The rc.2 notes body carries over: the list authorization fix restores stable behavior, and rc.2 never reached customers.

@@ -169,3 +169,7 @@ Hosted runners varied about twofold between two runs of the same integration pac
 ## 2026-11-25: The main integration suite holds stable API contracts
 
 Scoped list authorization that returned 404 for a missing filter scope broke two existing contract tests, which surfaced only in the first hosted full-candidate run. Run the complete hosted suite before tagging a candidate that changes authorization.
+
+## 2026-11-25: A seed is not the full candidate gate
+
+A dependency seed run qualifies only its verify path. Run the full candidate integration on the exact source before relying on its tag for customer publication.

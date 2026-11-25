@@ -287,3 +287,7 @@ Raised the pipeline API and model integration package timeouts after a hosted ru
 ## 2026-11-25: Deployment list authorization for missing scopes
 
 Restored the stable empty page for lists filtered by a missing Environment or project by authorizing at the wider scope. Added a strict-peer test for Environment-only and project readers on all three list paths and an integration case for an unknown project. See DECISIONS.md.
+
+## 2026-11-25: Prepare Data Plane v4.5.0-rc.3 metadata
+
+Advanced the README candidate link and added the v4.5.0-rc.3 notes with the unchanged rc.2 body. Score, API schemas and workflows are unchanged.
