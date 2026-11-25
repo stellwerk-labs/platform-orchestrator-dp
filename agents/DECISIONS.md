@@ -147,3 +147,7 @@ application behavior and publication safeguards.
 ## 2026-11-25: Forward candidate release metadata
 
 Use a forward release candidate when an already-public candidate tag identifies a source that failed validation. Preserve the old tag and release-note history; retain qualified runtime behavior when only release-contract tests change.
+
+## 2026-11-25: Correct pipeline integration fixtures in a forward candidate
+
+The first hosted full-candidate integration run failed two fixture assumptions, not product behavior. Fix the harness connection string and the shared log bucket handling, keep every assertion and the durable server bootstrap, and qualify the change as a new forward candidate.

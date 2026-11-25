@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -146,7 +147,11 @@ func TestNativeMixedConsumerRetainsControlsAndPhaseLogs(t *testing.T) {
 		return value
 	}
 	before := state()
-	objects, err := js.CreateOrUpdateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: nativelogs.Bucket, Storage: jetstream.MemoryStorage})
+	// The DP server bootstraps this bucket with FileStorage; reuse it rather than changing its storage type.
+	objects, err := js.ObjectStore(ctx, nativelogs.Bucket)
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		objects, err = js.CreateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: nativelogs.Bucket, Storage: jetstream.MemoryStorage})
+	}
 	require.NoError(t, err)
 	server.RunnerLogsReader = func(ctx context.Context, object string) (io.ReadCloser, error) { return objects.Get(ctx, object) }
 	authority := nativelogs.Authority{OrganizationID: org, EnvironmentID: environment.String(), DeploymentID: dep.Id.String(),

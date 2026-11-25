@@ -10,7 +10,8 @@ DB_CONNECTION_STRING="$(score-compose resources get-outputs 'postgres.default#pl
 CP_DB_CONNECTION_STRING="$(score-compose resources get-outputs 'postgres.default#platform-orchestrator-cp.postgres' -f "host=localhost port=${DATABASE_PORT:-5432} dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable")"
 IAM_DB_CONNECTION_STRING="$(score-compose resources get-outputs 'postgres.default#platform-orchestrator-iam.postgres' -f "host=localhost port=${DATABASE_PORT:-5432} dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable")"
 export NATS_URL="nats://localhost:${NATS_PORT:-4222}"
-export MODEL_TEST_DB_CONNECTION_STRING="${MODEL_TEST_DB_CONNECTION_STRING:-$DB_CONNECTION_STRING}"
+# hostaddr gives the commit-loss proxy test its literal loopback endpoint; host=localhost stays for check-test-env.py.
+export MODEL_TEST_DB_CONNECTION_STRING="${MODEL_TEST_DB_CONNECTION_STRING:-$DB_CONNECTION_STRING hostaddr=127.0.0.1}"
 export OUTCOME_ACK_TEST_NATS_URL="${OUTCOME_ACK_TEST_NATS_URL:-$NATS_URL}"
 export COST_POLICY_TEST_VAULT_ADDR="${COST_POLICY_TEST_VAULT_ADDR:-http://localhost:${VAULT_PORT:-8200}}"
 export COST_POLICY_TEST_VAULT_TOKEN="${COST_POLICY_TEST_VAULT_TOKEN:-mytoken}"

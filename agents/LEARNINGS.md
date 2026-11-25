@@ -157,3 +157,7 @@ in-memory controls that prove broad, overlapping and misowned routes fail.
 ## 2026-11-25: Forward candidate release metadata
 
 Release-route contracts should verify endpoint ownership and boundaries without rejecting an additional supported route. Candidate source identities and immutable tag identities must remain explicit.
+
+## 2026-11-25: Hosted integration fixtures own their shared state
+
+Integration tests share the compose stack with a running Data Plane server. Reuse a JetStream bucket the server already bootstrapped instead of changing its storage type, and give tests that require a literal loopback address an explicit `hostaddr` while the harness checker keeps `host=localhost`.
