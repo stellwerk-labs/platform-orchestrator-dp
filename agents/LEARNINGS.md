@@ -160,7 +160,7 @@ Release-route contracts should verify endpoint ownership and boundaries without 
 
 ## 2026-11-25: Hosted integration fixtures own their shared state
 
-Integration tests share the compose stack with a running Data Plane server. Reuse a JetStream bucket the server already bootstrapped instead of changing its storage type, and give tests that require a literal loopback address an explicit `hostaddr` while the harness checker keeps `host=localhost`.
+A test that builds the Data Plane's own durable consumer must not share NATS with the running Data Plane, which competes for the same messages. Run such a test against an isolated JetStream server, keep tests that need the application topology on the shared one, and give tests that require a literal loopback address an explicit `hostaddr` while the harness checker keeps `host=localhost`.
 
 ## 2026-11-25: Size package budgets from hosted runs
 

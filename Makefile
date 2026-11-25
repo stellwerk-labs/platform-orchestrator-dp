@@ -63,7 +63,7 @@ test-pipeline-storage:
 	@test -n "$$OUTCOME_ACK_TEST_NATS_URL" || { echo "OUTCOME_ACK_TEST_NATS_URL must name an isolated test NATS" >&2; exit 1; }
 	@test -n "$$COST_POLICY_TEST_VAULT_ADDR" || { echo "COST_POLICY_TEST_VAULT_ADDR must name an isolated test Vault" >&2; exit 1; }
 	@test -n "$$COST_POLICY_TEST_VAULT_TOKEN" || { echo "COST_POLICY_TEST_VAULT_TOKEN is required" >&2; exit 1; }
-	go test -race -tags=integration ./internal/api ./internal/worker/handlers/envdestroyhandler -count=1 -timeout=10m
+	go test -race -tags=integration ./internal/api ./internal/worker/handlers/envdestroyhandler -count=1 -timeout=10m $(TESTARGS)
 
 ## Lint the code
 .PHONY: lint

@@ -105,7 +105,7 @@ test-outcome-ack-integration:
 test-refusal-diagnostics-integration:
 	@set -eu; container=""; trap 'if [ -n "$$container" ]; then docker rm -f "$$container" >/dev/null; fi' EXIT INT TERM; \
 	for case in RecoversAfterTenDatabaseFailures RefusesDestructiveRetention; do \
-		container=$$(docker compose run --rm -d --no-deps --service-ports refusal-nats); \
+		container=$$(docker compose run --rm -d --no-deps --service-ports isolated-nats); \
 		docker exec "$$container" sh -c 'timeout 15 sh -c "until wget --spider -q http://localhost:8222/healthz; do sleep 1; done"'; \
 		address=$$(docker port "$$container" 4222/tcp); \
 		MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" \
@@ -113,9 +113,16 @@ test-refusal-diagnostics-integration:
 		docker rm -f "$$container" >/dev/null; container=""; \
 	done
 
+# The suite uses the application NATS topology bootstrapped by the running Data Plane. The mixed
+# consumer test builds the Data Plane's own durable consumer, which the running server would
+# compete for, so it owns an isolated JetStream server instead.
 .PHONY: test-pipeline-api-integration
 test-pipeline-api-integration:
-	@$(RUN_TESTS) $(MAKE) -C .. test-pipeline-storage
+	@$(RUN_TESTS) $(MAKE) -C .. test-pipeline-storage TESTARGS="-skip '^TestNativeMixedConsumerRetainsControlsAndPhaseLogs'"
+	@set -eu; container=""; trap 'if [ -n "$$container" ]; then docker rm -f "$$container" >/dev/null; fi' EXIT INT TERM; \
+	container=$$(docker compose run --rm -d --no-deps --service-ports isolated-nats); \
+	docker exec "$$container" sh -c 'timeout 15 sh -c "until wget --spider -q http://localhost:8222/healthz; do sleep 1; done"'; \
+	OUTCOME_ACK_TEST_NATS_URL="nats://$$(docker port "$$container" 4222/tcp)" $(RUN_TESTS) $(MAKE) -C .. test-pipeline-storage TESTARGS="-run '^TestNativeMixedConsumerRetainsControlsAndPhaseLogs'"
 
 .PHONY: clean
 clean:

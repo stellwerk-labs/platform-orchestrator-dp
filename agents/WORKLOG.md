@@ -278,7 +278,7 @@ Prepared the next Data Plane candidate after correcting the deployment-queue and
 
 ## 2026-11-25: Pipeline integration fixture correction
 
-Reproduced both hosted failures locally with the harness connection string and a server-bootstrapped FileStorage log bucket, then corrected only the test environment default and the mixed-consumer bucket setup. Product code, dependencies, workflows and limits are unchanged. See DECISIONS.md and LEARNINGS.md.
+Reproduced both hosted failures locally with the harness connection string and a server-bootstrapped FileStorage log bucket. A later hosted run showed the shared NATS also let the running server take the test consumer's events, so that test now runs separately against an isolated JetStream server while the rest of the suite keeps the shared application topology, and the test environment default adds a literal loopback address. Product code, dependencies, workflows and limits are unchanged. See DECISIONS.md and LEARNINGS.md.
 
 ## 2026-11-25: Hosted integration package budgets
 

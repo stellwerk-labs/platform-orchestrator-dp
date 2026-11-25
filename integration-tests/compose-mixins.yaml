@@ -12,7 +12,7 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
-  refusal-nats:
+  isolated-nats:
     profiles: ["tests"]
     image: nats:2.12-alpine@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
     command: ["--jetstream", "--http_port", "8222"]
