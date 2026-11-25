@@ -165,3 +165,7 @@ A test that builds the Data Plane's own durable consumer must not share NATS wit
 ## 2026-11-25: Size package budgets from hosted runs
 
 Hosted runners varied about twofold between two runs of the same integration packages. Derive aggregate package timeouts from hosted measurements with headroom for that variance; locally calibrated budgets left no margin.
+
+## 2026-11-25: The main integration suite holds stable API contracts
+
+Scoped list authorization that returned 404 for a missing filter scope broke two existing contract tests, which surfaced only in the first hosted full-candidate run. Run the complete hosted suite before tagging a candidate that changes authorization.

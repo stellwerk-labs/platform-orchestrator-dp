@@ -137,6 +137,25 @@ func TestScopedDeploymentListsDoNotPromoteEnvironmentAuthority(t *testing.T) {
 	}
 }
 
+func TestScopedDeploymentListsForMissingEnvironmentUseProjectAuthority(t *testing.T) {
+	f := newScopedReadFixture(t)
+	f.core.mu.Lock()
+	f.core.gone = true
+	f.core.mu.Unlock()
+	actor := uuid.New()
+	query := "?project_id=" + queueProject + "&env_id=" + queueEnv
+	for _, path := range []string{"/deployments", "/last-deployments", "/deployment-queue"} {
+		f.authorize(actor, map[string]int{"env:" + f.core.envUUID.String(): 204}, false)
+		response := f.call(http.MethodGet, "/orgs/"+queueOrg+path+query, nil, actor, "")
+		require.Equal(t, 403, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), f.deployment.Id.String())
+		require.NotContains(t, response.Body.String(), f.queuedItem.Id.String())
+		f.authorize(actor, map[string]int{"project:" + f.core.projectUUID.String(): 204}, false)
+		response = f.call(http.MethodGet, "/orgs/"+queueOrg+path+query, nil, actor, "")
+		require.Equal(t, 200, response.Code, response.Body.String())
+	}
+}
+
 func TestScopedDeploymentLogsRetainSeparatePlaintextPermission(t *testing.T) {
 	f := newScopedReadFixture(t)
 	actor := uuid.New()

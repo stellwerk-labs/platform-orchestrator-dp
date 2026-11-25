@@ -283,3 +283,7 @@ Reproduced both hosted failures locally with the harness connection string and a
 ## 2026-11-25: Hosted integration package budgets
 
 Raised the pipeline API and model integration package timeouts after a hosted run exceeded the 230-second package budget with no hung test. Individual test deadlines and assertions are unchanged.
+
+## 2026-11-25: Deployment list authorization for missing scopes
+
+Restored the stable empty page for lists filtered by a missing Environment or project by authorizing at the wider scope. Added a strict-peer test for Environment-only and project readers on all three list paths and an integration case for an unknown project. See DECISIONS.md.

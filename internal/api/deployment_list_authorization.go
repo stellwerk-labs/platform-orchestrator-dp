@@ -27,7 +27,8 @@ func (s *Server) authorizeDeploymentList(ctx context.Context, org string, projec
 			return err
 		}
 		if response.StatusCode() == http.StatusNotFound {
-			return echo.NewHTTPError(http.StatusNotFound)
+			// A missing Environment has nothing to disclose; authorize the list like an unfiltered project list.
+			return s.authorizeProjectDeploymentList(ctx, actor, org, *project)
 		}
 		if response.JSON200 == nil || response.JSON200.Id != *environment || response.JSON200.ProjectId != *project || response.JSON200.Uuid == uuid.Nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "environment unavailable")
@@ -43,7 +44,8 @@ func (s *Server) authorizeProjectDeploymentList(ctx context.Context, actor uuid.
 		return err
 	}
 	if response.StatusCode() == http.StatusNotFound {
-		return echo.NewHTTPError(http.StatusNotFound)
+		// A missing project has nothing to disclose; authorize the list like an unfiltered organization list.
+		return s.checkOrgAuthorization(ctx, actor, org, PermissionDeploymentRead)
 	}
 	if response.JSON200 == nil || response.JSON200.Id != project || response.JSON200.Uuid == uuid.Nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "project unavailable")

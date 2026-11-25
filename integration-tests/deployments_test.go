@@ -220,6 +220,13 @@ output "sample" {
 		}
 	})
 
+	t.Run("new deployment is not in the list when filtered by an unknown project", func(t *testing.T) {
+		res, err := client.ListDeploymentsWithResponse(t.Context(), orgId, &serverclient.ListDeploymentsParams{ProjectId: ref.Ref("unknown")})
+		if assert.NoError(t, err) && assert.Equal(t, http.StatusOK, res.StatusCode(), string(res.Body)) {
+			assert.Empty(t, res.JSON200.Items)
+		}
+	})
+
 	t.Run("new deployment is in the last-list", func(t *testing.T) {
 		res, err := client.ListLastDeploymentsWithResponse(t.Context(), orgId, &serverclient.ListLastDeploymentsParams{})
 		if assert.NoError(t, err) && assert.Equal(t, http.StatusOK, res.StatusCode(), string(res.Body)) && assert.Len(t, res.JSON200.Items, 1) {

@@ -151,3 +151,7 @@ Use a forward release candidate when an already-public candidate tag identifies 
 ## 2026-11-25: Correct pipeline integration fixtures in a forward candidate
 
 The first hosted full-candidate integration run failed two fixture assumptions, not product behavior. Run the mixed consumer test against its own JetStream server, give the API storage suite a literal loopback database address and package budgets sized from hosted runs, keep every assertion and the durable server bootstrap, and qualify the change as a new forward candidate.
+
+## 2026-11-25: Filtered deployment lists for a missing scope
+
+When the requested Environment or project no longer exists, authorize the list at the next wider scope instead of returning 404. A missing scope has nothing to disclose, clients keep the stable empty page for a deleted Environment, and the response no longer distinguishes a missing scope from a forbidden one. Only an explicit Core 404 falls back; Core failures stay failures. This replaces the earlier plan to answer a missing filter scope with 404.
