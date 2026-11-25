@@ -142,3 +142,8 @@ and does not invalidate the existing functional qualification.
 Verify named Data Plane route ownership and nonoverlap instead of fixing the
 total number of organization routes. Preserve the qualified Score configuration,
 application behavior and publication safeguards.
+
+
+## 2026-11-25: Forward candidate release metadata
+
+Use a forward release candidate when an already-public candidate tag identifies a source that failed validation. Preserve the old tag and release-note history; retain qualified runtime behavior when only release-contract tests change.

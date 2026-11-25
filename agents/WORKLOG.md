@@ -270,3 +270,8 @@ suite includes positive unrelated-route coverage and route-boundary controls.
 The original route-count failure was reproduced before the correction. Full
 application qualification is unchanged; no publisher was invoked.
 See DECISIONS.md and LEARNINGS.md for the route-contract testing rule.
+
+
+## 2026-11-25: Forward candidate release metadata
+
+Prepared the next Data Plane candidate after correcting the deployment-queue and runner-pipeline route contract. Eight workflow tests pass, including refusal controls; independent source reviews passed. Updated only candidate availability and new release notes here. Runtime, Score, API schemas and workflows are unchanged.

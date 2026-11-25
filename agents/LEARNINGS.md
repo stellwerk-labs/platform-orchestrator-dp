@@ -152,3 +152,8 @@ dynamic schemas, examples and imports.
 A legitimate additional route must not break an unrelated publication contract.
 Check positive route ownership and negative Core/internal boundaries, with
 in-memory controls that prove broad, overlapping and misowned routes fail.
+
+
+## 2026-11-25: Forward candidate release metadata
+
+Release-route contracts should verify endpoint ownership and boundaries without rejecting an additional supported route. Candidate source identities and immutable tag identities must remain explicit.
