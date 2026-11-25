@@ -159,3 +159,7 @@ When the requested Environment or project no longer exists, authorize the list a
 ## 2026-11-25: Forward candidate after the first full hosted integration run
 
 Publish the corrected source as the next candidate. Keep the previous candidate tag, its failed hosted run and release notes unchanged. The rc.2 notes body carries over: the list authorization fix restores stable behavior, and rc.2 never reached customers.
+
+## 2026-11-25: Forward candidate after a registry publication failure
+
+The rc.3 publisher failed while copying the verified image to the registry, after reserving its draft release. Publish the same tested source as the next candidate. Keep the rc.3 tag, draft, uploaded objects and failed run unchanged.

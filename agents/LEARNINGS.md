@@ -173,3 +173,7 @@ Scoped list authorization that returned 404 for a missing filter scope broke two
 ## 2026-11-25: A seed is not the full candidate gate
 
 A dependency seed run qualifies only its verify path. Run the full candidate integration on the exact source before relying on its tag for customer publication.
+
+## 2026-11-25: A reserved draft occupies the candidate version
+
+The publisher refuses any tag that a draft already reserves. After a failure past the reservation, a job retry needs a separately approved draft recovery; a metadata-only successor needs only fresh ordinary gates.

@@ -291,3 +291,7 @@ Restored the stable empty page for lists filtered by a missing Environment or pr
 ## 2026-11-25: Prepare Data Plane v4.5.0-rc.3 metadata
 
 Advanced the README candidate link and added the v4.5.0-rc.3 notes with the unchanged rc.2 body. Score, API schemas and workflows are unchanged.
+
+## 2026-11-25: Prepare Data Plane v4.5.0-rc.4 metadata
+
+Advanced the README candidate link and added the v4.5.0-rc.4 notes with the unchanged rc.3 body. The code is identical to rc.3.
