@@ -279,3 +279,7 @@ Prepared the next Data Plane candidate after correcting the deployment-queue and
 ## 2026-11-25: Pipeline integration fixture correction
 
 Reproduced both hosted failures locally with the harness connection string and a server-bootstrapped FileStorage log bucket, then corrected only the test environment default and the mixed-consumer bucket setup. Product code, dependencies, workflows and limits are unchanged. See DECISIONS.md and LEARNINGS.md.
+
+## 2026-11-25: Hosted integration package budgets
+
+Raised the pipeline API and model integration package timeouts after a hosted run exceeded the 230-second package budget with no hung test. Individual test deadlines and assertions are unchanged.

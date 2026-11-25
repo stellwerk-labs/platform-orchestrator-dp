@@ -93,7 +93,7 @@ test-environment:
 # The package budget includes all test roots and their database migration setup.
 .PHONY: test-model-integration
 test-model-integration:
-	@MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" go test -tags=integration ../internal/model -count=1 -timeout=120s
+	@MODEL_TEST_DB_CONNECTION_STRING="$(shell score-compose resources get-outputs 'postgres.default#platform-orchestrator-dp.postgres' -f 'host=localhost port=$(DATABASE_PORT) dbname={{ .name }} user={{ .username }} password={{ .password }} connect_timeout=5 sslmode=disable')" go test -tags=integration ../internal/model -count=1 -timeout=5m
 
 .PHONY: test-outcome-ack-integration
 test-outcome-ack-integration:
