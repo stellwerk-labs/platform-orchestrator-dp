@@ -114,14 +114,14 @@ def write_layout(root: Path) -> str:
 
 
 class PublishOciLayoutTest(unittest.TestCase):
-    def publish(self, mode, expected=None):
+    def publish(self, mode, expected=None, source_tag="v1"):
         registry = Registry(mode)
         self.addCleanup(registry.server_close)
         self.addCleanup(registry.shutdown)
         with tempfile.TemporaryDirectory() as directory:
             root = write_layout(Path(directory) / "layout")
             tag = f"localhost:{registry.server_address[1]}/stellwerk/image:v1"
-            result = subprocess.run(["bash", str(SCRIPT), f"{directory}/layout:v1", tag, expected or root],
+            result = subprocess.run(["bash", str(SCRIPT), f"{directory}/layout:{source_tag}", tag, expected or root],
                                     env=dict(os.environ, PUBLISH_RETRY_PAUSE_SECONDS="0"),
                                     capture_output=True, text=True, timeout=120)
         return registry, root, result
@@ -147,6 +147,13 @@ class PublishOciLayoutTest(unittest.TestCase):
     def test_denied_push_is_not_repeated(self):
         registry, _, result = self.publish("deny")
         self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("retrying", result.stderr)
+        self.assertEqual(registry.tags, {})
+
+    def test_missing_layout_tag_is_not_mistaken_for_registry_lag(self):
+        # ORAS also ends this deterministic source error with "not found"; only the registry form retries.
+        registry, _, result = self.publish("normal", source_tag="v2")
+        self.assertEqual(result.returncode, 1)
         self.assertNotIn("retrying", result.stderr)
         self.assertEqual(registry.tags, {})
 

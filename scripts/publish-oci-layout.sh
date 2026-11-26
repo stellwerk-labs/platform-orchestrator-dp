@@ -34,15 +34,21 @@ for attempt in $(seq 1 "$attempts"); do
   sleep "$pause"
 done
 
+# The same lag can hide the new tag for a moment; any other resolve error is final.
 for _ in $(seq 1 12); do
-  if digest="$(oras resolve "$image_tag" 2>/dev/null)"; then
+  if digest="$(oras resolve "$image_tag" 2>"$errors")"; then
     if [ "$digest" != "$image_digest" ]; then
       echo "$image_tag resolves to $digest, expected $image_digest" >&2
       exit 1
     fi
     exit 0
   fi
+  if ! tail -n 1 "$errors" | grep -Eq ': not found$'; then
+    cat "$errors" >&2
+    exit 1
+  fi
   sleep 5
 done
+cat "$errors" >&2
 echo "$image_tag did not resolve after publication" >&2
 exit 1
