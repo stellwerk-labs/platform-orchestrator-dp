@@ -87,6 +87,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_every_image_publisher_validates_complete_local_layout_first(self):
         workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        self.assertNotIn("oras cp", workflow)
         publishers = 0
         for job in re.split(r"(?m)^  [a-z][a-z0-9-]+:\n", workflow)[1:]:
             if "bash scripts/publish-oci-layout.sh" not in job:
@@ -121,7 +122,6 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("server-evidence/", job)
             self.assertIn('bash scripts/publish-oci-layout.sh "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG" "$IMAGE_DIGEST"', job)
             self.assertIn('python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST"', job)
-            self.assertIn('"$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"', job)
             self.assertNotIn('"$RUNNER_TEMP/server-layout@$IMAGE_DIGEST"', job)
             self.assertIn("moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea", job)
         expected = 3 if component(ROOT) == "dp" else 2
@@ -138,11 +138,6 @@ class WorkflowTests(unittest.TestCase):
         if component(ROOT) == "iam":
             self.assertIn("./cmd/authorization-migrate", build)
             self.assertIn("opt/server/authorization-migrate", (ROOT / "scripts/check-server-artifact.sh").read_text())
-
-    def test_publishers_copy_only_through_the_bounded_retry_script(self):
-        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
-        self.assertNotIn("oras cp", workflow)
-        self.assertEqual(workflow.count("bash scripts/publish-oci-layout.sh"), 3)
 
     def test_installer_actual_version_expression_is_strict(self):
         import subprocess

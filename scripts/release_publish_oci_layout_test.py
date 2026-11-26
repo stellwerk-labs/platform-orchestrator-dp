@@ -2,7 +2,8 @@
 """publish-oci-layout.sh against a real loopback registry and the pinned ORAS release.
 
 The registry can lag like GHCR did for Data Plane v4.5.0-rc.3 (404 for the first read of a manifest it
-has just accepted) or deny every push. ORAS talks plain HTTP to localhost, so no TLS fixture is needed.
+has just accepted), lag the same way on the first read of a tag it has just set, or deny every push.
+ORAS talks plain HTTP to localhost, so no TLS fixture is needed.
 """
 import hashlib
 import json
@@ -23,7 +24,8 @@ UNKNOWN = b'{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]
 class Registry(ThreadingHTTPServer):
     def __init__(self, mode):
         super().__init__(("127.0.0.1", 0), Handler)
-        self.mode, self.blobs, self.manifests, self.tags, self.lagging = mode, {}, {}, {}, set()
+        self.mode, self.blobs, self.manifests, self.tags = mode, {}, {}, {}
+        self.lagging, self.lagging_tags = set(), set()
         threading.Thread(target=self.serve_forever, daemon=True).start()
 
 
@@ -75,9 +77,14 @@ class Handler(BaseHTTPRequestHandler):
             registry.manifests[digest] = (self.headers["Content-Type"], data)
             if not reference.startswith("sha256:"):
                 registry.tags[reference] = digest
+                if registry.mode == "tag-lag":
+                    registry.lagging_tags.add(reference)
             if registry.mode == "lag":
                 registry.lagging.add(digest)
             return self.reply(201, {"Docker-Content-Digest": digest})
+        if reference in registry.lagging_tags:
+            registry.lagging_tags.discard(reference)
+            return self.reply(404, {"Content-Type": "application/json"}, UNKNOWN)
         digest = registry.tags.get(reference, reference)
         if digest not in registry.manifests or (self.command == "GET" and digest in registry.lagging):
             registry.lagging.discard(digest)
@@ -126,17 +133,18 @@ class PublishOciLayoutTest(unittest.TestCase):
                                     capture_output=True, text=True, timeout=120)
         return registry, root, result
 
-    def test_publishes_the_layout_root_and_reads_it_back(self):
-        registry, root, result = self.publish("normal")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(registry.tags["v1"], root)
-        self.assertNotIn("retrying", result.stderr)
-
     def test_repeats_the_copy_while_the_registry_lags(self):
         registry, root, result = self.publish("lag")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(registry.tags["v1"], root)
         self.assertIn("copy attempt 1 of 6, retrying", result.stderr)
+
+    def test_readback_waits_while_the_new_tag_lags(self):
+        registry, root, result = self.publish("tag-lag")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(registry.tags["v1"], root)
+        self.assertEqual(registry.lagging_tags, set(), "the readback never met the lagging tag")
+        self.assertNotIn("retrying", result.stderr)
 
     def test_wrong_expected_digest_fails_after_one_copy(self):
         _, _, result = self.publish("normal", expected="sha256:" + "0" * 64)
