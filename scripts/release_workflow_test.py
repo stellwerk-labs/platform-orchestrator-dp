@@ -20,7 +20,7 @@ def component(directory):
 class WorkflowTests(unittest.TestCase):
     def assert_publisher_buildx_policy(self, workflow):
         publishers = [job for job in re.split(r"(?m)^  [a-z][a-z0-9-]*:\n", workflow)[1:]
-                      if "oras cp --no-tty --from-oci-layout" in job]
+                      if "bash scripts/publish-oci-layout.sh" in job]
         self.assertEqual(len(publishers), 3)
         for job in publishers:
             steps = re.split(r"(?m)^      - name: ", job)[1:]
@@ -89,7 +89,7 @@ class WorkflowTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
         publishers = 0
         for job in re.split(r"(?m)^  [a-z][a-z0-9-]+:\n", workflow)[1:]:
-            if "oras cp --no-tty --from-oci-layout" not in job:
+            if "bash scripts/publish-oci-layout.sh" not in job:
                 continue
             publishers += 1
             self.assertIn("github.repository == 'stellwerk-labs/", job)
@@ -105,7 +105,7 @@ class WorkflowTests(unittest.TestCase):
             gate = job.index("bash scripts/check-server-artifact.sh")
             sbom = job.index("bash scripts/generate-server-sbom.sh")
             comparison = job.index("python3 scripts/release_content.py compare")
-            publication = job.index("oras cp --no-tty --from-oci-layout")
+            publication = job.index("bash scripts/publish-oci-layout.sh")
             self.assertLess(gate, comparison)
             self.assertLess(comparison, sbom)
             self.assertLess(sbom, publication)
@@ -119,7 +119,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertLess(exact_report, publication)
             self.assertEqual(job.count("server-publication-inspection/report.json"), 1)
             self.assertIn("server-evidence/", job)
-            self.assertIn('test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"', job)
+            self.assertIn('bash scripts/publish-oci-layout.sh "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG" "$IMAGE_DIGEST"', job)
             self.assertIn('python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST"', job)
             self.assertIn('"$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"', job)
             self.assertNotIn('"$RUNNER_TEMP/server-layout@$IMAGE_DIGEST"', job)
@@ -138,6 +138,11 @@ class WorkflowTests(unittest.TestCase):
         if component(ROOT) == "iam":
             self.assertIn("./cmd/authorization-migrate", build)
             self.assertIn("opt/server/authorization-migrate", (ROOT / "scripts/check-server-artifact.sh").read_text())
+
+    def test_publishers_copy_only_through_the_bounded_retry_script(self):
+        workflow = (ROOT / ".github/workflows/ci.yaml").read_text()
+        self.assertNotIn("oras cp", workflow)
+        self.assertEqual(workflow.count("bash scripts/publish-oci-layout.sh"), 3)
 
     def test_installer_actual_version_expression_is_strict(self):
         import subprocess

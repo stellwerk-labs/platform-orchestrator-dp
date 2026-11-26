@@ -125,3 +125,7 @@ versions and still requires200.
 - Preserve `get-logs` without header/query as ciphertext with `deployment_read`. Explicit private keys and `decrypt=true` plaintext both require `deployment_logs_read` on the exact historical Environment, with the existing organization fallback. A missing or inconsistent managed identity returns409; there is no ciphertext fallback for managed plaintext requests.
 - External plugin plaintext continues to trust the signed exact-action Core claim minted after Core authorization. No new independent Data Plane IAM adapter or plaintext plugin capability is introduced.
 - Recovery requires both database `deployment_log_material` rows and retained versions of the non-exportable Vault `deployment-log-material` key. Migration43 down drops identities; restore both stores to recover logs. Bootstrap Vault policy already grants `transit/*`; no Helm policy change is required.
+
+## 2026-11-26: Retry only the demonstrated registry lag
+
+Retry the image copy only when ORAS reports `Error response from registry: sha256:<digest>: not found`, the read-after-write lag that failed Data Plane v4.5.0-rc.3. ORAS already retries 408, 429 and 5xx; authentication, layout and digest failures are deterministic and must stop the publisher. The copy is content-addressed and only points the tag at the inspected root, so a repeat cannot publish other bytes, and a failed attempt may already have written that correct tag; absence is checked once before publishing, never between attempts.

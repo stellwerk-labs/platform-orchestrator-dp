@@ -346,7 +346,7 @@ class PublicationTests(unittest.TestCase):
         jobs = dict(re.findall(r"^  ([a-z-]+):\n(.*?)(?=^  [a-z-]+:\n|\Z)", workflow, re.M | re.S))
         publishers = 0
         for name, job in jobs.items():
-            if "oras cp --no-tty --from-oci-layout" not in job:
+            if "bash scripts/publish-oci-layout.sh" not in job:
                 self.assertNotIn("id-token: write", job)
                 continue
             publishers += 1
@@ -355,8 +355,8 @@ class PublicationTests(unittest.TestCase):
             prefix = "server-" + REPOSITORY.rsplit("-", 1)[1] + "-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-"
             self.assertEqual(namespaces, [prefix + "first", prefix + "second"])
             self.assertNotEqual(namespaces[0], namespaces[1])
-            self.assertLess(job.index("server-publication.py stage"), job.index("oras cp --no-tty"))
-            self.assertLess(job.index("oras cp --no-tty"), job.index("bash scripts/authenticate-server-artifact.sh"))
+            self.assertLess(job.index("server-publication.py stage"), job.index("bash scripts/publish-oci-layout.sh"))
+            self.assertLess(job.index("bash scripts/publish-oci-layout.sh"), job.index("bash scripts/authenticate-server-artifact.sh"))
             self.assertIn("server-verification-evidence-", job)
             if name in ("release", "candidate-release"):
                 self.assertLess(job.index("authenticate-server-artifact.sh"), job.index("gh release edit"))
