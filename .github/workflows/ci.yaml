@@ -219,8 +219,7 @@ jobs:
             "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
           cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
-          test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
+          bash scripts/publish-oci-layout.sh "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG" "$IMAGE_DIGEST"
 
       - name: Authenticate exact index, platforms, provenance and SBOMs
         env:
@@ -398,8 +397,7 @@ jobs:
             "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
           cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
-          test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
+          bash scripts/publish-oci-layout.sh "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG" "$IMAGE_DIGEST"
 
       - name: Authenticate exact index, platforms, provenance and SBOMs
         env:
@@ -470,6 +468,7 @@ jobs:
       - name: Verify artifact helper contracts with pinned tools
         run: |
           bash scripts/install-release-tools.sh "$RUNNER_TEMP/release-tools"
+          bash scripts/install-oras.sh "$RUNNER_TEMP/release-tools"
           PATH="$RUNNER_TEMP/release-tools:$PATH" python3 -m unittest discover -s scripts -p 'release_*_test.py' -v
 
       - name: Verify pinned Cosign cryptography without signer or registry access
@@ -789,8 +788,7 @@ jobs:
             "$(jq -er '.payloads | keys | join(",")' "$RUNNER_TEMP/server-inspection/report.json")"
           cmp "$RUNNER_TEMP/server-inspection/report.json" "$RUNNER_TEMP/server-publication-inspection/report.json"
           OCI_REFERENCE="$(python3 scripts/release_content.py oci-reference "$RUNNER_TEMP/server-layout" "$IMAGE_DIGEST")"
-          oras cp --no-tty --from-oci-layout "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG"
-          test "$(oras resolve "$IMAGE_TAG")" = "$IMAGE_DIGEST"
+          bash scripts/publish-oci-layout.sh "$RUNNER_TEMP/server-layout:$OCI_REFERENCE" "$IMAGE_TAG" "$IMAGE_DIGEST"
 
       - name: Authenticate exact index, platforms, provenance and SBOMs
         if: steps.release.outputs.version != ''
